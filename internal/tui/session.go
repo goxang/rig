@@ -29,12 +29,12 @@ type Session struct {
 	LogInstance string   `json:"log_instance,omitempty"`
 	LogGrep     string   `json:"log_grep,omitempty"`
 
-	Queries   map[string]*spec.Query  `json:"adhoc_queries,omitempty"`
-	Scheduled map[string]bool         `json:"scheduled,omitempty"`
-	Results   map[string]savedResult  `json:"results,omitempty"`
-	Runs      []queryRun              `json:"runs,omitempty"`
-	DataPaths map[string][]string     `json:"data_paths,omitempty"`
-	Dashboard int                     `json:"dashboard,omitempty"`
+	Queries   map[string]*spec.Query   `json:"adhoc_queries,omitempty"`
+	Scheduled map[string]bool          `json:"scheduled,omitempty"`
+	Results   map[string]savedResult   `json:"results,omitempty"`
+	Runs      []queryRun               `json:"runs,omitempty"`
+	DataPaths map[string][]string      `json:"data_paths,omitempty"`
+	Dashboard int                      `json:"dashboard,omitempty"`
 	Load      map[string]savedLoadHist `json:"load,omitempty"`
 }
 
