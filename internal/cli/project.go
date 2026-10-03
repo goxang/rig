@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
@@ -278,9 +280,80 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		}),
 	}
 
+	secret := &cobra.Command{
+		Use:   "secret [ls | set NAME [VALUE] | rm NAME]",
+		Short: "secrets rig.yaml uses as ${NAME}: kept in your config dir (0600), never in the repo; the environment wins",
+		Example: `  rig secret                          # declared secrets and where each value comes from (never the value)
+  rig secret set RIG_RABBITMQ_PASSWORD  # asks without echo (or reads stdin)
+  rig secret rm RIG_RABBITMQ_PASSWORD`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			file := g.file
+			if file == "" {
+				f, err := spec.Find(".")
+				if err != nil {
+					return err
+				}
+				file = f
+			}
+			p, _, err := spec.Load(file, g.env)
+			if err != nil {
+				return err
+			}
+			if len(args) >= 2 && (args[0] == "set" || args[0] == "rm") {
+				value := ""
+				if args[0] == "set" {
+					if len(args) > 2 {
+						value = args[2]
+					} else if value, err = readSecret(args[1]); err != nil {
+						return err
+					}
+					if value == "" {
+						return fmt.Errorf("empty value; rig secret rm %s removes it", args[1])
+					}
+				}
+				if err := spec.SetSecret(p.Name, args[1], value); err != nil {
+					return err
+				}
+				fmt.Println(green("✓"), args[1])
+				return nil
+			}
+			if len(args) > 0 && args[0] != "ls" {
+				return fmt.Errorf("usage: rig secret [ls | set NAME [VALUE] | rm NAME]")
+			}
+			stored, err := spec.LoadSecrets(p.Name)
+			if err != nil {
+				return err
+			}
+			names := map[string]bool{}
+			for n := range p.Secrets {
+				names[n] = true
+			}
+			for n := range stored {
+				names[n] = true
+			}
+			var rows [][]string
+			for _, n := range engine.SortedKeys(names) {
+				from := red("unset")
+				switch _, env := os.LookupEnv(n); {
+				case env:
+					from = "environment"
+				case stored[n] != "":
+					from = green("stored")
+				case p.Secrets[n].Default != "":
+					from = dim("default")
+				}
+				rows = append(rows, []string{n, from, p.Secrets[n].Help})
+			}
+			printTable(os.Stdout, []string{"SECRET", "FROM", "WHAT"}, rows)
+			f, _ := spec.SecretsFile(p.Name)
+			fmt.Println(dim("store: " + f))
+			return nil
+		},
+	}
+
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, vars, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
+	return []*cobra.Command{initCmd, env, vars, secret, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
 }
 
 func projectManifestDirs() []string {
@@ -366,4 +439,15 @@ func printTree(set *manifest.Set) {
 			fmt.Printf("  %s %s\n", dim(branch), o.ID())
 		}
 	}
+}
+
+func readSecret(name string) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		raw, err := io.ReadAll(os.Stdin)
+		return strings.TrimRight(string(raw), "\r\n"), err
+	}
+	fmt.Fprintf(os.Stderr, "%s: ", name)
+	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	return string(raw), err
 }

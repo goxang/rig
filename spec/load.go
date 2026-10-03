@@ -60,6 +60,7 @@ func Load(file, env string) (*Project, *Environment, error) {
 		Name         string            `yaml:"project"`
 		Default      string            `yaml:"default"`
 		Vars         map[string]string `yaml:"vars"`
+		Secrets      map[string]Secret `yaml:"secrets"`
 		Environments map[string]struct {
 			Vars map[string]string `yaml:"vars"`
 		} `yaml:"environments"`
@@ -75,9 +76,16 @@ func Load(file, env string) (*Project, *Environment, error) {
 	}
 
 	builtin := map[string]string{"env": env, "project": head.Name}
+	stored, _ := LoadSecrets(head.Name)
 	lookup := func(name string) (string, bool) {
 		if v, ok := os.LookupEnv(name); ok {
 			return v, true
+		}
+		if v, ok := stored[name]; ok {
+			return v, true
+		}
+		if s, ok := head.Secrets[name]; ok && s.Default != "" {
+			return s.Default, true
 		}
 		if v, ok := builtin[name]; ok {
 			return v, true

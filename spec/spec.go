@@ -30,6 +30,9 @@ type Project struct {
 	Tasks map[string][]string `yaml:"tasks"`
 	// Queries are saved queries: run on demand, or on a schedule while the UI is open.
 	Queries map[string]*Query `yaml:"queries"`
+	// Secrets are names ${NAME} may use whose values live outside the repo: the environment, then
+	// `rig secret set`, then the default written here.
+	Secrets map[string]Secret `yaml:"secrets"`
 	// Alerts are watched while the UI is open and shown in its header; `rig alerts` checks them once.
 	Alerts []Alert `yaml:"alerts"`
 
@@ -258,4 +261,9 @@ type Alert struct {
 	// Below fires when the number drops under the thresholds instead (consumers, ready replicas).
 	Below bool   `yaml:"below"`
 	Unit  string `yaml:"unit"`
+}
+
+type Secret struct {
+	Help    string `yaml:"help"`
+	Default string `yaml:"default"`
 }

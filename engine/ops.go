@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,10 +87,12 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 		}
 	}
 	leaveRunning := func(n string) bool {
-		if len(targets) > 0 {
-			return !named[n]
+		// running infrastructure is redeployed only when named itself, never through a group
+		if a.infraLike(n) {
+			_, direct := a.Spec.Services[n]
+			return !direct || !slices.Contains(targets, n)
 		}
-		return a.infraLike(n)
+		return len(targets) > 0 && !named[n]
 	}
 	if o.Tag == "" && o.Build {
 		o.Tag = a.DefaultTag(ctx, o.Ref)

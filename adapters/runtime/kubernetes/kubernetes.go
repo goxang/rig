@@ -641,6 +641,9 @@ func (r *Runtime) vars(ctx context.Context) func(string) (string, bool) {
 
 // Render produces the YAML Deploy would apply.
 func (r *Runtime) Render(ctx context.Context, s *spec.Service, rel core.Release) ([]byte, error) {
+	if h, ok := r.helm(s); ok {
+		return r.helmTemplate(ctx, s, h, rel)
+	}
 	return r.render(ctx, s, rel, false)
 }
 
@@ -701,6 +704,9 @@ func (r *Runtime) render(ctx context.Context, s *spec.Service, rel core.Release,
 }
 
 func (r *Runtime) Deploy(ctx context.Context, s *spec.Service, rel core.Release) error {
+	if h, ok := r.helm(s); ok {
+		return r.helmDeploy(ctx, s, h, rel)
+	}
 	if r.Opt.CreateNamespace {
 		_ = r.ensureNamespace(ctx)
 	}

@@ -200,6 +200,9 @@ func (r *Runtime) Actions() []core.Action {
 		{Name: "kubectl", Mutate: true, Help: "kubectl in this environment's context and namespace: kubectl rollout restart deploy/zipkin", Run: func(ctx context.Context, args []string, out io.Writer) error {
 			return r.kubectl(args...).Attach(ctx, nil, out, out)
 		}},
+		{Name: "helm", Mutate: true, Help: "helm in this environment's context and namespace: helm -- list | helm -- uninstall <release>", Run: func(ctx context.Context, args []string, out io.Writer) error {
+			return sh.New("helm", append([]string{"--kube-context", r.Opt.Context, "-n", r.Opt.Namespace}, args...)...).Attach(ctx, nil, out, out)
+		}},
 		{Name: "events", Help: "recent events in the namespace", Run: func(ctx context.Context, args []string, out io.Writer) error {
 			return r.kubectl("get", "events", "--sort-by=.lastTimestamp").Attach(ctx, nil, out, out)
 		}},

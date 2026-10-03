@@ -205,3 +205,26 @@ func TestOnlyByRole(t *testing.T) {
 		t.Fatalf("only: [app] must keep the app services: %v", p.ServiceNames())
 	}
 }
+
+func TestSecretsResolve(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	f := filepath.Join(dir, "rig.yaml")
+	y := "project: p\nsecrets:\n  PW: { default: dflt }\n  TOKEN: {}\nservices:\n  a: { image: x, env: { P: \"${PW}\", T: \"${TOKEN}\" } }\nenvironments:\n  e: { runtime: { type: local } }\ndefault: e\n"
+	if err := os.WriteFile(f, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSecret("p", "TOKEN", "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := Load(f, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env := p.Services["a"].Env; env["P"] != "dflt" || env["T"] != "s3cret" {
+		t.Fatalf("env %v", env)
+	}
+	if st, _ := os.Stat(func() string { s, _ := SecretsFile("p"); return s }()); st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", st.Mode())
+	}
+}
