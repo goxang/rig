@@ -8,7 +8,9 @@ CLI and one terminal UI.
 - **Infrastructure**: started once and left alone; one shared instance can serve local processes, docker and kind (`rig infra`)
 - **Observe**: Grafana-style charts, traces filtered by service, operation and duration, profiles, debuggers
 - **Data & load**: databases, caches, queues, key-value stores (browse, edit, restart readers), load generators (rate and instances), saved queries that run on a schedule
-- **Agents**: `rig mcp` serves all of it to AI agents over MCP
+- **Alerts**: node cpu/memory/disk (or any query) over a threshold, in the TUI header and `rig alerts`
+- **Secrets**: `rig secret set`, kept outside the repo; `helm:` charts deploy like manifests
+- **Agents**: `rig mcp` serves all of it to AI agents over MCP; `--brief` keeps every answer short
 
 Every part is an adapter behind a small interface, so a new metrics backend, database or runtime is one package.
 
@@ -36,6 +38,11 @@ rig query                     # saved queries and queryable components
 rig query db-top-cpu n=5
 rig load rate fleet 200 && rig load scale fleet +2
 rig task bootstrap            # a named list of steps from rig.yaml
+rig vars set MAIN_DB=x        # manifest variables per environment; rig setenv api K=V for env
+rig data db Switch tables     # walk databases and caches
+rig logs -E '(?i)timeout' api # regex over logs
+rig alerts                    # what is over its thresholds
+rig resume last               # the TUI as a saved session (S) left it
 rig mcp                       # MCP server for AI agents
 ```
 
@@ -55,15 +62,25 @@ and kind never ask. `?` shows the keys of the current screen.
 | Logs | the services you pick, merged, or one instance |
 | Metrics | dashboards from rig.yaml, on demand |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
-| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number |
+| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session |
 | KV | browse and edit keys; `R` restarts the services that read the edited key |
-| Data, Load, Manifests, Hosts | queues and caches; generators (rate, instances); manifests as a graph; nodes and a shell |
+| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `/` filters with globs |
+| Load | generators: rate, instances, `c` their KV config, `v` their env |
+| Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`) |
+| Hosts | nodes and a shell |
+
+`S` saves the session (screens, query results and history) for `rig resume`; `M` frees the mouse so
+the terminal can select text; the header shows alerts (`A`).
 
 ## Agents
 
 ```json
 { "mcpServers": { "rig": { "command": "rig", "args": ["mcp"], "cwd": "/path/to/project" } } }
 ```
+
+Agents get terse output (`--brief`, `RIG_BRIEF=1`: tab-separated, no colour, long cells cut). Every
+TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig query --every 30s --times 10`,
+`rig load`, `rig data`, `rig alerts`.
 
 Tools: `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
 `rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, and `rig` for any other command.

@@ -382,6 +382,7 @@ func loadCommand() *cobra.Command {
 
 func queryCommand() *cobra.Command {
 	var every time.Duration
+	var times int
 	cmd := &cobra.Command{
 		Use:   "query [saved-query [name=value...] | component query...]",
 		Short: "run a saved query from rig.yaml, or an ad hoc one in a component's language (SQL, PromQL, redis, kubectl, ...)",
@@ -390,7 +391,8 @@ func queryCommand() *cobra.Command {
   rig query db-top-cpu                        # a saved query
   rig query db-table-rows table=transactions  # a saved query with a parameter
   rig query db "@Switch SELECT TOP 5 * FROM terminals"
-  rig query prom 'sum(rate(http_requests_total[1m]))' --every 5s`,
+  rig query prom 'sum(rate(http_requests_total[1m]))' --every 5s
+  rig --brief query tx-per-minute --every 30s --times 10   # a sample series, for scripts and agents`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				saved := a.Queries()
@@ -440,12 +442,15 @@ func queryCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if every > 0 {
+				switch {
+				case every > 0 && (brief || times > 0):
+					fmt.Println("@" + time.Now().Format("15:04:05"))
+				case every > 0:
 					fmt.Print("\033[H\033[2J")
 					fmt.Println(dim(time.Now().Format("15:04:05") + "  every " + every.String()))
 				}
 				printCoreTable(os.Stdout, t)
-				if every == 0 {
+				if times--; every == 0 || times == 0 {
 					return nil
 				}
 				select {
@@ -457,6 +462,7 @@ func queryCommand() *cobra.Command {
 		}),
 	}
 	cmd.Flags().DurationVarP(&every, "every", "w", 0, "run again on this interval until Ctrl-C")
+	cmd.Flags().IntVarP(&times, "times", "n", 0, "with --every, stop after this many runs (results are appended, not redrawn)")
 	return cmd
 }
 

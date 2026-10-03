@@ -2,7 +2,8 @@
 
 rig looks for `rig.yaml` (or `rig.yml`, `.rig.yaml`) from the current directory up; `-f` or `$RIG_FILE`
 names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process environment, then
-`${env}` and `${project}`, then the environment's `vars`, then the project's `vars`. `$$` is a literal `$`.
+`rig secret set` values, then `secrets:` defaults, then `${env}` and `${project}`, then the environment's
+`vars`, then the project's `vars`. `$$` is a literal `$`.
 
 ## Top level
 
@@ -19,6 +20,8 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `manifests` | folders `rig manifests` and the TUI scan by default |
 | `tasks` | `name: [shell step, ...]`, run in order by `rig task <name>` (see below) |
 | `queries` | saved queries (see below) |
+| `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
+| `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
 
 ## services.<name>
 
@@ -39,6 +42,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
 | `k8s` | `workload`, `container`, `service`, `manifests`, `command`, `args` |
+| `helm` | deploy with a chart instead of manifests: `chart`, `version`, `release`, `values` (files), `set` (`$TAG`, `$NAMESPACE` and manifest vars filled in), `image_key`/`tag_key`/`replicas_key` (where builds and scaling go); `k8s.workload` names what the chart creates |
 | `docker` | `image`, `command`, `args`, `volumes`, `publish` (port name → host port), `bind` (host address, default 127.0.0.1), `container` (adopt an existing container by name, e.g. a compose one; never removed), `extra_args`, `labels` |
 
 ## environments.<name>
@@ -140,3 +144,36 @@ Each step runs with `sh -c` from the project directory and the task stops at the
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
 `rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
 Write `$$` for a shell `$`, since `${...}` is rig's own expansion.
+
+## secrets
+
+```yaml
+secrets:
+  DB_PASSWORD: { default: devpass, help: the app login }   # a public dev default
+  API_TOKEN: { help: staging API token }                   # no default: set it
+```
+
+`rig secret` lists them and where each value comes from (environment, stored, default, unset), never
+the value. `rig secret set API_TOKEN` asks without echo (or reads stdin) and keeps it in
+`~/.config/rig/secrets/<project>.json`, mode 0600. Use them like any variable: `password: "${DB_PASSWORD}"`.
+
+## alerts
+
+```yaml
+alerts:
+  - { name: memory, source: hosts, metric: memory, warn: 90, crit: 98, unit: "%" }   # every node
+  - { name: backlog, source: prom, query: "sum by (queue) (rabbitmq_queue_messages_ready)", warn: 1000, crit: 10000 }
+  - { name: consumers, source: queue, query: "queues name consumers", warn: 1, crit: 1, below: true }
+```
+
+`source: hosts` checks every node's `cpu`, `memory` or `disk` (percent). Any other source is a component
+whose query returns rows: each row's first number is checked, its other cells name it. `below: true`
+fires under the thresholds. With no `alerts:`, nodes are watched for cpu, memory and disk at 90% and 98%.
+The TUI checks every 15s and shows the worst in its header (`A` lists all); `rig alerts` checks once and
+exits 2 when one is critical. Environments add their own `alerts:`.
+
+## run state an environment keeps
+
+`rig vars set K=V` overrides a runtime `vars` entry (`$MAIN_DB` in manifests) and `rig setenv <service> K=V`
+adds env to a service; both live in the environment's state (a ConfigMap on Kubernetes, `.rig/<env>/`
+elsewhere), so every later deploy keeps them and teammates see them.
