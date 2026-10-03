@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  WORKER_URL: http://worker:8080
+  ZIPKIN_URL: http://zipkin:9411

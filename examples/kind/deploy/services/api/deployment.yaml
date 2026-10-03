@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: { app.kubernetes.io/name: api, app.kubernetes.io/part-of: rig-demo }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: api }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api, app.kubernetes.io/part-of: rig-demo }
+    spec:
+      containers:
+        - name: api
+          image: $REGISTRY/app:$TAG
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: api-config }
+          env:
+            - { name: ROLE, value: api }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }

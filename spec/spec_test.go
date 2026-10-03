@@ -1,0 +1,174 @@
+package spec
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+const project = `
+project: shop
+default: dev
+vars: { ns: shop }
+imports:
+  - godev: .godev.yaml
+services:
+  db:    { role: infra, image: "postgres:17", ports: { pg: 5432 } }
+  api:   { depends_on: [db], groups: [core], ports: { http: 8080 }, env: { NS: "${ns}", MODE: "${MODE:-plain}" }, k8s: { workload: deployment/api-v2 } }
+  web:   { depends_on: [api], groups: [core] }
+  load:  { role: load, depends_on: [api] }
+environments:
+  dev:
+    runtime: { type: local }
+  kind:
+    vars: { ns: shop-kind }
+    runtime: { type: kind, namespace: "${ns}" }
+    services:
+      api: { replicas: 3, env: { EXTRA: "1" } }
+    components:
+      metrics: { url: "http://kind-prom" }
+components:
+  metrics: { type: prometheus, url: "http://prom" }
+`
+
+const godev = `
+services:
+  worker: { path: ./cmd/worker, args: [--fast], group: [bg] }
+  api:    { path: ./cmd/should-not-win }
+`
+
+func write(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rig.yaml"), []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".godev.yaml"), []byte(godev), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "rig.yaml")
+}
+
+func TestLoadDefaultEnvironment(t *testing.T) {
+	p, e, err := Load(write(t), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Name != "dev" || e.Runtime.Type != "local" {
+		t.Fatalf("env = %s/%s", e.Name, e.Runtime.Type)
+	}
+	api := p.Services["api"]
+	if api.Env["NS"] != "shop" || api.Env["MODE"] != "plain" {
+		t.Fatalf("vars not expanded: %v", api.Env)
+	}
+	if api.Role != RoleApp || p.Services["db"].Role != RoleInfra {
+		t.Fatal("roles")
+	}
+	var k8s struct{ Workload string }
+	if ok, err := api.Section("k8s", &k8s); !ok || err != nil || k8s.Workload != "deployment/api-v2" {
+		t.Fatalf("section: %v %v %+v", ok, err, k8s)
+	}
+}
+
+func TestEnvironmentPatchesAndVars(t *testing.T) {
+	t.Setenv("MODE", "fast")
+	p, e, err := Load(write(t), "kind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var opt struct{ Namespace string }
+	if err := e.Runtime.Decode(&opt); err != nil || opt.Namespace != "shop-kind" {
+		t.Fatalf("namespace = %q, %v", opt.Namespace, err)
+	}
+	api := p.Services["api"]
+	if api.Replicas != 3 || api.Env["EXTRA"] != "1" || api.Env["NS"] != "shop-kind" || api.Env["MODE"] != "fast" {
+		t.Fatalf("patch not merged: %+v", api)
+	}
+	if len(api.DependsOn) != 1 {
+		t.Fatal("patch dropped fields it did not mention")
+	}
+	m := p.Components["metrics"]
+	var mo struct{ URL string }
+	_ = m.Decode(&mo)
+	if m.Type != "prometheus" || mo.URL != "http://kind-prom" {
+		t.Fatalf("component override: %s %s", m.Type, mo.URL)
+	}
+}
+
+func TestImportDoesNotOverride(t *testing.T) {
+	p, _, err := Load(write(t), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := p.Services["worker"]
+	if w == nil || w.Build.Go != "./cmd/worker" || !reflect.DeepEqual(w.Run.Args, []string{"--fast"}) || !w.InGroup("bg") {
+		t.Fatalf("worker = %+v", w)
+	}
+	if p.Services["api"].Build != nil {
+		t.Fatal("imported service replaced one defined in rig.yaml")
+	}
+}
+
+func TestSelectAndOrder(t *testing.T) {
+	p, _, err := Load(write(t), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Select([]string{"core"}); !reflect.DeepEqual(got, []string{"api", "web"}) {
+		t.Fatalf("group: %v", got)
+	}
+	if got := p.Select(nil); contains(got, "load") {
+		t.Fatalf("all must leave load generators out: %v", got)
+	}
+	layers, err := p.Order(p.WithDeps([]string{"web"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"db"}, {"api"}, {"web"}}
+	if !reflect.DeepEqual(layers, want) {
+		t.Fatalf("layers = %v", layers)
+	}
+	if bad := p.Unknown([]string{"core", "nope"}); !reflect.DeepEqual(bad, []string{"nope"}) {
+		t.Fatalf("unknown = %v", bad)
+	}
+}
+
+func TestCycle(t *testing.T) {
+	p := &Project{Services: map[string]*Service{
+		"a": {DependsOn: []string{"b"}}, "b": {DependsOn: []string{"a"}}, "c": {},
+	}}
+	_, err := p.Order([]string{"a", "b", "c"})
+	if err == nil || !strings.Contains(err.Error(), "a, b") {
+		t.Fatalf("cycle not reported: %v", err)
+	}
+}
+
+func TestExpand(t *testing.T) {
+	look := func(n string) (string, bool) {
+		v, ok := map[string]string{"A": "1", "E": ""}[n]
+		return v, ok
+	}
+	for in, want := range map[string]string{
+		"${A}":        "1",
+		"${B:-two}":   "two",
+		"${E:-three}": "three",
+		"${B}":        "${B}",
+		"$${A}":       "${A}",
+		"x-${A}-y":    "x-1-y",
+	} {
+		if got := Expand(in, look); got != want {
+			t.Errorf("Expand(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func contains(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}

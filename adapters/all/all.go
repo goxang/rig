@@ -1,0 +1,30 @@
+// Package all registers every adapter bundled with rig; a custom binary imports it plus its own.
+package all
+
+import (
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/builder/command"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/builder/docker"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/builder/golang"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/cache/redis"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/database/sql"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/debugger/delve"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/hosts/ssh"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/kv/consul"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/loadgen/command"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/loadgen/http"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/loadgen/kv"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/logs/loki"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/logs/runtime"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/messaging/rabbitmq"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/metrics/prometheus"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/metrics/scrape"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/profiler/command"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/profiler/pprof"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/query/http"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/runtime/docker"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/runtime/kind"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/runtime/kubernetes"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/runtime/local"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/tracing/jaeger"
+	_ "github.com/MohammadmahdiAhmadi/rig/adapters/tracing/zipkin"
+)
