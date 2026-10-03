@@ -29,7 +29,7 @@ func serviceCommands() []*cobra.Command {
 		}),
 	}
 	upCmd.Flags().BoolVarP(&up.Build, "build", "b", false, "build images first (container runtimes)")
-	upCmd.Flags().StringVarP(&up.Tag, "tag", "t", "", "image tag: what --build produces (default: a timestamp), or without --build the tag to deploy")
+	upCmd.Flags().StringVarP(&up.Tag, "tag", "t", "", "image tag: what --build produces (default: <branch>-<date>-<time>), or without --build the tag to deploy")
 	upCmd.Flags().StringVar(&up.Ref, "ref", "", "with --build, build from this git branch, tag or commit instead of the working tree")
 	upCmd.Flags().BoolVar(&up.NoDeps, "no-deps", false, "do not bring up dependencies")
 	upCmd.Flags().DurationVar(&up.Wait, "wait", 3*time.Minute, "how long each phase may take to become ready")
@@ -93,7 +93,7 @@ func serviceCommands() []*cobra.Command {
 				return err
 			}
 			if buildFirst && tag == "" {
-				tag = time.Now().Format("20060102-150405")
+				tag = a.DefaultTag(ctx, ref)
 			}
 			err = parallelNames(names, func(n string) error {
 				s := a.Spec.Services[n]
@@ -138,7 +138,7 @@ func serviceCommands() []*cobra.Command {
 				return err
 			}
 			if tag == "" {
-				tag = time.Now().Format("20060102-150405")
+				tag = a.DefaultTag(ctx, ref)
 			}
 			err = parallelNames(names, func(n string) error {
 				if a.Spec.Services[n].Build == nil {
@@ -153,7 +153,7 @@ func serviceCommands() []*cobra.Command {
 			return err
 		}),
 	}
-	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag (default: a timestamp)")
+	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag (default: <branch>-<date>-<time>)")
 	build.Flags().StringVar(&ref, "ref", "", "build from this git branch, tag or commit instead of the working tree")
 
 	scale := &cobra.Command{

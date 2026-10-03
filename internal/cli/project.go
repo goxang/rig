@@ -231,9 +231,56 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		},
 	}
 
+	vars := &cobra.Command{
+		Use:   "vars [set K=V... | unset K...]",
+		Short: "manifest variables ($MAIN_DB, ...): rig.yaml's, overridden per environment and kept in its state",
+		Example: `  rig -e loadtest2 vars                                  # what manifests get, and where from
+  rig -e loadtest2 vars set MAIN_DB=lt2_Switch HSM_DB=lt2_Hsm   # then rig up / deploy renders with them
+  rig -e loadtest2 vars unset MAIN_DB                    # back to rig.yaml's value`,
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			if len(args) > 0 {
+				if err := a.Guard(); err != nil {
+					return err
+				}
+				kv := map[string]string{}
+				for _, arg := range args[1:] {
+					k, v, ok := strings.Cut(arg, "=")
+					switch {
+					case args[0] == "set" && ok && k != "" && v != "":
+						kv["var."+k] = v
+					case args[0] == "unset" && !ok:
+						kv["var."+k] = ""
+					default:
+						return fmt.Errorf("usage: rig vars set K=V... | rig vars unset K...")
+					}
+				}
+				if len(kv) == 0 {
+					return fmt.Errorf("usage: rig vars set K=V... | rig vars unset K...")
+				}
+				if err := a.SetState(ctx, kv); err != nil {
+					return err
+				}
+			}
+			vars, err := a.Vars(ctx)
+			if err != nil {
+				return err
+			}
+			var rows [][]string
+			for _, k := range engine.SortedKeys(vars) {
+				rows = append(rows, []string{k, vars[k].Value, vars[k].From})
+			}
+			state, _ := a.LoadState(ctx)
+			if t := state["tag"]; t != "" {
+				rows = append(rows, []string{"TAG", t, "last deploy"})
+			}
+			printTable(os.Stdout, []string{"VAR", "VALUE", "FROM"}, rows)
+			return nil
+		}),
+	}
+
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
+	return []*cobra.Command{initCmd, env, vars, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
 }
 
 func projectManifestDirs() []string {

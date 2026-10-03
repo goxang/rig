@@ -42,6 +42,16 @@ var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Z
 func Render(objs []*Object, workload *Object, o RenderOptions) ([]byte, error) {
 	var b bytes.Buffer
 	missing := map[string]bool{}
+	if o.Vars != nil && len(o.Env) > 0 {
+		// rig.yaml env may use manifest variables too: database=$MAIN_DB
+		env := make(map[string]string, len(o.Env))
+		for k, v := range o.Env {
+			n := &yaml.Node{Kind: yaml.ScalarNode, Value: v}
+			substitute(n, o.Vars, "value", missing)
+			env[k] = n.Value
+		}
+		o.Env = env
+	}
 	for i, obj := range objs {
 		n := clone(obj.Node)
 		if o.Vars != nil {

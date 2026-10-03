@@ -268,7 +268,7 @@ func mcpTools() []mcpTool {
 				return append(append([]string{"scale"}, list(a, "targets")...), str(a, "replicas")), nil
 			}},
 		{Name: "rig_build", Description: "build images and push them to the environment's registry; returns the tag. An existing tag is not overwritten without confirm.",
-			InputSchema: schema(map[string]any{"targets": pTargets, "tag": pString("image tag (default: a timestamp)"), "ref": pString("git branch, tag or commit to build (default: the working tree)")}, "targets"),
+			InputSchema: schema(map[string]any{"targets": pTargets, "tag": pString("image tag (default: <branch>-<date>-<time>)"), "ref": pString("git branch, tag or commit to build (default: the working tree)")}, "targets"),
 			argv: func(a map[string]any) ([]string, error) {
 				if err := need(a, "targets"); err != nil {
 					return nil, err

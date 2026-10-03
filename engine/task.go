@@ -60,6 +60,11 @@ func (a *App) RunTask(ctx context.Context, name string, out io.Writer) error {
 	if a.Confirmed {
 		env = append(env, "RIG_YES=1")
 	}
+	env = append(env, "RIG_TASK="+name)
+	vars, _ := a.Vars(ctx)
+	for k, v := range vars {
+		env = append(env, k+"="+v.Value)
+	}
 	for i, step := range steps {
 		var resolveErr error
 		line := svcRef.ReplaceAllStringFunc(step, func(ref string) string {
@@ -85,4 +90,35 @@ func (a *App) RunTask(ctx context.Context, name string, out io.Writer) error {
 		}
 	}
 	return nil
+}
+
+// Var is a manifest variable and where its value comes from.
+type Var struct {
+	Value, From string
+}
+
+// Vars are the runtime's manifest variables: rig.yaml's, with `rig vars set` overrides from the
+// environment's state on top.
+func (a *App) Vars(ctx context.Context) (map[string]Var, error) {
+	out := map[string]Var{}
+	if a.Env == nil || a.Env.Runtime == nil {
+		return out, nil
+	}
+	var file struct {
+		Vars map[string]string `yaml:"vars"`
+	}
+	_ = a.Env.Runtime.Node.Decode(&file)
+	for k, v := range file.Vars {
+		out[k] = Var{Value: v, From: "rig.yaml"}
+	}
+	state, err := a.LoadState(ctx)
+	if err != nil {
+		return out, err
+	}
+	for k, v := range state {
+		if n, ok := strings.CutPrefix(k, "var."); ok {
+			out[n] = Var{Value: v, From: "set (rig.yaml: " + file.Vars[n] + ")"}
+		}
+	}
+	return out, nil
 }

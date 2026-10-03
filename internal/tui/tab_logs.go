@@ -53,10 +53,10 @@ func (t *logsTab) hints() [][2]string {
 
 func (t *logsTab) interval() time.Duration { return time.Second }
 
-// open streams nothing until services are picked: a log of everything is heavy and rarely wanted.
+// open streams nothing until services are picked (f): a log of everything is heavy and rarely wanted.
+// It does not open the picker itself, which would take the keys that switch screens.
 func (t *logsTab) open(m *model) tea.Cmd {
 	if len(t.services) == 0 {
-		t.pickServices(m)
 		return nil
 	}
 	return t.start(m)
@@ -191,7 +191,7 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		return next(msg.gen, msg.stream, t.ch)
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "f":
+		case "f", "enter":
 			t.pickServices(m)
 		case "i":
 			t.pickInstance(m)
@@ -226,7 +226,7 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 
 func (t *logsTab) view(m *model, w, h int) string {
 	if len(t.services) == 0 {
-		return panel("logs", sDim.Render("press f to pick the services whose logs to follow"), w, h, true)
+		return panel("logs", sDim.Render("press f (or enter) to pick the services whose logs to follow"), w, h, true)
 	}
 	title := strings.Join(t.services, ", ")
 	if len(t.services) > 3 {

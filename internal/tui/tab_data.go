@@ -51,7 +51,7 @@ func (t *dataTab) open(m *model) tea.Cmd {
 	t.depth = map[string][]float64{}
 	t.queues = newGrid("queues", col("QUEUE", 0), col("SOURCE", 10), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
 	t.queues.sortBy, t.queues.desc = 2, true
-	return tea.Batch(t.refresh(m), t.loadDBs(m))
+	return batch(t.refresh(m), t.loadDBs(m))
 }
 
 func (t *dataTab) loadDBs(m *model) tea.Cmd {

@@ -192,6 +192,9 @@ func isUpperHeader(h string) bool { return strings.ToUpper(h) == h }
 
 func (r *Runtime) Actions() []core.Action {
 	return []core.Action{
+		{Name: "kubectl", Mutate: true, Help: "kubectl in this environment's context and namespace: kubectl rollout restart deploy/zipkin", Run: func(ctx context.Context, args []string, out io.Writer) error {
+			return r.kubectl(args...).Attach(ctx, nil, out, out)
+		}},
 		{Name: "events", Help: "recent events in the namespace", Run: func(ctx context.Context, args []string, out io.Writer) error {
 			return r.kubectl("get", "events", "--sort-by=.lastTimestamp").Attach(ctx, nil, out, out)
 		}},

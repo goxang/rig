@@ -133,7 +133,7 @@ func (s *scheduler) due(m *model) tea.Cmd {
 		text, _ := engine.FillQuery(qs[n], nil)
 		cmds = append(cmds, s.run(m.ctx, n, text))
 	}
-	return tea.Batch(cmds...)
+	return batch(cmds...)
 }
 
 // run executes a query (text already filled in) under its name.

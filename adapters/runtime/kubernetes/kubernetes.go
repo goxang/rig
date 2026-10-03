@@ -619,10 +619,11 @@ func (r *Runtime) Objects(s *spec.Service) ([]*manifest.Object, *manifest.Object
 func (r *Runtime) vars(ctx context.Context) func(string) (string, bool) {
 	state, _ := r.LoadState(ctx)
 	return func(n string) (string, bool) {
-		if v, ok := r.Opt.Vars[n]; ok {
+		// `rig vars set` wins over rig.yaml, so a namespace can be pointed at other databases without an edit
+		if v, ok := state["var."+n]; ok {
 			return v, true
 		}
-		if v, ok := state["var."+n]; ok {
+		if v, ok := r.Opt.Vars[n]; ok {
 			return v, true
 		}
 		if n == "TAG" && state["tag"] != "" {
