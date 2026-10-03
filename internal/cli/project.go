@@ -193,9 +193,30 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	}
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing rig.yaml")
 
+	task := &cobra.Command{
+		Use: "task [name]", Short: "run a task from rig.yaml (its shell steps, in order), or list them",
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			if len(args) == 0 {
+				tasks := a.Tasks()
+				var rows [][]string
+				for _, n := range a.TaskNames() {
+					rows = append(rows, []string{n, strings.Join(tasks[n], " && ")})
+				}
+				printTable(os.Stdout, []string{"TASK", "STEPS"}, rows)
+				return nil
+			}
+			for _, n := range args {
+				if err := a.RunTask(ctx, n, os.Stdout); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, manifests, hosts, plugins, version}
+	return []*cobra.Command{initCmd, env, task, manifests, hosts, plugins, version}
 }
 
 func projectManifestDirs() []string {

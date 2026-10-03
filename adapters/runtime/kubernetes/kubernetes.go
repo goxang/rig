@@ -639,8 +639,8 @@ func (r *Runtime) Render(ctx context.Context, s *spec.Service, rel core.Release)
 		return generate(s, r.section(s), img, env, max(rel.Replicas, s.Replicas, 1))
 	}
 	var rep *int
-	if rel.Replicas > 0 {
-		rep = &rel.Replicas
+	if n := max(rel.Replicas, s.Replicas); n > 0 {
+		rep = &n
 	}
 	return manifest.Render(objs, w, manifest.RenderOptions{
 		Vars: r.vars(ctx), Image: rel.Image, Container: r.section(s).Container, Env: env, Replicas: rep,

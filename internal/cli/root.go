@@ -69,7 +69,7 @@ Run rig with no arguments for the terminal UI.`,
 	}
 	root.PersistentFlags().StringVarP(&g.file, "file", "f", "", "project file (default: rig.yaml found from here up, or $RIG_FILE)")
 	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default)")
-	root.PersistentFlags().BoolVarP(&g.yes, "yes", "y", false, "confirm changes to a protected environment")
+	root.PersistentFlags().BoolVarP(&g.yes, "yes", "y", os.Getenv("RIG_YES") != "", "confirm changes to a protected environment (or $RIG_YES)")
 
 	root.AddGroup(&cobra.Group{ID: "svc", Title: "Services:"}, &cobra.Group{ID: "obs", Title: "Observe:"},
 		&cobra.Group{ID: "data", Title: "Data & load:"}, &cobra.Group{ID: "infra", Title: "Project & infrastructure:"})

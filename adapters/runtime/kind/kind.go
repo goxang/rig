@@ -121,7 +121,8 @@ func (r *Runtime) create(ctx context.Context, _ []string, out io.Writer) error {
 			cfg += "  - role: worker\n"
 		}
 		if r.opt.RegistryPort > 0 {
-			cfg += fmt.Sprintf("containerdConfigPatches:\n  - |-\n    [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"localhost:%d\"]\n      endpoint = [\"http://%s:5000\"]\n", r.opt.RegistryPort, reg)
+			// registry.mirrors is gone in containerd 2; hosts.toml under config_path works on 1.7 and 2.x
+			cfg += "containerdConfigPatches:\n  - |-\n    [plugins.\"io.containerd.grpc.v1.cri\".registry]\n      config_path = \"/etc/containerd/certs.d\"\n"
 		}
 		previous, _ := sh.New("kubectl", "config", "current-context").Output(ctx)
 		args := []string{"create", "cluster", "--name", r.opt.Cluster, "--config", "-"}
@@ -143,6 +144,9 @@ func (r *Runtime) create(ctx context.Context, _ []string, out io.Writer) error {
 	}
 	if r.opt.RegistryPort > 0 {
 		_ = sh.New("docker", "network", "connect", "kind", reg).Run(ctx)
+		if err := r.useRegistry(ctx, reg); err != nil {
+			return err
+		}
 	}
 	for _, img := range r.opt.Preload {
 		fmt.Fprintf(out, "loading %s\n", img)
@@ -154,6 +158,24 @@ func (r *Runtime) create(ctx context.Context, _ []string, out io.Writer) error {
 		_ = sh.New("kubectl", "--context", r.Opt.Context, "create", "namespace", r.Opt.Namespace).Run(ctx)
 	}
 	fmt.Fprintf(out, "ready: context %s, namespace %s\n", r.Opt.Context, r.Opt.Namespace)
+	return nil
+}
+
+// useRegistry points every node's containerd at the registry container for localhost:<port> images.
+func (r *Runtime) useRegistry(ctx context.Context, reg string) error {
+	nodes, err := sh.New("kind", "get", "nodes", "--name", r.opt.Cluster).Output(ctx)
+	if err != nil {
+		return err
+	}
+	dir := fmt.Sprintf("/etc/containerd/certs.d/localhost:%d", r.opt.RegistryPort)
+	hosts := fmt.Sprintf("[host.\"http://%s:5000\"]\n", reg)
+	for _, n := range strings.Fields(string(nodes)) {
+		cmd := sh.New("docker", "exec", "-i", n, "sh", "-c", "mkdir -p "+dir+" && cat > "+dir+"/hosts.toml")
+		cmd.Stdin = strings.NewReader(hosts)
+		if err := cmd.Run(ctx); err != nil {
+			return fmt.Errorf("node %s: %w", n, err)
+		}
+	}
 	return nil
 }
 

@@ -17,6 +17,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `components` | below; shared by every environment |
 | `dashboards` | `name: [panel, ...]` |
 | `manifests` | folders `rig manifests` and the TUI scan by default |
+| `tasks` | `name: [shell step, ...]`, run in order by `rig task <name>` (see below) |
 
 ## services.<name>
 
@@ -30,7 +31,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `run` | local runtime: `command`, `args`, `dir` (default: the binary built from `build.go`) |
 | `ports` | `name: number`; `svc://service:name` resolves names |
 | `env` | environment for every runtime |
-| `replicas` | default 1 |
+| `replicas` | default 1; on Kubernetes, set here it also overrides the manifest's count |
 | `health` | `{port, path}`: readiness for local and docker, a readiness probe in generated manifests |
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
@@ -48,6 +49,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `only` | services and groups that exist here; dependencies on the rest are dropped |
 | `services` | patches merged into services here: `api: { replicas: 3 }` |
 | `components` | components added or replaced here; one without `type` patches the shared one |
+| `tasks` | tasks replacing the project's tasks of the same name |
 
 ### runtime options
 
@@ -98,3 +100,19 @@ dashboards:
 
 `unit` formats values (`/s`, `ms`, `s`, `bytes`, `%`, `ratio`); `kind: stat` shows a big number with a
 sparkline; `source` picks the metrics component.
+
+## tasks
+
+```yaml
+tasks:
+  bootstrap:
+    - rig up infra
+    - rig do db seed schema.sql
+    - ./scripts/seed-consul.sh svc://consul:8500
+    - rig up --build
+```
+
+Each step runs with `sh -c` from the project directory and the task stops at the first failure.
+`svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
+`rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
+Write `$$` for a shell `$`, since `${...}` is rig's own expansion.

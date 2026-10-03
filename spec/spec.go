@@ -25,6 +25,8 @@ type Project struct {
 	Components   map[string]*Component   `yaml:"components"`
 	Dashboards   map[string][]Panel      `yaml:"dashboards"`
 	Manifests    []string                `yaml:"manifests"`
+	// Tasks are named lists of shell steps: `rig task <name>`.
+	Tasks map[string][]string `yaml:"tasks"`
 
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
@@ -82,6 +84,8 @@ type Environment struct {
 	Only        []string              `yaml:"only"`
 	Components  map[string]*Component `yaml:"components"`
 	Services    map[string]yaml.Node  `yaml:"services"`
+	// Tasks replace the project's tasks of the same name in this environment.
+	Tasks map[string][]string `yaml:"tasks"`
 }
 
 // Component is one adapter instance: Kind picks the interface, Type the implementation,
