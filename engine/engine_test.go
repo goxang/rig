@@ -164,3 +164,18 @@ func TestResolveNeedsForwarder(t *testing.T) {
 		t.Fatal("svc:// resolved without a forwarding runtime")
 	}
 }
+
+func TestUpLeavesRunningDependencies(t *testing.T) {
+	a := open(t, "")
+	ctx := context.Background()
+	if err := a.Up(ctx, []string{"web"}, UpOptions{Wait: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	shared.log = nil
+	if err := a.Up(ctx, []string{"web"}, UpOptions{Wait: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"deploy web"}; !reflect.DeepEqual(shared.log, want) {
+		t.Fatalf("running dependencies were redeployed: %v", shared.log)
+	}
+}

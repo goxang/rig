@@ -59,6 +59,17 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 	if err != nil {
 		return err
 	}
+	// dependencies pulled in by the targets are only started when not already running, never rebuilt
+	named := map[string]bool{}
+	if len(targets) > 0 && !o.NoDeps {
+		own, err := a.Targets(targets, false)
+		if err != nil {
+			return err
+		}
+		for _, n := range own {
+			named[n] = true
+		}
+	}
 	if o.Tag == "" {
 		o.Tag = time.Now().Format("20060102-150405")
 	}
@@ -69,6 +80,11 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 		fmt.Fprintf(out, "▸ phase %d/%d: %v\n", i+1, len(layers), layer)
 		err := parallel(layer, func(n string) error {
 			s := a.Spec.Services[n]
+			if len(named) > 0 && !named[n] {
+				if st, err := a.runtime.Status(ctx, s); err == nil && Ready(st) {
+					return nil
+				}
+			}
 			rel := core.Release{}
 			if o.Build && s.Build != nil && a.ImageBased() {
 				img, err := a.Build(ctx, s, o.Tag, out)

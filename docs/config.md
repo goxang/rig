@@ -25,7 +25,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 |---|---|
 | `role` | `app` (default), `infra`, or `load` (left out of `rig up`) |
 | `groups` | names to address several services at once: `rig up core` |
-| `depends_on` | started first; `up` deploys in phases and waits for each |
+| `depends_on` | started first; `up` deploys in phases and waits for each, leaving dependencies that already run untouched |
 | `image` | image to run, or the repository name builds push to |
 | `build` | `go: ./cmd/api`, `dockerfile: path` (+ `context`, `args`), or `command: [...]` |
 | `run` | local runtime: `command`, `args`, `dir` (default: the binary built from `build.go`) |
