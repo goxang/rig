@@ -238,7 +238,7 @@ func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
 		for j, c := range g.cols {
 			v := ""
 			if j < len(r.cells) {
-				v = r.cells[j]
+				v = printable(r.cells[j])
 			}
 			if c.right {
 				cells[j] = padLeft(v, ws[j])
@@ -250,7 +250,8 @@ func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
 		if i == g.sel && focused {
 			line = sSelected.Render(stripStyles(line, w))
 		} else if i == g.sel {
-			line = lipgloss.NewStyle().Underline(true).Render(line)
+			// underlining styled cells garbles their escape codes into visible text
+			line = lipgloss.NewStyle().Underline(true).Render(stripStyles(line, w))
 		}
 		b.WriteString("\n" + line)
 	}
@@ -286,4 +287,18 @@ func padLeft(s string, w int) string {
 		return strings.Repeat(" ", d) + s
 	}
 	return truncate(s, w)
+}
+
+// printable keeps a cell one line of known width: a tab or newline from SQL text or kubectl output
+// moves the terminal's cursor where lipgloss does not count it, leaving stale text of the last frame.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20 && r != '\x1b', r == 0x7f:
+			return -1
+		}
+		return r
+	}, s)
 }

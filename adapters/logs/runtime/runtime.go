@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 
 	"github.com/goxang/rig/core"
@@ -27,6 +26,10 @@ func (l *Logs) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, 
 	if len(names) == 0 {
 		names = p.ServiceNames()
 	}
+	match, err := q.Matcher()
+	if err != nil {
+		return nil, err
+	}
 	out := make(chan core.LogLine, 512)
 	var wg sync.WaitGroup
 	var errs []error
@@ -35,7 +38,7 @@ func (l *Logs) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, 
 		if err == nil {
 			var ch <-chan core.LogLine
 			if ch, err = rt.Logs(ctx, s, core.LogOptions{Follow: q.Follow, Tail: q.Tail, Since: q.Since, Instance: q.Instance}); err == nil {
-				l.pump(ctx, &wg, ch, q.Match, out)
+				l.pump(ctx, &wg, ch, match, out)
 				continue
 			}
 		}
@@ -52,13 +55,13 @@ func (l *Logs) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, 
 	return out, nil
 }
 
-func (l *Logs) pump(ctx context.Context, wg *sync.WaitGroup, ch <-chan core.LogLine, match string, out chan<- core.LogLine) {
+func (l *Logs) pump(ctx context.Context, wg *sync.WaitGroup, ch <-chan core.LogLine, match func(string) bool, out chan<- core.LogLine) {
 	{
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for line := range ch {
-				if match != "" && !strings.Contains(line.Text, match) {
+				if !match(line.Text) {
 					continue
 				}
 				select {

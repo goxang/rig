@@ -241,7 +241,7 @@ func serviceCommands() []*cobra.Command {
 	}
 
 	var lo core.LogOptions
-	var grep string
+	var grep, regex string
 	logs := &cobra.Command{
 		Use: "logs [service|group...]", Short: "logs of services, merged and coloured per service",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
@@ -255,11 +255,19 @@ func serviceCommands() []*cobra.Command {
 					return err
 				}
 			}
-			ch, err := src.Logs(ctx, core.LogQuery{Services: names, Follow: lo.Follow, Tail: lo.Tail, Since: lo.Since, Match: grep, Instance: lo.Instance})
+			q := core.LogQuery{Services: names, Follow: lo.Follow, Tail: lo.Tail, Since: lo.Since, Match: grep, Instance: lo.Instance}
+			if regex != "" {
+				q.Match, q.Regex = regex, true
+			}
+			ch, err := src.Logs(ctx, q)
 			if err != nil {
 				return err
 			}
 			for l := range ch {
+				if brief {
+					fmt.Println(l.Service, cut(l.Text, 400))
+					continue
+				}
 				fmt.Printf("%s %s %s\n", dim(l.Time.Local().Format("15:04:05.000")), serviceColor(l.Service)(fmt.Sprintf("%-16s", l.Service)), l.Text)
 			}
 			return nil
@@ -269,6 +277,7 @@ func serviceCommands() []*cobra.Command {
 	logs.Flags().IntVarP(&lo.Tail, "tail", "n", 100, "lines from the end")
 	logs.Flags().DurationVar(&lo.Since, "since", 0, "only newer than this")
 	logs.Flags().StringVarP(&grep, "grep", "g", "", "only lines containing this")
+	logs.Flags().StringVarP(&regex, "regex", "E", "", `only lines matching this regular expression, e.g. -E '(?i)timeout|refused'`)
 	logs.Flags().StringVarP(&lo.Instance, "instance", "i", "", "one instance (pod, container) of a single service")
 
 	var instance string

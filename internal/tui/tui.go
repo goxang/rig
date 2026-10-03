@@ -6,7 +6,9 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -68,6 +70,10 @@ type model struct {
 	prompt  *prompt
 	picker  *picker
 	help    bool
+	// session is the saved session this run continues (S, rig resume); quitting updates it
+	session *Session
+	// mouseOff hands the mouse to the terminal, so text can be selected and copied
+	mouseOff bool
 
 	services []core.Status
 	svcAt    time.Time
@@ -114,12 +120,17 @@ func newTabs() []tab {
 	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}}
 }
 
-func Run(ctx context.Context, a *engine.App) error {
+func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil) }
+
+func run(ctx context.Context, a *engine.App, s *Session) error {
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}}
 	m.sched = newScheduler(a)
+	if s != nil {
+		m.restore(s)
+	}
 	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	_, err := program.Run()
 	if err == tea.ErrProgramKilled {
@@ -129,10 +140,15 @@ func Run(ctx context.Context, a *engine.App) error {
 }
 
 func (m *model) Init() tea.Cmd {
-	return batch(m.openTab(0), m.fetchServices(), tick())
+	return batch(m.openTab(m.active), m.fetchServices(), tick())
 }
 
 var program *tea.Program
+
+// osc52 puts text on the terminal's clipboard.
+func osc52(text string) {
+	fmt.Fprint(os.Stdout, "\x1b]52;c;"+base64.StdEncoding.EncodeToString([]byte(text))+"\a")
+}
 
 // batch runs cmds concurrently. tea.Batch must not be used: bubbletea 1.3.7 runs a batch's commands
 // inside its event loop, so a Tick or a kubectl call in one froze the keys for seconds (fixed in 1.3.10,
@@ -389,13 +405,32 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if !t.typing() {
 		switch s := k.String(); s {
 		case "q":
+			if m.session != nil {
+				_, _ = m.saveSession()
+			}
 			return tea.Quit
+		case "S":
+			id, err := m.saveSession()
+			if err != nil {
+				m.setStatus("save session: "+err.Error(), true)
+			} else {
+				m.setStatus("session saved: rig resume "+id+" (quitting with q keeps it current)", false)
+			}
+			return nil
 		case "?", "f1":
 			m.help = true
 			return nil
 		case "E":
 			m.pickEnv()
 			return nil
+		case "M":
+			m.mouseOff = !m.mouseOff
+			if m.mouseOff {
+				m.setStatus("mouse off: select and copy with the mouse; M turns it back on", false)
+				return tea.DisableMouse
+			}
+			m.setStatus("mouse on", false)
+			return tea.EnableMouseCellMotion
 		case "tab":
 			return m.openTab((m.active + 1) % len(m.tabs))
 		case "shift+tab":
@@ -555,7 +590,7 @@ func (m *model) helpView() string {
 	rows := [][2]string{
 		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

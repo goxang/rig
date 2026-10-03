@@ -146,7 +146,7 @@ func runTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool)
 		return err.Error(), true
 	}
 	cmd := exec.CommandContext(ctx, self, append(global, argv...)...)
-	cmd.Env = append(os.Environ(), "NO_COLOR=1", "RIG_YES=")
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "RIG_BRIEF=1", "RIG_YES=")
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err = cmd.Run()
@@ -289,12 +289,13 @@ func mcpTools() []mcpTool {
 				return append(argv, flag(a, "ref", "--ref")...), nil
 			}},
 		{Name: "rig_logs", Description: "recent log lines of services (merged), optionally one instance, filtered by text",
-			InputSchema: schema(map[string]any{"targets": pTargets, "tail": pString("lines per service (default 100)"), "since": pString("e.g. 10m"), "grep": pString("only lines containing this"), "instance": pString("one pod or container")}, "targets"),
+			InputSchema: schema(map[string]any{"targets": pTargets, "tail": pString("lines per service (default 100)"), "since": pString("e.g. 10m"), "grep": pString("only lines containing this"), "regex": pString("only lines matching this RE2 regex, (?i) for any case"), "instance": pString("one pod or container")}, "targets"),
 			argv: func(a map[string]any) ([]string, error) {
 				argv := append([]string{"logs"}, list(a, "targets")...)
 				argv = append(argv, flag(a, "tail", "--tail")...)
 				argv = append(argv, flag(a, "since", "--since")...)
 				argv = append(argv, flag(a, "grep", "--grep")...)
+				argv = append(argv, flag(a, "regex", "--regex")...)
 				return append(argv, flag(a, "instance", "--instance")...), nil
 			}},
 		{Name: "rig_query", Description: "run a saved query (name, with params) or an ad hoc one (component + query: SQL with optional @db prefix, PromQL, redis, kubectl, rabbitmq, kv). With no arguments lists saved queries and queryable components.",

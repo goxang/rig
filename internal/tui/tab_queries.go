@@ -38,11 +38,30 @@ type scheduler struct {
 	running map[string]bool
 	results map[string]*qresult
 	extra   map[string]*spec.Query // ad hoc queries written in the UI
+	runs    []queryRun             // every run this session, oldest first
 }
+
+// queryRun is one run of a query, kept for the history (H) and saved with the session.
+type queryRun struct {
+	Name  string        `json:"name"`
+	Text  string        `json:"text"`
+	Auto  bool          `json:"auto,omitempty"`
+	At    time.Time     `json:"at"`
+	Took  time.Duration `json:"took"`
+	Table core.Table    `json:"table"`
+	Err   string        `json:"err,omitempty"`
+}
+
+const (
+	maxRuns    = 1000
+	maxRunRows = 300
+)
 
 type schedMsg struct {
 	s    *scheduler
 	name string
+	text string
+	auto bool
 	res  qresult
 }
 
@@ -131,13 +150,17 @@ func (s *scheduler) due(m *model) tea.Cmd {
 	s.mu.Unlock()
 	for _, n := range names {
 		text, _ := engine.FillQuery(qs[n], nil)
-		cmds = append(cmds, s.run(m.ctx, n, text))
+		cmds = append(cmds, s.runAs(m.ctx, n, text, true))
 	}
 	return batch(cmds...)
 }
 
 // run executes a query (text already filled in) under its name.
 func (s *scheduler) run(ctx context.Context, name, text string) tea.Cmd {
+	return s.runAs(ctx, name, text, false)
+}
+
+func (s *scheduler) runAs(ctx context.Context, name, text string, auto bool) tea.Cmd {
 	s.mu.Lock()
 	if s.running[name] {
 		s.mu.Unlock()
@@ -149,7 +172,7 @@ func (s *scheduler) run(ctx context.Context, name, text string) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
 		t, err := s.a.RunQuery(ctx, q.Source, text)
-		return schedMsg{s: s, name: name, res: qresult{table: t, err: err, at: time.Now(), took: time.Since(start)}}
+		return schedMsg{s: s, name: name, text: text, auto: auto, res: qresult{table: t, err: err, at: time.Now(), took: time.Since(start)}}
 	}
 }
 
@@ -172,6 +195,18 @@ func (s *scheduler) done(msg schedMsg) {
 		}
 	}
 	s.results[msg.name] = &r
+	run := queryRun{Name: msg.name, Text: msg.text, Auto: msg.auto, At: r.at, Took: r.took, Table: r.table}
+	if len(run.Table.Rows) > maxRunRows {
+		run.Table.Rows = run.Table.Rows[:maxRunRows]
+		run.Table.Note = strings.TrimSpace(run.Table.Note + fmt.Sprintf(" (history keeps the first %d rows)", maxRunRows))
+	}
+	if r.err != nil {
+		run.Err = r.err.Error()
+	}
+	s.runs = append(s.runs, run)
+	if len(s.runs) > maxRuns {
+		s.runs = s.runs[len(s.runs)-maxRuns:]
+	}
 }
 
 func (s *scheduler) result(name string) *qresult {
@@ -214,6 +249,8 @@ type queriesTab struct {
 	langs     map[string]string
 	adhocSeq  int
 	resultFor string
+	history   bool // H: every run of this session instead of the query list
+	hist      *grid
 }
 
 func (t *queriesTab) name() string { return "Queries" }
@@ -222,7 +259,10 @@ func (t *queriesTab) hints() [][2]string {
 	if t.focusRes {
 		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"< >", "sort"}, {"I", "invert"}}
 	}
-	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"a", "schedule on/off"}, {"→", "result"}, {"< >", "sort"}}
+	if t.history {
+		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H", "back to queries"}}
+	}
+	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"a", "schedule on/off"}, {"H", "history"}, {"→", "result"}, {"< >", "sort"}}
 }
 
 func (t *queriesTab) interval() time.Duration { return time.Second }
@@ -231,6 +271,7 @@ func (t *queriesTab) open(m *model) tea.Cmd {
 	t.list = newGrid("queries", col("", 2), col("QUERY", 26), col("GROUP", 12), col("SOURCE", 10), rcol("EVERY", 6), rcol("LAST", 8), rcol("ROWS", 5), col("TREND", 14), col("WHAT", 0))
 	t.list.sortBy = 2
 	t.result = newGrid("result")
+	t.hist = newGrid("hist", col("TIME", 8), col("QUERY", 26), col("BY", 9), rcol("ROWS", 6), rcol("TOOK", 7), col("FIRST VALUE", 0))
 	a, gen := m.app, m.gen
 	return func() tea.Msg {
 		langs := map[string]string{}
@@ -330,6 +371,20 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.result.key(msg)
 			return nil
 		}
+		if msg.String() == "H" {
+			t.history, t.resultFor = !t.history, ""
+			return nil
+		}
+		if t.history {
+			if !t.hist.key(msg) {
+				switch msg.String() {
+				case "right", "l", "enter":
+					t.focusRes = true
+				}
+			}
+			t.resultFor = ""
+			return nil
+		}
 		if t.list.key(msg) {
 			return nil
 		}
@@ -399,6 +454,12 @@ func (t *queriesTab) click(m *model, h hit) tea.Cmd {
 		t.result.click(h)
 		return nil
 	}
+	if t.history {
+		if t.hist.click(h) {
+			t.focusRes, t.resultFor = false, ""
+		}
+		return nil
+	}
 	if t.list.click(h) {
 		t.focusRes = false
 		if name, q := t.selected(m); q != nil {
@@ -456,7 +517,53 @@ func (t *queriesTab) rows(m *model) []grow {
 	return rows
 }
 
+func (t *queriesTab) historyView(m *model, w, h int) string {
+	m.sched.mu.Lock()
+	runs := append([]queryRun{}, m.sched.runs...)
+	m.sched.mu.Unlock()
+	rows := make([]grow, 0, len(runs))
+	for i := len(runs) - 1; i >= 0; i-- {
+		r := runs[i]
+		by, first := "manual", ""
+		if r.Auto {
+			by = sDim.Render("schedule")
+		}
+		if v, ok := firstNumber(r.Table); ok {
+			first = strconv.FormatFloat(v, 'f', -1, 64)
+		}
+		rowsN := strconv.Itoa(len(r.Table.Rows))
+		if r.Err != "" {
+			rowsN, first = sRed.Render("err"), sRed.Render(r.Err)
+		}
+		rows = append(rows, grow{id: strconv.Itoa(i), cells: []string{r.At.Format("15:04:05"), r.Name, by, rowsN, r.Took.Round(time.Millisecond).String(), first},
+			keys: []any{float64(-r.At.UnixNano()), r.Name, by, float64(len(r.Table.Rows)), float64(r.Took), first}})
+	}
+	t.hist.set(rows)
+	listH := max(5, min(h*2/5, len(rows)+3))
+	list := panel(fmt.Sprintf("history · %d runs this session · H back", len(runs)), t.hist.view(m, 1, 1, w-2, listH-2, !t.focusRes), w, listH, !t.focusRes)
+	resH := h - listH
+	cur, ok := t.hist.current()
+	if !ok {
+		return lipgloss.JoinVertical(lipgloss.Left, list, panel("result", sDim.Render("nothing has run yet"), w, resH, false))
+	}
+	i, _ := strconv.Atoi(cur.id)
+	r := runs[i]
+	title := fmt.Sprintf("%s at %s · %d rows · %s", r.Name, r.At.Format("15:04:05"), len(r.Table.Rows), r.Took.Round(time.Millisecond))
+	if r.Err != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, list, panel(title, sRed.Render(wrap(r.Err, w-4)), w, resH, t.focusRes))
+	}
+	t.setResult("run:"+cur.id, r.Table)
+	body := t.result.view(m, 1, listH+1, w-2, resH-2-boolInt(r.Table.Note != ""), t.focusRes)
+	if r.Table.Note != "" {
+		body += "\n" + sDim.Render(r.Table.Note)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, list, panel(title, body, w, resH, t.focusRes))
+}
+
 func (t *queriesTab) view(m *model, w, h int) string {
+	if t.history {
+		return t.historyView(m, w, h)
+	}
 	t.list.set(t.rows(m))
 	if len(t.list.rows) == 0 && len(t.langs) == 0 {
 		return panel("queries", sDim.Render("no saved queries and no component that answers queries.\n\nadd saved queries to rig.yaml:\n\nqueries:\n  slow-requests:\n    source: prom\n    query: topk(5, rate(http_request_duration_seconds_sum[5m]))\n    every: 30s"), w, h, true)
