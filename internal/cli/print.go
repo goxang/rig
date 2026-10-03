@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,8 +15,10 @@ import (
 
 var out = lipgloss.NewRenderer(os.Stdout)
 
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
 func init() {
-	if os.Getenv("NO_COLOR") != "" {
+	if os.Getenv("NO_COLOR") != "" || brief {
 		out.SetColorProfile(termenv.Ascii)
 	}
 }
@@ -42,8 +45,43 @@ func stateText(s core.State) string {
 	return dim("? " + string(s))
 }
 
+// brief is output for agents (--brief, RIG_BRIEF=1): no colour or padding, tab-separated, long
+// cells cut, at most briefRows rows; every token is paid for.
+var brief = os.Getenv("RIG_BRIEF") != ""
+
+const briefRows = 100
+
+func setBrief(on bool) {
+	brief = on
+	if on {
+		out.SetColorProfile(termenv.Ascii)
+	}
+}
+
+func cut(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
 // printTable writes an aligned table; cells may carry ANSI colour.
 func printTable(w io.Writer, cols []string, rows [][]string) {
+	if brief {
+		fmt.Fprintln(w, strings.Join(cols, "\t"))
+		for i, r := range rows {
+			if i == briefRows {
+				fmt.Fprintf(w, "+%d rows\n", len(rows)-briefRows)
+				break
+			}
+			cells := make([]string, len(r))
+			for j, c := range r {
+				cells[j] = cut(strings.Join(strings.Fields(ansi.ReplaceAllString(c, "")), " "), 60)
+			}
+			fmt.Fprintln(w, strings.Join(cells, "\t"))
+		}
+		return
+	}
 	widths := make([]int, len(cols))
 	for i, c := range cols {
 		widths[i] = lipgloss.Width(c)

@@ -91,7 +91,11 @@ func (l *Loki) selector(services []string) string {
 func (l *Loki) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, error) {
 	sel := l.selector(q.Services)
 	if q.Match != "" {
-		sel += ` |= "` + strings.ReplaceAll(q.Match, `"`, `\"`) + `"`
+		op := ` |= "`
+		if q.Regex {
+			op = ` |~ "`
+		}
+		sel += op + strings.ReplaceAll(strings.ReplaceAll(q.Match, `\`, `\\`), `"`, `\"`) + `"`
 	}
 	since := q.Since
 	if since == 0 {

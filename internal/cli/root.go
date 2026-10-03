@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,12 @@ var g globals
 
 // UI opens the terminal UI; set by main so the cli package does not import the TUI.
 var UI func(ctx context.Context, a *engine.App) error
+
+// Resume opens a saved UI session (S in the UI); Sessions lists them. Set by main, like UI.
+var (
+	Resume   func(ctx context.Context, open func(env string) (*engine.App, error), projectDir, id string) error
+	Sessions func(projectDir string) ([][]string, error)
+)
 
 func Execute() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -69,6 +76,8 @@ Run rig with no arguments for the terminal UI.`,
 	}
 	root.PersistentFlags().StringVarP(&g.file, "file", "f", "", "project file (default: rig.yaml found from here up, or $RIG_FILE)")
 	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default)")
+	root.PersistentFlags().BoolVar(&brief, "brief", brief, "terse output for agents and scripts: no colour, tab-separated, long cells cut (or $RIG_BRIEF=1)")
+	root.PersistentPreRun = func(*cobra.Command, []string) { setBrief(brief) }
 	root.PersistentFlags().BoolVarP(&g.yes, "yes", "y", os.Getenv("RIG_YES") != "", "confirm changes to a protected environment (or $RIG_YES)")
 
 	root.AddGroup(&cobra.Group{ID: "svc", Title: "Services:"}, &cobra.Group{ID: "obs", Title: "Observe:"},
@@ -85,6 +94,41 @@ Run rig with no arguments for the terminal UI.`,
 		c.GroupID = "data"
 		root.AddCommand(c)
 	}
+	root.AddCommand(&cobra.Command{
+		Use:     "resume [session|last]",
+		Short:   "reopen the terminal UI as a saved session left it (S saves one); without an id, list them",
+		GroupID: "obs",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			file := g.file
+			if file == "" {
+				f, err := spec.Find(".")
+				if err != nil {
+					return err
+				}
+				file = f
+			}
+			dir := filepath.Dir(file)
+			if len(args) == 0 {
+				rows, err := Sessions(dir)
+				if err != nil {
+					return err
+				}
+				printTable(os.Stdout, []string{"SESSION", "SAVED", "WHAT"}, rows)
+				return nil
+			}
+			return Resume(cmd.Context(), func(env string) (*engine.App, error) {
+				if g.env != "" {
+					env = g.env
+				}
+				a, err := engine.Open(file, env)
+				if err == nil {
+					a.Confirmed = g.yes
+				}
+				return a, err
+			}, dir, args[0])
+		},
+	})
 	for _, c := range projectCommands() {
 		c.GroupID = "infra"
 		root.AddCommand(c)

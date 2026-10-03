@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,194 +16,394 @@ import (
 	"github.com/goxang/rig/internal/viz"
 )
 
-// dataTab shows queues (depth trend, consumers, rates), caches and databases. Queues and caches
-// refresh every 5s while showing; the database list is read once.
+// dataTab walks the data components: queues (depth trend, consumers, rates), and databases and
+// caches as trees (databases › objects › rows; caches › dbs › keys › value). Left picks the
+// component, right walks it; / filters what the right side lists.
 type dataTab struct {
-	queues *grid
-	snap   dataSnap
-	dbs    map[string][]string
-	depth  map[string][]float64
+	comps []dataComp
+	left  *grid
+	right *grid
+	focus int // 0 the components, 1 what the selected one shows
+
+	queues   map[string][]core.Queue
+	queueErr map[string]error
+	depth    map[string][]float64
+
+	paths   map[string][]string // per component, where its walk stands
+	table   core.Table
+	leaf    bool
+	loading bool
+	err     error
+	seq     int
+
+	filter   string
+	restored map[string][]string
 }
 
-type dataSnap struct {
+type dataComp struct {
+	name, kind, adapter string
+	browse              bool
+}
+
+type dataCompsMsg struct {
+	gen   int
+	comps []dataComp
+}
+
+type queuesMsg struct {
+	gen    int
 	queues map[string][]core.Queue
-	caches map[string]map[string]string
 	errs   map[string]error
 }
 
-type dataMsg struct {
-	gen  int
-	snap dataSnap
-}
-
-type dbsMsg struct {
-	gen int
-	dbs map[string][]string
+type browseMsg struct {
+	gen, seq int
+	t        core.Table
+	leaf     bool
+	err      error
 }
 
 func (t *dataTab) name() string { return "Data" }
 func (t *dataTab) typing() bool { return false }
 func (t *dataTab) hints() [][2]string {
-	return [][2]string{{"↑↓", "queue"}, {"P", "purge queue"}, {"< >", "sort"}, {"D", "reload databases"}}
+	c := t.current()
+	switch {
+	case t.focus == 0:
+		return [][2]string{{"↑↓", "component"}, {"enter →", "open"}}
+	case c.kind == string(core.KindMessaging):
+		return [][2]string{{"/", "filter (*word*)"}, {"P", "purge queue"}, {"< >", "sort"}, {"esc ←", "components"}}
+	}
+	return [][2]string{{"enter →", "open"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
 }
 func (t *dataTab) interval() time.Duration { return 5 * time.Second }
 
 func (t *dataTab) open(m *model) tea.Cmd {
-	t.depth = map[string][]float64{}
-	t.queues = newGrid("queues", col("QUEUE", 0), col("SOURCE", 10), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
-	t.queues.sortBy, t.queues.desc = 2, true
-	return batch(t.refresh(m), t.loadDBs(m))
-}
-
-func (t *dataTab) loadDBs(m *model) tea.Cmd {
-	a, gen, ctx := m.app, m.gen, m.ctx
+	t.depth, t.paths = map[string][]float64{}, map[string][]string{}
+	if t.restored != nil {
+		t.paths = t.restored
+	}
+	t.left = newGrid("dcomp", col("COMPONENT", 0), col("KIND", 9))
+	t.right = newGrid("dright")
+	a, gen := m.app, m.gen
 	return func() tea.Msg {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		out := map[string][]string{}
-		dbs, errs := engine.All[core.Database](a, core.KindDatabase)
-		for n, d := range dbs {
-			names, err := d.Databases(c)
-			if err != nil {
-				names = []string{"✖ " + err.Error()}
+		var out []dataComp
+		for _, n := range engine.SortedKeys(a.Spec.Components) {
+			k, typ, err := a.Kind(n)
+			if err != nil || (k != core.KindMessaging && k != core.KindDatabase && k != core.KindCache) {
+				continue
 			}
-			out[n] = names
+			c := dataComp{name: n, kind: string(k), adapter: typ}
+			if v, err := a.Component(n); err == nil {
+				_, c.browse = v.(core.Browser)
+			}
+			out = append(out, c)
 		}
-		for n, err := range errs {
-			out[n] = []string{"✖ " + err.Error()}
-		}
-		return dbsMsg{gen: gen, dbs: out}
+		return dataCompsMsg{gen: gen, comps: out}
 	}
 }
 
+func (t *dataTab) current() dataComp {
+	if t.left == nil {
+		return dataComp{}
+	}
+	if r, ok := t.left.current(); ok {
+		for _, c := range t.comps {
+			if c.name == r.id {
+				return c
+			}
+		}
+	}
+	return dataComp{}
+}
+
 func (t *dataTab) refresh(m *model) tea.Cmd {
+	c := t.current()
+	switch {
+	case c.kind == string(core.KindMessaging):
+		return t.loadQueues(m)
+	case t.leaf && len(t.paths[c.name]) > 0 && t.paths[c.name][len(t.paths[c.name])-1] == "running":
+		return t.load(m)
+	}
+	return nil
+}
+
+func (t *dataTab) loadQueues(m *model) tea.Cmd {
 	a, gen, ctx := m.app, m.gen, m.ctx
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
-		s := dataSnap{queues: map[string][]core.Queue{}, caches: map[string]map[string]string{}, errs: map[string]error{}}
-		qs, e1 := engine.All[core.Messaging](a, core.KindMessaging)
+		qs, errs := engine.All[core.Messaging](a, core.KindMessaging)
+		out := map[string][]core.Queue{}
 		for n, q := range qs {
 			var err error
-			if s.queues[n], err = q.Queues(c); err != nil {
-				e1[n] = err
+			if out[n], err = q.Queues(c); err != nil {
+				errs[n] = err
 			}
 		}
-		cs, e2 := engine.All[core.Cache](a, core.KindCache)
-		for n, x := range cs {
-			var err error
-			if s.caches[n], err = x.Info(c); err != nil {
-				e2[n] = err
-			}
+		return queuesMsg{gen: gen, queues: out, errs: errs}
+	}
+}
+
+// load walks the selected component to its current path.
+func (t *dataTab) load(m *model) tea.Cmd {
+	c := t.current()
+	if !c.browse {
+		return nil
+	}
+	t.seq++
+	t.loading, t.err = true, nil
+	a, gen, seq, ctx, path := m.app, m.gen, t.seq, m.ctx, append([]string{}, t.paths[c.name]...)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		v, err := a.Component(c.name)
+		if err != nil {
+			return browseMsg{gen: gen, seq: seq, err: err}
 		}
-		for _, m := range []map[string]error{e1, e2} {
-			for k, v := range m {
-				s.errs[k] = v
-			}
-		}
-		return dataMsg{gen: gen, snap: s}
+		tb, leaf, err := v.(core.Browser).Browse(ctx, path)
+		return browseMsg{gen: gen, seq: seq, t: tb, leaf: leaf, err: err}
 	}
 }
 
 func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
-	case dataMsg:
+	case dataCompsMsg:
 		if msg.gen != m.gen {
 			return nil
 		}
-		t.snap = msg.snap
+		t.comps = msg.comps
 		var rows []grow
-		for comp, qs := range msg.snap.queues {
+		for _, c := range t.comps {
+			rows = append(rows, grow{id: c.name, cells: []string{c.name, sDim.Render(c.kind)}})
+		}
+		t.left.set(rows)
+		return t.show(m)
+	case queuesMsg:
+		if msg.gen != m.gen {
+			return nil
+		}
+		t.queues, t.queueErr = msg.queues, msg.errs
+		for comp, qs := range msg.queues {
 			for _, q := range qs {
 				k := comp + "/" + q.Name
 				t.depth[k] = last(append(t.depth[k], float64(q.Messages)), 60)
-				depth := strconv.Itoa(q.Messages)
-				if q.Messages > 0 {
-					depth = sAmber.Render(depth)
-				}
-				cons := strconv.Itoa(q.Consumers)
-				if q.Consumers == 0 {
-					cons = sRed.Render("0")
-				}
-				rows = append(rows, grow{id: k, cells: []string{q.Name, sDim.Render(comp), depth, viz.Sparkline(t.depth[k], 16, viz.Palette[1]), strconv.Itoa(q.Unacked), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")},
-					keys: []any{q.Name, comp, float64(q.Messages), float64(q.Messages), float64(q.Unacked), float64(q.Consumers), q.InRate, q.OutRate}})
 			}
 		}
-		t.queues.set(rows)
-	case dbsMsg:
-		if msg.gen == m.gen {
-			t.dbs = msg.dbs
+		if t.current().kind == string(core.KindMessaging) {
+			t.fill()
 		}
-	case tea.KeyMsg:
-		if t.queues.key(msg) {
+	case browseMsg:
+		if msg.gen != m.gen || msg.seq != t.seq {
 			return nil
 		}
-		switch msg.String() {
-		case "D":
-			return t.loadDBs(m)
-		case "P":
-			r, ok := t.queues.current()
-			if !ok {
-				return nil
+		t.loading, t.table, t.leaf, t.err = false, msg.t, msg.leaf, msg.err
+		t.fill()
+	case tea.KeyMsg:
+		return t.key(m, msg)
+	}
+	return nil
+}
+
+// show switches the right side to the selected component.
+func (t *dataTab) show(m *model) tea.Cmd {
+	t.table, t.err, t.leaf, t.loading = core.Table{}, nil, false, false
+	t.right = newGrid("dright")
+	if t.current().kind == string(core.KindMessaging) {
+		t.right = newGrid("dright", col("QUEUE", 0), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
+		t.right.sortBy, t.right.desc = 1, true
+		t.fill()
+		return t.loadQueues(m)
+	}
+	return t.load(m)
+}
+
+// fill puts what the selected component holds, filtered, into the right grid.
+func (t *dataTab) fill() {
+	c := t.current()
+	match := globMatcher(t.filter)
+	if c.kind == string(core.KindMessaging) {
+		var rows []grow
+		for _, q := range t.queues[c.name] {
+			if !match(q.Name) {
+				continue
 			}
-			comp, q, _ := strings.Cut(r.id, "/")
-			a := m.app
-			return m.act("purge queue "+q, true, func(ctx context.Context) error {
-				mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
-				if err != nil {
-					return err
-				}
-				return mq.Purge(ctx, q)
-			})
+			depth := strconv.Itoa(q.Messages)
+			if q.Messages > 0 {
+				depth = sAmber.Render(depth)
+			}
+			cons := strconv.Itoa(q.Consumers)
+			if q.Consumers == 0 {
+				cons = sRed.Render("0")
+			}
+			rows = append(rows, grow{id: q.Name, cells: []string{q.Name, depth, viz.Sparkline(t.depth[c.name+"/"+q.Name], 16, viz.Palette[1]), strconv.Itoa(q.Unacked), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")},
+				keys: []any{q.Name, float64(q.Messages), float64(q.Messages), float64(q.Unacked), float64(q.Consumers), q.InRate, q.OutRate}})
 		}
+		t.right.set(rows)
+		return
+	}
+	ws := colWidths(t.table, 0)
+	var cols []gcol
+	for i, name := range t.table.Columns {
+		cols = append(cols, col(name, min(max(ws[i], 4), 60)))
+	}
+	if len(cols) > 0 {
+		cols[len(cols)-1].width = 0
+	}
+	if len(cols) != len(t.right.cols) {
+		t.right = newGrid("dright", cols...)
+	} else {
+		t.right.cols = cols
+	}
+	var rows []grow
+	for i, r := range t.table.Rows {
+		if len(r) == 0 || !match(r[0]) {
+			continue
+		}
+		rows = append(rows, grow{id: strconv.Itoa(i) + "\x00" + r[0], cells: r})
+	}
+	t.right.set(rows)
+}
+
+func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
+	c := t.current()
+	if t.focus == 0 {
+		if t.left.key(k) {
+			if t.current().name != c.name {
+				t.filter = ""
+				return t.show(m)
+			}
+			return nil
+		}
+		switch k.String() {
+		case "enter", "right", "l":
+			t.focus = 1
+		}
+		return nil
+	}
+	if t.right.key(k) {
+		return nil
+	}
+	switch k.String() {
+	case "/":
+		m.ask("filter (text, or a glob like *word*)", t.filter, func(v string) tea.Cmd {
+			t.filter = strings.TrimSpace(v)
+			t.fill()
+			return nil
+		})
+	case "r":
+		if c.kind == string(core.KindMessaging) {
+			return t.loadQueues(m)
+		}
+		return t.load(m)
+	case "enter", "right", "l":
+		r, ok := t.right.current()
+		if !ok || !c.browse || t.leaf || t.loading {
+			return nil
+		}
+		_, child, _ := strings.Cut(r.id, "\x00")
+		t.paths[c.name] = append(t.paths[c.name], child)
+		t.filter = ""
+		t.right = newGrid("dright")
+		return t.load(m)
+	case "esc", "left", "h", "backspace":
+		switch {
+		case t.filter != "":
+			t.filter = ""
+			t.fill()
+		case len(t.paths[c.name]) > 0:
+			p := t.paths[c.name]
+			t.paths[c.name] = p[:len(p)-1]
+			t.right = newGrid("dright")
+			return t.load(m)
+		default:
+			t.focus = 0
+		}
+	case "P":
+		r, ok := t.right.current()
+		if !ok || c.kind != string(core.KindMessaging) {
+			return nil
+		}
+		a, comp, q := m.app, c.name, r.id
+		return m.act("purge queue "+q, true, func(ctx context.Context) error {
+			mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
+			if err != nil {
+				return err
+			}
+			return mq.Purge(ctx, q)
+		})
 	}
 	return nil
 }
 
 func (t *dataTab) click(m *model, h hit) tea.Cmd {
-	t.queues.click(h)
+	if strings.HasPrefix(h.id, "dcomp:") {
+		before := t.current().name
+		t.left.click(h)
+		t.focus = 0
+		if t.current().name != before {
+			t.filter = ""
+			return t.show(m)
+		}
+		return nil
+	}
+	t.focus = 1
+	if t.right.click(h) && h.double {
+		return t.key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	}
 	return nil
 }
 
 func (t *dataTab) view(m *model, w, h int) string {
-	if len(t.snap.queues)+len(t.snap.caches)+len(t.snap.errs)+len(t.dbs) == 0 {
+	if t.left == nil || len(t.left.rows) == 0 {
 		return panel("data", sDim.Render("no database, messaging or cache components in this environment (or still loading)"), w, h, true)
 	}
-	topH := h * 3 / 5
-	var errs strings.Builder
-	for _, n := range engine.SortedKeys(t.snap.errs) {
-		errs.WriteString(sRed.Render(n+": "+t.snap.errs[n].Error()) + "\n")
-	}
-	eh := lipgloss.Height(strings.TrimRight(errs.String(), "\n"))
-	if errs.Len() == 0 {
-		eh = 0
-	}
-	qbody := errs.String() + t.queues.view(m, 1, 1+eh, w-2, topH-2-eh, true)
-	queues := panel(fmt.Sprintf("queues · %d", len(t.queues.rows)), qbody, w, topH, true)
+	lw := min(34, w/4)
+	left := panel("components", t.left.view(m, 1, 1, lw-2, h-2, t.focus == 0), lw, h, t.focus == 0)
 
-	lw := w / 2
-	var cb strings.Builder
-	for _, comp := range engine.SortedKeys(t.snap.caches) {
-		info := t.snap.caches[comp]
-		cb.WriteString(sTitle.Render(comp) + "\n")
-		for _, k := range []string{"redis_version", "used_memory_human", "connected_clients", "instantaneous_ops_per_sec", "db0"} {
-			if v, ok := info[k]; ok {
-				cb.WriteString(sDim.Render(padRight(k, 28)) + v + "\n")
-			}
-		}
-		if hits, _ := strconv.ParseFloat(info["keyspace_hits"], 64); hits > 0 {
-			miss, _ := strconv.ParseFloat(info["keyspace_misses"], 64)
-			ratio := hits / (hits + miss)
-			cb.WriteString(sDim.Render(padRight("hit ratio", 28)) + viz.Gauge(ratio, 16) + fmt.Sprintf(" %.1f%%", ratio*100) + "\n")
-		}
+	c := t.current()
+	title := c.name
+	if p := t.paths[c.name]; len(p) > 0 {
+		title += " › " + strings.Join(p, " › ")
 	}
-	var db strings.Builder
-	for _, comp := range engine.SortedKeys(t.dbs) {
-		db.WriteString(sTitle.Render(comp) + sDim.Render("  "+strings.Join(t.dbs[comp], " · ")) + "\n")
+	title += fmt.Sprintf(" · %d", len(t.right.rows))
+	if t.filter != "" {
+		title += " · filter " + t.filter
 	}
-	if db.Len() == 0 {
-		db.WriteString(sDim.Render("loading…"))
+	if t.loading {
+		title += " · loading…"
 	}
-	bottom := lipgloss.JoinHorizontal(lipgloss.Top, panel("caches", cb.String(), lw, h-topH, false), panel("databases", db.String(), w-lw, h-topH, false))
-	return lipgloss.JoinVertical(lipgloss.Left, queues, bottom)
+	var head string
+	switch {
+	case t.err != nil:
+		head = sRed.Render(wrap(t.err.Error(), w-lw-4))
+	case c.kind == string(core.KindMessaging) && t.queueErr[c.name] != nil:
+		head = sRed.Render(wrap(t.queueErr[c.name].Error(), w-lw-4))
+	case !c.browse && c.kind != string(core.KindMessaging):
+		head = sDim.Render(c.adapter + " cannot be walked")
+	}
+	hh := 0
+	if head != "" {
+		hh = lipgloss.Height(head)
+		head += "\n"
+	}
+	noteH := boolInt(t.table.Note != "" && c.kind != string(core.KindMessaging))
+	body := head + t.right.view(m, lw+1, 1+hh, w-lw-2, h-2-hh-noteH, t.focus == 1)
+	if noteH > 0 {
+		body += "\n" + sDim.Render(t.table.Note)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(title, body, w-lw, h, t.focus == 1))
+}
+
+// globMatcher matches names case-insensitively: plain text anywhere in the name, or a glob
+// (*word*, prefix*) against the whole name.
+func globMatcher(p string) func(string) bool {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if p == "" {
+		return func(string) bool { return true }
+	}
+	if !strings.Contains(p, "*") {
+		return func(s string) bool { return strings.Contains(strings.ToLower(s), p) }
+	}
+	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\*`, ".*") + "$")
+	return func(s string) bool { return re.MatchString(strings.ToLower(s)) }
 }

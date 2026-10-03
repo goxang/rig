@@ -21,6 +21,8 @@ type loadTab struct {
 	stats map[string]core.LoadStatus
 	errs  map[string]error
 	hist  map[string]*loadHist
+
+	restored map[string]savedLoadHist
 }
 
 // loadHist keeps what a generator did while the TUI watched it; Sent deltas give the actual rate.
@@ -63,6 +65,9 @@ func (t *loadTab) hints() [][2]string {
 func (t *loadTab) open(m *model) tea.Cmd {
 	t.names = m.app.Names(core.KindLoad)
 	t.hist = map[string]*loadHist{}
+	for n, h := range t.restored {
+		t.hist[n] = &loadHist{target: h.Target, actual: h.Actual, failed: h.Failed}
+	}
 	return t.refresh(m)
 }
 

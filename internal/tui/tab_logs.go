@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +34,7 @@ type logsTab struct {
 	cancel   context.CancelFunc
 	ch       <-chan core.LogLine
 	err      string
+	shown    int // lines the last render showed
 }
 
 type logBatchMsg struct {
@@ -48,7 +52,8 @@ type logStartMsg struct {
 func (t *logsTab) name() string { return "Logs" }
 func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
-	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep"}, {"p", "pause"}, {"↑↓", "scroll"}, {"c", "clear"}}
+	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep (regex)"}, {"p", "pause"}, {"↑↓", "scroll"},
+		{"y/Y", "copy shown/all"}, {"M", "mouse off: select text"}, {"c", "clear"}}
 }
 
 func (t *logsTab) interval() time.Duration { return time.Second }
@@ -125,6 +130,9 @@ func (t *logsTab) start(m *model) tea.Cmd {
 	t.cancel = cancel
 	a, gen, stream := m.app, m.gen, t.stream
 	q := core.LogQuery{Follow: true, Tail: 200, Match: t.grep, Services: t.services}
+	if _, err := regexp.Compile(t.grep); err == nil {
+		q.Regex = true
+	}
 	if len(t.services) == 1 {
 		q.Instance = t.instance
 	}
@@ -196,7 +204,7 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "i":
 			t.pickInstance(m)
 		case "/":
-			m.ask("grep", t.grep, func(v string) tea.Cmd {
+			m.ask("grep (text or regex, (?i) ignores case)", t.grep, func(v string) tea.Cmd {
 				t.grep = v
 				return t.start(m)
 			})
@@ -219,6 +227,11 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.scroll, t.paused = 0, false
 		case "c":
 			t.lines, t.scroll = nil, 0
+		case "y":
+			end := len(t.lines) - t.scroll
+			return t.copy(m, t.lines[max(0, end-t.shown):end])
+		case "Y":
+			return t.copy(m, t.lines)
 		}
 	}
 	return nil
@@ -244,6 +257,7 @@ func (t *logsTab) view(m *model, w, h int) string {
 	}
 	title += fmt.Sprintf(" · %d lines · ", len(t.lines)) + state
 	inner := h - 2
+	t.shown = inner
 	if t.err != "" {
 		return panel(title, sRed.Render(t.err), w, h, true)
 	}
@@ -262,8 +276,8 @@ func (t *logsTab) view(m *model, w, h int) string {
 		}
 		svc := lipgloss.NewStyle().Foreground(colorFor(who)).Render(padRight(who, nameW))
 		text := pretty(l.Text)
-		if t.grep != "" {
-			text = strings.ReplaceAll(text, t.grep, sAmber.Bold(true).Render(t.grep))
+		if re := t.grepRe(); re != nil {
+			text = re.ReplaceAllStringFunc(text, func(s string) string { return sAmber.Bold(true).Render(s) })
 		}
 		b.WriteString(sDim.Render(l.Time.Local().Format("15:04:05.000")) + " " + svc + " " + text + "\n")
 	}
@@ -332,4 +346,35 @@ func pretty(s string) string {
 		lv = sGreen
 	}
 	return lv.Render(padRight(level, 5)) + " " + msg + "  " + strings.Join(kv, " ")
+}
+
+func (t *logsTab) grepRe() *regexp.Regexp {
+	if t.grep == "" {
+		return nil
+	}
+	if re, err := regexp.Compile(t.grep); err == nil {
+		return re
+	}
+	return regexp.MustCompile(regexp.QuoteMeta(t.grep))
+}
+
+// copy puts lines on the clipboard (OSC 52, which most terminals and tmux honour) and in a file
+// under the environment's state directory, for terminals that ignore it.
+func (t *logsTab) copy(m *model, lines []core.LogLine) tea.Cmd {
+	if len(lines) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l.Time.Local().Format("15:04:05.000") + " " + l.Service + " " + l.Text + "\n")
+	}
+	text := b.String()
+	dir := filepath.Join(m.app.StateDir(), "logs")
+	file := filepath.Join(dir, time.Now().Format("20060102-150405")+".log")
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		_ = os.WriteFile(file, []byte(text), 0o644)
+	}
+	osc52(text)
+	m.setStatus(fmt.Sprintf("copied %d lines (also in %s)", len(lines), file), false)
+	return nil
 }

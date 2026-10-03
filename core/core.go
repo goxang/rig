@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -265,6 +266,23 @@ type LogQuery struct {
 	Tail     int
 	Follow   bool
 	Match    string
+	// Regex makes Match an RE2 regular expression ((?i) for any case) instead of plain text.
+	Regex bool
+}
+
+// Matcher is q's line filter; an invalid regular expression is an error.
+func (q LogQuery) Matcher() (func(string) bool, error) {
+	switch {
+	case q.Match == "":
+		return func(string) bool { return true }, nil
+	case q.Regex:
+		re, err := regexp.Compile(q.Match)
+		if err != nil {
+			return nil, err
+		}
+		return re.MatchString, nil
+	}
+	return func(s string) bool { return strings.Contains(s, q.Match) }, nil
 }
 
 type LogSource interface {
@@ -375,6 +393,12 @@ type Forwarder interface {
 }
 
 // Querier answers ad hoc queries in its own language: SQL, PromQL, a redis command, ...
+// Browser lets a data component be walked as a tree: the rows under a path, whose first column
+// names each child, until a leaf (a table's rows, a key's value) ends it.
+type Browser interface {
+	Browse(ctx context.Context, path []string) (t Table, leaf bool, err error)
+}
+
 type Querier interface {
 	QueryLanguage() string
 	RunQuery(ctx context.Context, q string) (Table, error)

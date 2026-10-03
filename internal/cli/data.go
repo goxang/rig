@@ -190,7 +190,45 @@ func dataCommands() []*cobra.Command {
 		})},
 	)
 
-	return []*cobra.Command{db, cache, queue, kv, loadCommand(), queryCommand(), doCommand()}
+	browse := &cobra.Command{
+		Use:   "data [component] [path...]",
+		Short: "walk databases and caches: data db Switch tables dbo.transactions | data cache db0 <key>",
+		Example: `  rig data                                  # components that can be walked
+  rig data db                               # databases
+  rig data db Switch                        # tables, views, procedures, functions, running
+  rig data db Switch procedures             # every procedure; then one: ... procedures dbo.usp_x
+  rig data cache db0 session:42             # a Redis key's value`,
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			if len(args) == 0 {
+				var rows [][]string
+				for _, n := range engine.SortedKeys(a.Spec.Components) {
+					if v, err := a.Component(n); err == nil {
+						if _, ok := v.(core.Browser); ok {
+							k, t, _ := a.Kind(n)
+							rows = append(rows, []string{n, string(k), t})
+						}
+					}
+				}
+				printTable(os.Stdout, []string{"COMPONENT", "KIND", "ADAPTER"}, rows)
+				return nil
+			}
+			v, err := a.Component(args[0])
+			if err != nil {
+				return err
+			}
+			b, ok := v.(core.Browser)
+			if !ok {
+				return fmt.Errorf("%s cannot be walked", args[0])
+			}
+			t, _, err := b.Browse(ctx, args[1:])
+			if err != nil {
+				return err
+			}
+			printCoreTable(os.Stdout, t)
+			return nil
+		}),
+	}
+	return []*cobra.Command{db, cache, queue, kv, browse, loadCommand(), queryCommand(), doCommand()}
 }
 
 func loadCommand() *cobra.Command {
