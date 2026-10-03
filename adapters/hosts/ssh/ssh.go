@@ -100,7 +100,7 @@ func (h Host) args(tty bool) []string {
 	return append(a, target)
 }
 
-const probe = `cat /proc/loadavg; nproc; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; uname -r; (. /etc/os-release && echo "$PRETTY_NAME"); head -1 /proc/stat; sleep 0.3; head -1 /proc/stat`
+const probe = `cat /proc/loadavg; nproc; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; uname -r; (. /etc/os-release && echo "$PRETTY_NAME"); head -1 /proc/stat; sleep 0.3; head -1 /proc/stat; df -kP / | tail -1`
 
 func (s *SSH) Hosts(ctx context.Context) ([]core.Host, error) {
 	out := make([]core.Host, len(s.opt.Hosts))
@@ -145,6 +145,11 @@ func parse(raw string, h *core.Host) {
 	a, b := cpu(lines[6]), cpu(lines[7])
 	if total := b[0] - a[0]; total > 0 {
 		h.CPUUsed = 1 - (b[1]-a[1])/total
+	}
+	if len(lines) > 8 {
+		if f := strings.Fields(lines[8]); len(f) >= 4 {
+			h.DiskTotal, h.DiskUsed = kb("x "+f[1]), kb("x "+f[2])
+		}
 	}
 }
 

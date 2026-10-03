@@ -294,7 +294,41 @@ func serviceCommands() []*cobra.Command {
 	}
 	exec.Flags().StringVarP(&instance, "instance", "i", "", "a specific instance (pod, container)")
 
-	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, logs, exec}
+	setenv := &cobra.Command{
+		Use:   "setenv <service|group> [K=V... | K=]",
+		Short: "env vars of services, kept in the environment's state so every deploy keeps them; running ones redeploy",
+		Example: `  rig setenv loadtestv2-shaparakv2-iso-pos              # what is set
+  rig -e loadtest2 -y setenv parser VERBOSITY=2 LOG_MODE=json
+  rig -e loadtest2 -y setenv parser VERBOSITY=             # back to the manifest's`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			names, err := a.Targets(args[:1], false)
+			if err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				var rows [][]string
+				for _, n := range names {
+					o := a.EnvOverrides(n)
+					for _, k := range engine.SortedKeys(o) {
+						rows = append(rows, []string{n, k, o[k]})
+					}
+				}
+				printTable(os.Stdout, []string{"SERVICE", "VAR", "VALUE"}, rows)
+				return nil
+			}
+			kv := map[string]string{}
+			for _, f := range args[1:] {
+				k, v, ok := strings.Cut(f, "=")
+				if !ok || k == "" {
+					return fmt.Errorf("%q: write K=V (K= removes)", f)
+				}
+				kv[k] = v
+			}
+			return a.SetEnv(ctx, names, kv)
+		}),
+	}
+	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, logs, exec, setenv}
 }
 
 func envLabel(a *engine.App) string {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,7 +174,34 @@ func observeCommands() []*cobra.Command {
 	}
 	debug.Flags().StringVarP(&dinst, "instance", "i", "", "instance")
 
-	return []*cobra.Command{metrics, traces, profile, debug}
+	alerts := &cobra.Command{
+		Use:   "alerts",
+		Short: "check the alerts once (rig.yaml alerts:, default: node cpu/memory/disk at 90%/98%); exit 2 when one is critical",
+		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
+			firing, errs := a.CheckAlerts(ctx)
+			for _, e := range errs {
+				fmt.Fprintln(os.Stderr, dim(e.Error()))
+			}
+			if len(firing) == 0 {
+				fmt.Println(green("ok") + dim(fmt.Sprintf(" (%d rules)", len(a.AlertRules()))))
+				return nil
+			}
+			var rows [][]string
+			for _, f := range firing {
+				lv := amber("warn")
+				if f.Level == engine.LevelCrit {
+					lv = red("crit")
+				}
+				rows = append(rows, []string{lv, f.Alert, f.Subject, strconv.FormatFloat(f.Value, 'f', -1, 64) + f.Unit})
+			}
+			printTable(os.Stdout, []string{"LEVEL", "ALERT", "SUBJECT", "VALUE"}, rows)
+			if firing[0].Level == engine.LevelCrit {
+				os.Exit(2)
+			}
+			return nil
+		}),
+	}
+	return []*cobra.Command{metrics, traces, profile, debug, alerts}
 }
 
 type panel struct{ title, query, unit string }

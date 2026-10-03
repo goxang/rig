@@ -30,6 +30,8 @@ type Project struct {
 	Tasks map[string][]string `yaml:"tasks"`
 	// Queries are saved queries: run on demand, or on a schedule while the UI is open.
 	Queries map[string]*Query `yaml:"queries"`
+	// Alerts are watched while the UI is open and shown in its header; `rig alerts` checks them once.
+	Alerts []Alert `yaml:"alerts"`
 
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
@@ -97,6 +99,8 @@ type Environment struct {
 	Tasks map[string][]string `yaml:"tasks"`
 	// Queries replace the project's queries of the same name in this environment.
 	Queries map[string]*Query `yaml:"queries"`
+	// Alerts add to the project's alerts in this environment.
+	Alerts []Alert `yaml:"alerts"`
 	// Infra names the environment that runs this one's shared services, so heavy infrastructure
 	// (a database, a broker) runs once for local, docker and kind alike.
 	Infra string `yaml:"infra"`
@@ -239,4 +243,19 @@ func (p *Project) EnvironmentNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Alert fires when a number crosses Warn or Crit. Source "hosts" watches every node's Metric (cpu,
+// memory or disk, in percent); any other source is a component whose Query returns rows, each
+// row's first number checked and its text cells naming it.
+type Alert struct {
+	Name   string  `yaml:"name"`
+	Source string  `yaml:"source"`
+	Metric string  `yaml:"metric"`
+	Query  string  `yaml:"query"`
+	Warn   float64 `yaml:"warn"`
+	Crit   float64 `yaml:"crit"`
+	// Below fires when the number drops under the thresholds instead (consumers, ready replicas).
+	Below bool   `yaml:"below"`
+	Unit  string `yaml:"unit"`
 }

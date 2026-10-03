@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +16,9 @@ import (
 	"github.com/goxang/rig/manifest"
 )
 
-// manifestsTab browses any folder of manifests: objects by kind, how each one relates to the rest, what is wrong.
+// manifestsTab browses any folder of manifests: objects by kind, or folders and files (t), how each
+// object relates to the rest, what is wrong (i: the file's, I: all). Marked objects (space) or the
+// selected one can be applied to the environment (a) or become a rig.yaml service (n).
 type manifestsTab struct {
 	dirs    []string
 	set     *manifest.Set
@@ -20,8 +26,13 @@ type manifestsTab struct {
 	filter  string
 	sel     int
 	offset  int
-	issues  bool
+	issues  string // "", "file" or "all"
 	yamlOff int
+	marked  map[string]bool
+
+	tree bool   // folders and files instead of every object
+	cwd  string // the folder the tree shows
+	file string // in the tree: the file whose objects are listed
 }
 
 type manifestsMsg struct {
@@ -30,14 +41,21 @@ type manifestsMsg struct {
 	err error
 }
 
+// applier is a runtime that can apply manifests (Kubernetes).
+type applier interface {
+	ApplyManifests(ctx context.Context, objs []*manifest.Object) error
+}
+
 func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
-	return [][2]string{{"/", "filter"}, {"i", "issues"}, {"d", "folder"}, {"r", "rescan"}, {"J/K", "yaml"}}
+	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"/", "filter"}, {"space", "mark"}, {"a", "apply"}, {"n", "new service"},
+		{"i/I", "issues file/all"}, {"d", "folders"}, {"r", "rescan"}, {"J/K", "yaml"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
 	t.dirs = m.app.ManifestDirs()
+	t.marked = map[string]bool{}
 	return t.scan(m)
 }
 
@@ -51,17 +69,163 @@ func (t *manifestsTab) scan(m *model) tea.Cmd {
 	}
 }
 
-func (t *manifestsTab) visible() []*manifest.Object {
+// entry is a row of the list: an object, or in the tree a folder or a file.
+type entry struct {
+	obj   *manifest.Object
+	dir   string // a folder (absolute)
+	file  string // a file
+	count int    // objects under a folder or in a file
+}
+
+func (e entry) id() string {
+	switch {
+	case e.obj != nil:
+		return e.obj.File + "#" + e.obj.ID()
+	case e.dir != "":
+		return "dir:" + e.dir
+	}
+	return "file:" + e.file
+}
+
+func (t *manifestsTab) objects() []*manifest.Object {
 	if t.set == nil {
 		return nil
 	}
 	var out []*manifest.Object
 	for _, o := range t.set.Objects {
-		if t.filter == "" || strings.Contains(strings.ToLower(o.ID()), strings.ToLower(t.filter)) {
+		if t.tree && t.file != "" && o.File != t.file {
+			continue
+		}
+		if t.filter == "" || strings.Contains(strings.ToLower(o.ID()+" "+o.File), strings.ToLower(t.filter)) {
 			out = append(out, o)
 		}
 	}
 	return out
+}
+
+func abs(p string) string {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return a
+}
+
+// entries is what the list shows: objects, or the tree's folders and files under cwd.
+func (t *manifestsTab) entries() []entry {
+	if !t.tree || t.file != "" {
+		var out []entry
+		for _, o := range t.objects() {
+			out = append(out, entry{obj: o})
+		}
+		return out
+	}
+	if t.set == nil {
+		return nil
+	}
+	if t.cwd == "" {
+		if len(t.dirs) == 1 {
+			t.cwd = abs(t.dirs[0])
+		} else {
+			t.cwd = abs(m0(t.dirs))
+		}
+	}
+	dirs, files := map[string]int{}, map[string]int{}
+	for _, o := range t.set.Objects {
+		f := abs(o.File)
+		rel, err := filepath.Rel(t.cwd, f)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		if t.filter != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(t.filter)) {
+			continue
+		}
+		if first, _, deeper := strings.Cut(rel, string(filepath.Separator)); deeper {
+			dirs[filepath.Join(t.cwd, first)]++
+		} else {
+			files[o.File]++
+		}
+	}
+	var out []entry
+	for _, d := range sortedKeys(dirs) {
+		out = append(out, entry{dir: d, count: dirs[d]})
+	}
+	for _, f := range sortedKeys(files) {
+		out = append(out, entry{file: f, count: files[f]})
+	}
+	return out
+}
+
+// m0 is the folder every root shares.
+func m0(dirs []string) string {
+	if len(dirs) == 0 {
+		return "."
+	}
+	common := abs(dirs[0])
+	for _, d := range dirs[1:] {
+		d = abs(d)
+		for !strings.HasPrefix(d+string(filepath.Separator), common+string(filepath.Separator)) {
+			common = filepath.Dir(common)
+		}
+	}
+	return common
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (t *manifestsTab) current() (entry, bool) {
+	es := t.entries()
+	if t.sel < 0 || t.sel >= len(es) {
+		return entry{}, false
+	}
+	return es[t.sel], true
+}
+
+// targets are the marked objects, else those the selection stands for (an object, or a file's).
+func (t *manifestsTab) targets() []*manifest.Object {
+	var out []*manifest.Object
+	if len(t.marked) > 0 {
+		for _, o := range t.set.Objects {
+			if t.marked[o.File+"#"+o.ID()] || t.marked["file:"+o.File] {
+				out = append(out, o)
+			}
+		}
+		return out
+	}
+	e, ok := t.current()
+	switch {
+	case !ok:
+	case e.obj != nil:
+		out = append(out, e.obj)
+	case e.file != "":
+		for _, o := range t.set.Objects {
+			if o.File == e.file {
+				out = append(out, o)
+			}
+		}
+	}
+	return out
+}
+
+// fileInView is the file the issues key narrows to: the open file, the selected file or object's.
+func (t *manifestsTab) fileInView() string {
+	if t.tree && t.file != "" {
+		return t.file
+	}
+	if e, ok := t.current(); ok {
+		if e.obj != nil {
+			return e.obj.File
+		}
+		return e.file
+	}
+	return ""
 }
 
 func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
@@ -74,7 +238,13 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 		}
 	case tea.KeyMsg:
-		if listKeys(msg, &t.sel, len(t.visible())) {
+		if t.issues != "" {
+			if s := msg.String(); s == "esc" || s == "i" || s == "I" || s == "left" {
+				t.issues = ""
+			}
+			return nil
+		}
+		if listKeys(msg, &t.sel, len(t.entries())) {
 			t.yamlOff = 0
 			return nil
 		}
@@ -84,14 +254,52 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.filter, t.sel, t.offset = v, 0, 0
 				return nil
 			})
+		case "t":
+			t.tree, t.sel, t.offset, t.file = !t.tree, 0, 0, ""
+		case "enter", "right", "l":
+			e, ok := t.current()
+			if !ok || !t.tree {
+				return nil
+			}
+			switch {
+			case e.dir != "":
+				t.cwd, t.sel, t.offset = e.dir, 0, 0
+			case e.file != "":
+				t.file, t.sel, t.offset = e.file, 0, 0
+			}
+		case "esc", "left", "h", "backspace":
+			switch {
+			case t.filter != "":
+				t.filter = ""
+			case t.tree && t.file != "":
+				t.file, t.sel, t.offset = "", 0, 0
+			case t.tree && t.cwd != "" && t.cwd != filepath.Dir(t.cwd):
+				t.cwd, t.sel, t.offset = filepath.Dir(t.cwd), 0, 0
+			}
+		case " ":
+			if e, ok := t.current(); ok && e.dir == "" {
+				t.marked[e.id()] = !t.marked[e.id()]
+				if !t.marked[e.id()] {
+					delete(t.marked, e.id())
+				}
+				t.sel = min(t.sel+1, len(t.entries())-1)
+			}
 		case "i":
-			t.issues = !t.issues
+			if t.fileInView() != "" {
+				t.issues = "file"
+			}
+		case "I":
+			t.issues = "all"
+		case "a":
+			return t.apply(m)
+		case "n":
+			return t.newService(m)
 		case "r":
 			return t.scan(m)
 		case "d":
 			m.ask("folders (space separated)", strings.Join(t.dirs, " "), func(v string) tea.Cmd {
 				t.dirs = strings.Fields(v)
-				t.sel, t.offset = 0, 0
+				t.sel, t.offset, t.cwd, t.file = 0, 0, "", ""
 				return t.scan(m)
 			})
 		case "J":
@@ -103,6 +311,120 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+func (t *manifestsTab) apply(m *model) tea.Cmd {
+	objs := t.targets()
+	if len(objs) == 0 {
+		return nil
+	}
+	ap, ok := m.app.Runtime().(applier)
+	if !ok {
+		m.setStatus("this environment's runtime ("+m.app.Env.Runtime.Type+") does not apply manifests", true)
+		return nil
+	}
+	label := fmt.Sprintf("apply %d objects", len(objs))
+	if len(objs) == 1 {
+		label = "apply " + objs[0].ID()
+	}
+	return m.act(label, true, func(ctx context.Context) error {
+		if err := ap.ApplyManifests(ctx, objs); err != nil {
+			return err
+		}
+		t.marked = map[string]bool{}
+		return nil
+	})
+}
+
+// newService appends a service for the selected workload to rig.yaml, asking its name, role and groups.
+func (t *manifestsTab) newService(m *model) tea.Cmd {
+	var w *manifest.Object
+	for _, o := range t.targets() {
+		if manifest.IsWorkload(o.Kind) {
+			w = o
+			break
+		}
+	}
+	if w == nil {
+		m.setStatus("select a workload (Deployment, StatefulSet, ...) to make it a service", true)
+		return nil
+	}
+	if _, taken := m.app.Spec.Services[w.Name]; taken {
+		m.setStatus(w.Name+" is already a service in "+filepath.Base(m.app.Spec.File), true)
+		return nil
+	}
+	m.ask("new service: name role(app|infra|load) groups,comma", w.Name+" app "+strings.ToLower(w.Kind), func(v string) tea.Cmd {
+		f := strings.Fields(v)
+		if len(f) < 2 || (f[1] != "app" && f[1] != "infra" && f[1] != "load") {
+			m.setStatus("write: name role [groups], role app, infra or load", true)
+			return nil
+		}
+		groups := ""
+		if len(f) > 2 {
+			groups = "[" + strings.Join(strings.Split(f[2], ","), ", ") + "]"
+		}
+		file, _ := filepath.Rel(m.app.Spec.Dir, abs(w.File))
+		img := ""
+		if tpl, ok := manifest.Template(w); ok && len(tpl.Spec.Containers) > 0 {
+			img = tpl.Spec.Containers[0].Image
+		}
+		if strings.Contains(img, "$") {
+			img = "" // the manifest fills it at deploy
+		}
+		if err := addService(m.app.Spec.File, f[0], f[1], groups, img, strings.ToLower(w.Kind)+"/"+w.Name, file); err != nil {
+			m.setStatus("rig.yaml: "+err.Error(), true)
+			return nil
+		}
+		m.setStatus(fmt.Sprintf("added service %s to %s; switch environment (E) or restart rig to use it", f[0], filepath.Base(m.app.Spec.File)), false)
+		return nil
+	})
+	return nil
+}
+
+// addService writes a service at the end of rig.yaml's services: block, keeping the file's comments.
+func addService(file, name, role, groups, image, workload, manifestFile string) error {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s:\n", name)
+	if role != "app" {
+		fmt.Fprintf(&b, "    role: %s\n", role)
+	}
+	if groups != "" {
+		fmt.Fprintf(&b, "    groups: %s\n", groups)
+	}
+	if image != "" {
+		fmt.Fprintf(&b, "    image: %q\n", image)
+	}
+	fmt.Fprintf(&b, "    k8s: { workload: %s, manifests: [%s] }\n", workload, manifestFile)
+	lines := strings.SplitAfter(string(raw), "\n")
+	in, at := false, -1
+	for i, l := range lines {
+		top := len(l) > 0 && l[0] != ' ' && l[0] != '#' && l[0] != '\n'
+		switch {
+		case strings.HasPrefix(l, "services:"):
+			in = true
+		case in && top:
+			at = i
+		}
+		if at >= 0 {
+			break
+		}
+	}
+	if !in {
+		return fmt.Errorf("no services: block")
+	}
+	if at < 0 {
+		at = len(lines)
+	}
+	// before the blank lines and comments that lead into the next block
+	for at > 0 && (strings.TrimSpace(lines[at-1]) == "" || strings.HasPrefix(strings.TrimSpace(lines[at-1]), "#")) {
+		at--
+	}
+	out := strings.Join(lines[:at], "") + b.String() + strings.Join(lines[at:], "")
+	return os.WriteFile(file, []byte(out), 0o644)
+}
+
 func (t *manifestsTab) view(m *model, w, h int) string {
 	if t.err != "" {
 		return panel("manifests", sRed.Render(t.err), w, h, true)
@@ -110,44 +432,86 @@ func (t *manifestsTab) view(m *model, w, h int) string {
 	if t.set == nil {
 		return panel("manifests", sDim.Render("scanning "+strings.Join(t.dirs, ", ")+"…"), w, h, true)
 	}
-	objs := t.visible()
 	counts := map[string]int{}
 	for _, i := range t.set.Issues {
 		counts[i.Level]++
 	}
 	summary := fmt.Sprintf("%d objects · %d files · ", len(t.set.Objects), len(t.set.Files())) +
 		sRed.Render(fmt.Sprintf("%d errors", counts["error"])) + " " + sAmber.Render(fmt.Sprintf("%d warnings", counts["warn"]))
-	if t.issues {
-		return panel("issues · "+summary, t.issueList(t.set.Issues, w-4), w, h, true)
+	switch t.issues {
+	case "all":
+		return panel("issues · "+summary+" · esc back", t.issueList(t.set.Issues, w-4), w, h, true)
+	case "file":
+		f := t.fileInView()
+		var mine []manifest.Issue
+		for _, i := range t.set.Issues {
+			if i.File == f || objFile(t.set, i.Object) == f {
+				mine = append(mine, i)
+			}
+		}
+		body := t.issueList(mine, w-4)
+		if len(mine) == 0 {
+			body = sGreen.Render("no issues in this file")
+		}
+		return panel(fmt.Sprintf("issues of %s · %d · I all · esc back", relTo(m.app.Spec.Dir, f), len(mine)), body, w, h, true)
 	}
 
-	lw := min(48, w*2/5)
-	var rows [][]string
+	lw := min(52, w*2/5)
 	issuesOf := map[string]int{}
 	for _, i := range t.set.Issues {
 		if i.Level != "info" {
 			issuesOf[i.Object]++
+			if i.Object == "" {
+				issuesOf["file:"+i.File]++
+			}
 		}
 	}
-	for _, o := range objs {
-		mark := ""
-		if n := issuesOf[o.ID()]; n > 0 {
-			mark = sAmber.Render(fmt.Sprintf("⚠%d", n))
+	es := t.entries()
+	var rows [][]string
+	for _, e := range es {
+		mark := "  "
+		if t.marked[e.id()] {
+			mark = sAccent.Render("▣ ")
 		}
-		rows = append(rows, []string{kindColor(o.Kind), o.Name, mark})
+		switch {
+		case e.obj != nil:
+			warn := ""
+			if n := issuesOf[e.obj.ID()]; n > 0 {
+				warn = sAmber.Render(fmt.Sprintf("⚠%d", n))
+			}
+			rows = append(rows, []string{mark + kindColor(e.obj.Kind), e.obj.Name, warn})
+		case e.dir != "":
+			rows = append(rows, []string{mark + sAccent.Render("▸ dir"), filepath.Base(e.dir) + "/", sDim.Render(fmt.Sprint(e.count))})
+		default:
+			rows = append(rows, []string{mark + sDim.Render("file"), filepath.Base(e.file), sDim.Render(fmt.Sprint(e.count))})
+		}
 	}
 	t.sel = min(t.sel, max(0, len(rows)-1))
 	t.offset = scroll(t.sel, t.offset, h-3, len(rows))
 	title := "objects"
+	if t.tree {
+		title = relTo(m.app.Spec.Dir, t.cwd) + "/"
+		if t.file != "" {
+			title = relTo(m.app.Spec.Dir, t.file)
+		}
+	}
 	if t.filter != "" {
 		title += " · " + t.filter
 	}
-	list := panel(title, table([]string{"KIND", "NAME", ""}, []int{14, lw - 24, 4}, rows, t.sel, t.offset, h-2), lw, h, true)
-	rw := w - lw
-	if len(objs) == 0 {
-		return lipgloss.JoinHorizontal(lipgloss.Top, list, panel(summary, sDim.Render("no objects"), rw, h, false))
+	if n := len(t.marked); n > 0 {
+		title += fmt.Sprintf(" · %d marked", n)
 	}
-	o := objs[t.sel]
+	list := panel(title, table([]string{"KIND", "NAME", ""}, []int{16, lw - 26, 4}, rows, t.sel, t.offset, h-2), lw, h, true)
+	rw := w - lw
+	e, ok := t.current()
+	if !ok || e.obj == nil {
+		help := "t: folders and files · enter opens a folder or a file · a applies the selected file (or marked ones)"
+		if !t.tree {
+			help = "no objects"
+		}
+		return lipgloss.JoinHorizontal(lipgloss.Top, list, panel(summary, sDim.Render(help), rw, h, false))
+	}
+	o := e.obj
 	graph := viz.RelationGraph(o.ID(), rels(t.set.In(o.ID()), true), rels(t.set.Out(o.ID()), false))
 	graphH := min(lipgloss.Height(graph)+3, h/2)
 	var mine []manifest.Issue
@@ -176,6 +540,23 @@ func (t *manifestsTab) view(m *model, w, h int) string {
 	}
 	parts = append(parts, yamlBox)
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func relTo(base, p string) string {
+	if r, err := filepath.Rel(base, abs(p)); err == nil && !strings.HasPrefix(r, "..") {
+		return r
+	}
+	return p
+}
+
+// objFile is the file an issue's object (Kind/name) lives in.
+func objFile(s *manifest.Set, id string) string {
+	for _, o := range s.Objects {
+		if o.ID() == id {
+			return o.File
+		}
+	}
+	return ""
 }
 
 func (t *manifestsTab) issueList(is []manifest.Issue, w int) string {

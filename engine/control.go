@@ -37,7 +37,7 @@ func (a *App) Owner(name string) (core.Runtime, *spec.Service, error) {
 		return nil, nil, fmt.Errorf("no service %q in %s", name, a.envName())
 	}
 	if !s.Shared {
-		return a.runtime, s, nil
+		return a.runtime, a.withEnv(s), nil
 	}
 	ia, err := a.InfraApp()
 	if err != nil {
@@ -315,4 +315,87 @@ func (a *App) RunQuery(ctx context.Context, comp, text string) (core.Table, erro
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	return q.RunQuery(ctx, text)
+}
+
+// ---- per-service env overrides (rig setenv, the Load screen), kept in the environment's state ----
+
+const envPrefix = "env."
+
+func (a *App) overrides() map[string]map[string]string {
+	a.envMu.Lock()
+	defer a.envMu.Unlock()
+	if a.envOverrides == nil {
+		a.envOverrides = map[string]map[string]string{}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		state, _ := a.LoadState(ctx)
+		for k, v := range state {
+			rest, ok := strings.CutPrefix(k, envPrefix)
+			if !ok {
+				continue
+			}
+			if svc, name, ok := strings.Cut(rest, "."); ok {
+				if a.envOverrides[svc] == nil {
+					a.envOverrides[svc] = map[string]string{}
+				}
+				a.envOverrides[svc][name] = v
+			}
+		}
+	}
+	return a.envOverrides
+}
+
+// withEnv is s with its env overrides on top, as a copy; s itself is the project's and stays as written.
+func (a *App) withEnv(s *spec.Service) *spec.Service {
+	o := a.overrides()[s.Name]
+	if len(o) == 0 {
+		return s
+	}
+	c := *s
+	c.Env = map[string]string{}
+	for k, v := range s.Env {
+		c.Env[k] = v
+	}
+	for k, v := range o {
+		c.Env[k] = v
+	}
+	return &c
+}
+
+// EnvOverrides are the variables SetEnv gave a service.
+func (a *App) EnvOverrides(name string) map[string]string { return a.overrides()[name] }
+
+// SetEnv sets (an empty value removes) environment variables of services in this environment's state,
+// so every later deploy keeps them, and redeploys the services that run so they take effect.
+func (a *App) SetEnv(ctx context.Context, names []string, kv map[string]string) error {
+	if err := a.Guard(); err != nil {
+		return err
+	}
+	st := map[string]string{}
+	for _, n := range names {
+		for k, v := range kv {
+			st[envPrefix+n+"."+k] = v
+		}
+	}
+	if err := a.SetState(ctx, st); err != nil {
+		return err
+	}
+	a.envMu.Lock()
+	a.envOverrides = nil
+	a.envMu.Unlock()
+	for _, n := range names {
+		st, err := a.Status(ctx, n)
+		if err != nil || st.Desired == 0 {
+			continue
+		}
+		rt, s, err := a.Owner(n)
+		if err == nil {
+			// same image and replica count, new env
+			err = rt.Deploy(ctx, s, core.Release{Replicas: st.Desired})
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", n, err)
+		}
+	}
+	return nil
 }

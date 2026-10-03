@@ -79,6 +79,12 @@ type model struct {
 	svcAt    time.Time
 	svcBusy  bool
 
+	alerts     []engine.Firing
+	alertErrs  []error
+	alertsAt   time.Time
+	alertsBusy bool
+	showAlerts bool
+
 	refreshed map[int]time.Time
 	sched     *scheduler
 
@@ -109,6 +115,11 @@ type (
 	servicesMsg struct {
 		gen int
 		sts []core.Status
+	}
+	alertsMsg struct {
+		gen    int
+		firing []engine.Firing
+		errs   []error
 	}
 	envMsg struct {
 		app *engine.App
@@ -247,6 +258,63 @@ func (m *model) fetchServices() tea.Cmd {
 	}
 }
 
+func (m *model) fetchAlerts() tea.Cmd {
+	m.alertsBusy = true
+	gen, a, ctx := m.gen, m.app, m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		f, errs := a.CheckAlerts(c)
+		return alertsMsg{gen: gen, firing: f, errs: errs}
+	}
+}
+
+// alertBadge is the header's summary of what is over its thresholds.
+func (m *model) alertBadge() string {
+	if len(m.alerts) == 0 {
+		return ""
+	}
+	top := m.alerts[0]
+	text := " ⚠ " + top.String()
+	if n := len(m.alerts) - 1; n > 0 {
+		text += fmt.Sprintf(" +%d", n)
+	}
+	text += " (A) "
+	bg := cAmber
+	if top.Level == engine.LevelCrit {
+		bg = cRed
+	}
+	return lipgloss.NewStyle().Background(bg).Foreground(lipgloss.Color("#000000")).Bold(true).Render(text)
+}
+
+func (m *model) alertsView() string {
+	var b strings.Builder
+	for _, f := range m.alerts {
+		st := sAmber
+		if f.Level == engine.LevelCrit {
+			st = sRed
+		}
+		b.WriteString(st.Render("⚠ "+f.String()) + "\n")
+	}
+	for _, e := range m.alertErrs {
+		b.WriteString(sDim.Render(e.Error()) + "\n")
+	}
+	if b.Len() == 0 {
+		b.WriteString(sGreen.Render("nothing over its thresholds") + "\n")
+	}
+	var rules []string
+	for _, r := range m.app.AlertRules() {
+		src := r.Source
+		if r.Metric != "" {
+			src += " " + r.Metric
+		}
+		rules = append(rules, fmt.Sprintf("%s: %s, warn %v crit %v%s", r.Name, src, r.Warn, r.Crit, r.Unit))
+	}
+	b.WriteString("\n" + sDim.Render("checked every 15s · rules (alerts: in rig.yaml):\n"+strings.Join(rules, "\n")))
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
+		Render(sTitle.Render("alerts") + "\n\n" + b.String())
+}
+
 // zone registers a clickable area of the tab body being rendered (body-relative cells).
 func (m *model) zone(id string, x, y, w, h int) {
 	m.zones = append(m.zones, zone{id: id, x: x, y: y + m.originY, w: w, h: h})
@@ -262,6 +330,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if time.Since(m.svcAt) >= 3*time.Second {
 			cmds = append(cmds, m.fetchServices())
 		}
+		if !m.alertsBusy && time.Since(m.alertsAt) >= 15*time.Second {
+			cmds = append(cmds, m.fetchAlerts())
+		}
 		every := 3 * time.Second
 		if iv, ok := m.tabs[m.active].(intervaler); ok {
 			every = iv.interval()
@@ -271,6 +342,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.tabs[m.active].refresh(m))
 		}
 		return m, batch(cmds...)
+	case alertsMsg:
+		if msg.gen == m.gen {
+			m.alerts, m.alertErrs = msg.firing, msg.errs
+		}
+		m.alertsAt, m.alertsBusy = time.Now(), false
+		return m, nil
 	case servicesMsg:
 		if msg.gen == m.gen {
 			m.services, m.svcAt, m.svcBusy = msg.sts, time.Now(), false
@@ -397,8 +474,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return m.picker.key(m, k)
 		}
 	}
-	if m.help {
-		m.help = false
+	if m.help || m.showAlerts {
+		m.help, m.showAlerts = false, false
 		return nil
 	}
 	t := m.tabs[m.active]
@@ -419,6 +496,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		case "?", "f1":
 			m.help = true
+			return nil
+		case "A":
+			m.showAlerts = true
 			return nil
 		case "E":
 			m.pickEnv()
@@ -494,6 +574,8 @@ func (m *model) View() string {
 	switch {
 	case m.help:
 		body = m.overlay(m.helpView(), bodyH)
+	case m.showAlerts:
+		body = m.overlay(m.alertsView(), bodyH)
 	case m.picker != nil:
 		body = m.picker.view(m, bodyH)
 	default:
@@ -513,6 +595,9 @@ func (m *model) header() string {
 		sDim.Render(" ("+a.Env.Runtime.Type+")")
 	if a.Env.Protected {
 		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
+	}
+	if b := m.alertBadge(); b != "" {
+		left += " " + b
 	}
 	up, bad := 0, 0
 	for _, s := range m.services {
@@ -590,7 +675,7 @@ func (m *model) helpView() string {
 	rows := [][2]string{
 		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

@@ -53,6 +53,9 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	return g, nil
 }
 
+func (g *Gen) ConfigKey() (string, string) { return g.opt.Store, g.opt.Key }
+func (g *Gen) Services() []string          { return g.opt.Services }
+
 func (g *Gen) store() (core.KV, error) {
 	v, err := g.env.Component(g.opt.Store)
 	if err != nil {
