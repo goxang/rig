@@ -236,27 +236,33 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 			})
 		})
 	case "b":
-		return m.act(label("build and deploy", names), true, func(ctx context.Context) error {
-			tag := time.Now().Format("20060102-150405")
-			err := each(names, func(n string) error {
-				rt, s, err := a.Owner(n)
-				if err != nil || s.Build == nil || !a.ImageBased() {
-					if err == nil {
-						err = rt.Deploy(ctx, s, core.Release{})
+		m.ask(label("build and deploy", names)+": image tag", a.DefaultTag(m.ctx, ""), func(tag string) tea.Cmd {
+			tag = strings.TrimSpace(tag)
+			if tag == "" {
+				return nil
+			}
+			return m.act(label("build and deploy", names)+tagNote(tag), true, func(ctx context.Context) error {
+				err := each(names, func(n string) error {
+					rt, s, err := a.Owner(n)
+					if err != nil || s.Build == nil || !a.ImageBased() {
+						if err == nil {
+							err = rt.Deploy(ctx, s, core.Release{})
+						}
+						return err
 					}
-					return err
-				}
-				img, err := a.Build(ctx, s, tag, nil)
+					img, err := a.Build(ctx, s, tag, nil)
+					if err != nil {
+						return err
+					}
+					return rt.Deploy(ctx, s, core.Release{Image: img})
+				})
 				if err != nil {
 					return err
 				}
-				return rt.Deploy(ctx, s, core.Release{Image: img})
+				return a.SetState(ctx, map[string]string{"tag": tag})
 			})
-			if err != nil {
-				return err
-			}
-			return a.SetState(ctx, map[string]string{"tag": tag})
 		})
+		return nil
 	case "l":
 		for i, tb := range m.tabs {
 			if lt, ok := tb.(*logsTab); ok {

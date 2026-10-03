@@ -188,3 +188,18 @@ func TestRenderRefusesUnresolvedImageAndEnv(t *testing.T) {
 		t.Fatalf("an image the patch replaces is not unresolved: %v", err)
 	}
 }
+
+func TestRenderExpandsEnvVars(t *testing.T) {
+	s := scanTestdata(t)
+	w := s.FindWorkload("api")
+	out, err := Render([]*Object{w}, w, RenderOptions{
+		Vars: func(k string) (string, bool) {
+			v, ok := map[string]string{"TAG": "v9", "REPLICAS": "1", "DB": "lt2"}[k]
+			return v, ok
+		},
+		Env: map[string]string{"CONN": "sqlserver://h?database=$DB"},
+	})
+	if err != nil || !strings.Contains(string(out), "database=lt2") {
+		t.Fatalf("err %v\n%s", err, out)
+	}
+}

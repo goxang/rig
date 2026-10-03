@@ -79,3 +79,28 @@ func imageExists(ctx context.Context, ref string) bool {
 	_, err = remote.Head(r, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	return err == nil
 }
+
+// DefaultTag names a build: the branch (or ref) when it is short enough to read, then the time,
+// e.g. feature-x-20261003-1907; a plain timestamp outside git or for long branch names.
+func (a *App) DefaultTag(ctx context.Context, ref string) string {
+	stamp := time.Now().Format("20060102-1504")
+	name := ref
+	if name == "" {
+		c := sh.New("git", "rev-parse", "--abbrev-ref", "HEAD")
+		c.Dir = a.Spec.Dir
+		out, _ := c.Output(ctx)
+		name = strings.TrimSpace(string(out))
+	}
+	name = strings.TrimPrefix(name, "origin/")
+	name = strings.Trim(strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		}
+		return '-'
+	}, name), "-.")
+	if name == "" || name == "HEAD" || len(name) > 24 {
+		return time.Now().Format("20060102-150405")
+	}
+	return name + "-" + stamp
+}

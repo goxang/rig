@@ -120,7 +120,8 @@ func Run(ctx context.Context, a *engine.App) error {
 	}
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}}
 	m.sched = newScheduler(a)
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx)).Run()
+	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	_, err := program.Run()
 	if err == tea.ErrProgramKilled {
 		return nil
 	}
@@ -128,7 +129,23 @@ func Run(ctx context.Context, a *engine.App) error {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(m.openTab(0), m.fetchServices(), tick())
+	return batch(m.openTab(0), m.fetchServices(), tick())
+}
+
+var program *tea.Program
+
+// batch runs cmds concurrently. tea.Batch must not be used: bubbletea 1.3.7 runs a batch's commands
+// inside its event loop, so a Tick or a kubectl call in one froze the keys for seconds (fixed in 1.3.10,
+// which needs Go 1.24).
+func batch(cmds ...tea.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		for _, c := range cmds {
+			if c != nil {
+				go func() { program.Send(c()) }()
+			}
+		}
+		return nil
+	}
 }
 
 func tick() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
@@ -237,7 +254,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshed[m.active] = time.Now()
 			cmds = append(cmds, m.tabs[m.active].refresh(m))
 		}
-		return m, tea.Batch(cmds...)
+		return m, batch(cmds...)
 	case servicesMsg:
 		if msg.gen == m.gen {
 			m.services, m.svcAt, m.svcBusy = msg.sts, time.Now(), false
@@ -264,7 +281,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tabs = newTabs()
 		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
-		return m, tea.Batch(m.openTab(m.active), m.fetchServices())
+		return m, batch(m.openTab(m.active), m.fetchServices())
 	case tea.KeyMsg:
 		return m, m.key(msg)
 	case tea.MouseMsg:
@@ -275,7 +292,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	for _, t := range m.tabs {
 		cmds = append(cmds, t.update(m, msg))
 	}
-	return m, tea.Batch(cmds...)
+	return m, batch(cmds...)
 }
 
 func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
@@ -357,7 +374,12 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 	if m.picker != nil {
-		return m.picker.key(m, k)
+		switch k.String() {
+		case "tab", "shift+tab":
+			m.picker = nil
+		default:
+			return m.picker.key(m, k)
+		}
 	}
 	if m.help {
 		m.help = false

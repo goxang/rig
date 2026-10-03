@@ -4,7 +4,9 @@ package redis
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -140,6 +142,33 @@ func (r *Cache) Info(ctx context.Context) (map[string]string, error) {
 }
 
 func (r *Cache) QueryLanguage() string { return "redis" }
+
+func (r *Cache) Actions() []core.Action {
+	return []core.Action{{Name: "flushdb", Mutate: true, Help: "empty databases: flushdb <db>... (default: the component's)", Run: func(ctx context.Context, args []string, out io.Writer) error {
+		if len(args) == 0 {
+			args = []string{strconv.Itoa(r.opt.DB)}
+		}
+		addr, err := r.env.Resolve(ctx, r.opt.Addr)
+		if err != nil {
+			return err
+		}
+		for _, a := range args {
+			db, err := strconv.Atoi(a)
+			if err != nil {
+				return fmt.Errorf("flushdb: %q is not a database number", a)
+			}
+			c := goredis.NewClient(&goredis.Options{Addr: strings.TrimPrefix(addr, "redis://"), Password: r.opt.Password, DB: db})
+			n, _ := c.DBSize(ctx).Result()
+			err = c.FlushDB(ctx).Err()
+			c.Close()
+			if err != nil {
+				return fmt.Errorf("db %d: %w", db, err)
+			}
+			fmt.Fprintf(out, "flushed db %d (%d keys)\n", db, n)
+		}
+		return nil
+	}}}
+}
 
 func (r *Cache) RunQuery(ctx context.Context, q string) (core.Table, error) {
 	args, err := splitArgs(q)

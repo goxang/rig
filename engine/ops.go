@@ -92,7 +92,7 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 		return a.infraLike(n)
 	}
 	if o.Tag == "" && o.Build {
-		o.Tag = time.Now().Format("20060102-150405")
+		o.Tag = a.DefaultTag(ctx, o.Ref)
 	}
 	if o.Wait == 0 {
 		o.Wait = 3 * time.Minute
