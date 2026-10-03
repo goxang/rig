@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -28,20 +29,36 @@ func (l *Logs) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, 
 	}
 	out := make(chan core.LogLine, 512)
 	var wg sync.WaitGroup
+	var errs []error
 	for _, n := range names {
-		s, ok := p.Services[n]
-		if !ok {
-			continue
+		rt, s, err := l.env.Owner(n)
+		if err == nil {
+			var ch <-chan core.LogLine
+			if ch, err = rt.Logs(ctx, s, core.LogOptions{Follow: q.Follow, Tail: q.Tail, Since: q.Since, Instance: q.Instance}); err == nil {
+				l.pump(ctx, &wg, ch, q.Match, out)
+				continue
+			}
 		}
-		ch, err := l.env.Runtime().Logs(ctx, s, core.LogOptions{Follow: q.Follow, Tail: q.Tail, Since: q.Since})
-		if err != nil {
-			continue // one service without logs must not hide the others
-		}
+		// one service without logs must not hide the others
+		errs = append(errs, err)
+	}
+	if len(errs) == len(names) && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+	return out, nil
+}
+
+func (l *Logs) pump(ctx context.Context, wg *sync.WaitGroup, ch <-chan core.LogLine, match string, out chan<- core.LogLine) {
+	{
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for line := range ch {
-				if q.Match != "" && !strings.Contains(line.Text, q.Match) {
+				if match != "" && !strings.Contains(line.Text, match) {
 					continue
 				}
 				select {
@@ -52,9 +69,4 @@ func (l *Logs) Logs(ctx context.Context, q core.LogQuery) (<-chan core.LogLine, 
 			}
 		}()
 	}
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out, nil
 }

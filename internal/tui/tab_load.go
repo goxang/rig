@@ -57,7 +57,7 @@ type loadMsg struct {
 func (t *loadTab) name() string { return "Load" }
 func (t *loadTab) typing() bool { return false }
 func (t *loadTab) hints() [][2]string {
-	return [][2]string{{"space", "start/stop"}, {"+/-", "step"}, {"r", "set rate"}}
+	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"}}
 }
 
 func (t *loadTab) open(m *model) tea.Cmd {
@@ -123,9 +123,40 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 		switch msg.String() {
 		case " ", "enter":
 			if t.stats[n].Running {
-				return m.mutate("stop "+n, g.Stop)
+				return m.act("stop "+n, false, g.Stop)
 			}
-			return m.mutate("start "+n, g.Start)
+			return m.act("start "+n, false, g.Start)
+		case "[", "]":
+			ls, ok := g.(core.LoadScaler)
+			if !ok {
+				m.setStatus(n+" does not run as instances", true)
+				return nil
+			}
+			d := 1
+			if msg.String() == "[" {
+				d = -1
+			}
+			return m.act(fmt.Sprintf("%s instances %+d", n, d), false, func(ctx context.Context) error {
+				cur, err := ls.Replicas(ctx)
+				if err != nil {
+					return err
+				}
+				return ls.SetReplicas(ctx, max(cur+d, 0))
+			})
+		case "R":
+			ls, ok := g.(core.LoadScaler)
+			if !ok {
+				m.setStatus(n+" does not run as instances", true)
+				return nil
+			}
+			m.ask("instances of "+n, t.stats[n].Extra["replicas"], func(v string) tea.Cmd {
+				k, err := strconv.Atoi(strings.TrimSpace(v))
+				if err != nil {
+					m.setStatus("instances: "+err.Error(), true)
+					return nil
+				}
+				return m.act(fmt.Sprintf("%s to %d instances", n, k), false, func(ctx context.Context) error { return ls.SetReplicas(ctx, k) })
+			})
 		case "+", "=":
 			return m.do("raise "+n, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, 1); return err })
 		case "-":
@@ -137,7 +168,7 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 					m.setStatus("rate: "+err.Error(), true)
 					return nil
 				}
-				return m.mutate(fmt.Sprintf("set %s to %s/s", n, v), func(ctx context.Context) error { return a.SetRate(ctx, n, r, false) })
+				return m.act(fmt.Sprintf("set %s to %s/s", n, v), false, func(ctx context.Context) error { return a.SetRate(ctx, n, r, false) })
 			})
 		}
 	}

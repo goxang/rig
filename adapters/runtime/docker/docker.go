@@ -42,6 +42,12 @@ type Section struct {
 	Publish   map[string]int    `yaml:"publish"` // service port name -> host port
 	ExtraArgs []string          `yaml:"extra_args"`
 	Labels    map[string]string `yaml:"labels"`
+	// Container adopts an existing container by name (one made by docker compose, say): rig starts
+	// and stops it but never removes or recreates it.
+	Container string `yaml:"container"`
+	// Bind is the host address published ports listen on (default 127.0.0.1; 0.0.0.0 lets a kind
+	// cluster reach a shared service).
+	Bind string `yaml:"bind"`
 }
 
 type Runtime struct {
@@ -50,6 +56,14 @@ type Runtime struct {
 	opt     Options
 	env     core.Env
 	project string
+
+	fwdMu sync.Mutex
+	fwd   map[string]cachedAddr
+}
+
+type cachedAddr struct {
+	addr string
+	at   time.Time
 }
 
 func New(env core.Env, c *spec.Component) (any, error) {
@@ -95,7 +109,11 @@ type container struct {
 }
 
 func (r *Runtime) containers(ctx context.Context, filter ...string) ([]container, error) {
-	args := []string{"ps", "-a", "--no-trunc", "--format", "{{json .}}", "--filter", "label=rig.project=" + r.project}
+	return r.list(ctx, append([]string{"label=rig.project=" + r.project}, filter...)...)
+}
+
+func (r *Runtime) list(ctx context.Context, filter ...string) ([]container, error) {
+	args := []string{"ps", "-a", "--no-trunc", "--format", "{{json .}}"}
 	for _, f := range filter {
 		args = append(args, "--filter", f)
 	}
@@ -112,7 +130,7 @@ func (r *Runtime) containers(ctx context.Context, filter ...string) ([]container
 		if json.Unmarshal(sc.Bytes(), &raw) != nil {
 			continue
 		}
-		c := container{ID: raw.ID, Name: raw.Names, State: raw.State, Status: raw.Status, Image: raw.Image, Labels: map[string]string{}}
+		c := container{ID: raw.ID, Name: strings.Split(raw.Names, ",")[0], State: raw.State, Status: raw.Status, Image: raw.Image, Labels: map[string]string{}}
 		for _, kv := range strings.Split(raw.Labels, ",") {
 			k, v, _ := strings.Cut(kv, "=")
 			c.Labels[k] = v
@@ -125,7 +143,60 @@ func (r *Runtime) containers(ctx context.Context, filter ...string) ([]container
 }
 
 func (r *Runtime) of(ctx context.Context, s *spec.Service) ([]container, error) {
+	if name := r.section(s).Container; name != "" {
+		return r.list(ctx, "name=^/"+name+"$")
+	}
 	return r.containers(ctx, "label=rig.service="+s.Name)
+}
+
+// StatusAll lists this machine's containers once and answers for every service from that list.
+func (r *Runtime) StatusAll(ctx context.Context, svcs []*spec.Service) ([]core.Status, error) {
+	cs, err := r.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.Status, len(svcs))
+	var wg sync.WaitGroup
+	for i, s := range svcs {
+		adopt := r.section(s).Container
+		var mine []container
+		for _, c := range cs {
+			if adopt != "" && c.Name == adopt || adopt == "" && c.Labels["rig.project"] == r.project && c.Labels["rig.service"] == s.Name {
+				mine = append(mine, c)
+			}
+		}
+		out[i] = status(s.Name, mine)
+		if out[i].State == core.StateRunning && s.Health != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if !r.healthy(ctx, s) {
+					out[i].State, out[i].Ready = core.StateStarting, 0
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	return out, nil
+}
+
+// adopted starts an adopted container and puts it on the project network under the service's name.
+func (r *Runtime) adopted(ctx context.Context, s *spec.Service, cs []container) error {
+	if err := r.network(ctx); err != nil {
+		return err
+	}
+	for _, c := range cs {
+		if c.State != "running" {
+			if err := sh.New("docker", "start", c.ID).Run(ctx); err != nil {
+				return err
+			}
+		}
+		err := sh.New("docker", "network", "connect", "--alias", s.Name, r.opt.Network, c.ID).Run(ctx)
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) Discover(ctx context.Context) ([]core.Workload, error) {
@@ -231,7 +302,13 @@ func (r *Runtime) Deploy(ctx context.Context, s *spec.Service, rel core.Release)
 	if err != nil {
 		return err
 	}
-	n := max(rel.Replicas, s.Replicas, 1)
+	if r.section(s).Container != "" && len(cs) > 0 {
+		return r.adopted(ctx, s, cs)
+	}
+	n := s.CountOr(1)
+	if rel.Replicas > 0 {
+		n = rel.Replicas
+	}
 	if r.current(cs, img, n) && len(rel.Env) == 0 {
 		return nil
 	}
@@ -276,7 +353,11 @@ func (r *Runtime) network(ctx context.Context) error {
 
 func (r *Runtime) run(ctx context.Context, s *spec.Service, img string, i int, extra map[string]string) error {
 	sec := r.section(s)
-	args := []string{"run", "-d", "--name", r.name(s.Name, i), "--network", r.opt.Network, "--network-alias", s.Name,
+	cname := r.name(s.Name, i)
+	if sec.Container != "" {
+		cname = sec.Container
+	}
+	args := []string{"run", "-d", "--name", cname, "--network", r.opt.Network, "--network-alias", s.Name,
 		"--label", "rig.project=" + r.project, "--label", "rig.service=" + s.Name, "--restart", "unless-stopped"}
 	if e := r.env.Environment(); e != nil {
 		args = append(args, "--label", "rig.env="+e.Name)
@@ -300,7 +381,11 @@ func (r *Runtime) run(ctx context.Context, s *spec.Service, img string, i int, e
 			if h, ok := sec.Publish[name]; ok {
 				host = strconv.Itoa(h)
 			}
-			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%s:%d", host, p))
+			bind := sec.Bind
+			if bind == "" {
+				bind = "127.0.0.1"
+			}
+			args = append(args, "-p", fmt.Sprintf("%s:%s:%d", bind, host, p))
 		}
 	}
 	for _, v := range sec.Volumes {
@@ -325,6 +410,9 @@ func (r *Runtime) Start(ctx context.Context, s *spec.Service) error {
 	}
 	if len(cs) == 0 {
 		return r.Deploy(ctx, s, core.Release{})
+	}
+	if r.section(s).Container != "" {
+		return r.adopted(ctx, s, cs)
 	}
 	for _, c := range cs {
 		if c.State != "running" {
@@ -361,6 +449,12 @@ func (r *Runtime) Scale(ctx context.Context, s *spec.Service, n int) error {
 	}
 	if n == 0 {
 		return r.Stop(ctx, s)
+	}
+	if r.section(s).Container != "" {
+		if n > 1 {
+			return fmt.Errorf("%s is an adopted container: %w", s.Name, core.ErrUnsupported)
+		}
+		return r.Start(ctx, s)
 	}
 	if len(cs) == 0 {
 		return r.Deploy(ctx, s, core.Release{Replicas: n})
@@ -431,6 +525,9 @@ func (r *Runtime) Exec(ctx context.Context, s *spec.Service, o core.ExecOptions)
 	name := o.Instance
 	if name == "" {
 		name = r.name(s.Name, 1)
+		if c := r.section(s).Container; c != "" {
+			name = c
+		}
 	}
 	args := []string{"exec", "-i"}
 	if o.TTY {
@@ -439,12 +536,35 @@ func (r *Runtime) Exec(ctx context.Context, s *spec.Service, o core.ExecOptions)
 	return sh.New("docker", append(append(args, name), o.Command...)...).Attach(ctx, o.Stdin, o.Stdout, o.Stderr)
 }
 
-// Forward returns the published port, or else the container's address on its network.
+// Forward returns the published port, or else the container's address on its network; answers are
+// cached briefly since health checks ask on every status.
 func (r *Runtime) Forward(ctx context.Context, t core.Target) (string, error) {
+	key := fmt.Sprintf("%s/%s:%d", t.Service, t.Instance, t.Port)
+	r.fwdMu.Lock()
+	if c, ok := r.fwd[key]; ok && time.Since(c.at) < 20*time.Second {
+		r.fwdMu.Unlock()
+		return c.addr, nil
+	}
+	r.fwdMu.Unlock()
+	addr, err := r.forward(ctx, t)
+	if err == nil {
+		r.fwdMu.Lock()
+		if r.fwd == nil {
+			r.fwd = map[string]cachedAddr{}
+		}
+		r.fwd[key] = cachedAddr{addr: addr, at: time.Now()}
+		r.fwdMu.Unlock()
+	}
+	return addr, err
+}
+
+func (r *Runtime) forward(ctx context.Context, t core.Target) (string, error) {
 	name := t.Instance
 	if name == "" {
 		name = r.name(t.Service, 1)
-		if sh.New("docker", "inspect", name).Run(ctx) != nil {
+		if s, ok := r.env.Project().Services[t.Service]; ok && r.section(s).Container != "" {
+			name = r.section(s).Container
+		} else if sh.New("docker", "inspect", name).Run(ctx) != nil {
 			name = t.Service
 		}
 	}

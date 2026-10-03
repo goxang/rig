@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +173,18 @@ func TestRender(t *testing.T) {
 	out, _ = Render([]*Object{w}, w, RenderOptions{Vars: func(k string) (string, bool) { return map[string]string{"TAG": "v9", "REPLICAS": "2"}[k], true }})
 	if !strings.Contains(string(out), "replicas: 2\n") || !strings.Contains(string(out), "api:v9") {
 		t.Errorf("vars not substituted (or replicas left a string):\n%s", out)
+	}
+}
+
+func TestRenderRefusesUnresolvedImageAndEnv(t *testing.T) {
+	s := scanTestdata(t)
+	w := s.FindWorkload("api")
+	_, err := Render([]*Object{w}, w, RenderOptions{Vars: func(string) (string, bool) { return "", false }})
+	var ue *UnresolvedError
+	if !errors.As(err, &ue) || len(ue.Names) == 0 {
+		t.Fatalf("unresolved $TAG in the image must fail the render, got %v", err)
+	}
+	if _, err := Render([]*Object{w}, w, RenderOptions{Vars: func(string) (string, bool) { return "", false }, Image: "x:1"}); err != nil && strings.Contains(err.Error(), "TAG") {
+		t.Fatalf("an image the patch replaces is not unresolved: %v", err)
 	}
 }

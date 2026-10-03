@@ -34,6 +34,9 @@ func New(env core.Env, c *spec.Component) (any, error) {
 func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOptions) (string, error) {
 	ref := core.ImageRef(s, o.Registry, o.Tag)
 	dir := b.env.Project().Dir
+	if o.Dir != "" {
+		dir = o.Dir
+	}
 	bctx := filepath.Join(dir, s.Build.Context)
 	if s.Build.Context == "" {
 		bctx = filepath.Join(dir, filepath.Dir(s.Build.Dockerfile))

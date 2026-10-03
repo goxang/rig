@@ -124,8 +124,9 @@ type metricsTab struct {
 	loaded string
 }
 
-func (t *metricsTab) name() string { return "Metrics" }
-func (t *metricsTab) typing() bool { return false }
+func (t *metricsTab) name() string            { return "Metrics" }
+func (t *metricsTab) interval() time.Duration { return 10 * time.Second }
+func (t *metricsTab) typing() bool            { return false }
 func (t *metricsTab) hints() [][2]string {
 	return [][2]string{{"←→↑↓", "focus"}, {"z", "zoom"}, {"t", "range"}, {"[ ]", "dashboard"}, {"a", "add query"}, {"e", "edit"}, {"x", "remove"}}
 }

@@ -24,6 +24,7 @@ func New(name string, args ...string) *Cmd { return &Cmd{Name: name, Args: args}
 
 func (c *Cmd) cmd(ctx context.Context) *exec.Cmd {
 	x := exec.CommandContext(ctx, c.Name, c.Args...)
+	TiedToParent(x)
 	x.Dir = c.Dir
 	if len(c.Env) > 0 {
 		x.Env = append(os.Environ(), c.Env...)

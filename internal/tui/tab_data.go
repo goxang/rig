@@ -15,20 +15,18 @@ import (
 	"github.com/goxang/rig/internal/viz"
 )
 
-// dataTab shows every data component at once: databases, queues (with depth history), caches, kv.
+// dataTab shows queues (depth trend, consumers, rates), caches and databases. Queues and caches
+// refresh every 5s while showing; the database list is read once.
 type dataTab struct {
+	queues *grid
 	snap   dataSnap
+	dbs    map[string][]string
 	depth  map[string][]float64
-	focus  int
-	sel    int
-	offset int
 }
 
 type dataSnap struct {
-	dbs    map[string][]string
 	queues map[string][]core.Queue
 	caches map[string]map[string]string
-	kvs    map[string][]string
 	errs   map[string]error
 }
 
@@ -37,15 +35,44 @@ type dataMsg struct {
 	snap dataSnap
 }
 
+type dbsMsg struct {
+	gen int
+	dbs map[string][]string
+}
+
 func (t *dataTab) name() string { return "Data" }
 func (t *dataTab) typing() bool { return false }
 func (t *dataTab) hints() [][2]string {
-	return [][2]string{{"←→", "panel"}, {"↑↓", "select"}, {"P", "purge queue"}}
+	return [][2]string{{"↑↓", "queue"}, {"P", "purge queue"}, {"< >", "sort"}, {"D", "reload databases"}}
 }
+func (t *dataTab) interval() time.Duration { return 5 * time.Second }
 
 func (t *dataTab) open(m *model) tea.Cmd {
 	t.depth = map[string][]float64{}
-	return t.refresh(m)
+	t.queues = newGrid("queues", col("QUEUE", 0), col("SOURCE", 10), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
+	t.queues.sortBy, t.queues.desc = 2, true
+	return tea.Batch(t.refresh(m), t.loadDBs(m))
+}
+
+func (t *dataTab) loadDBs(m *model) tea.Cmd {
+	a, gen, ctx := m.app, m.gen, m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		out := map[string][]string{}
+		dbs, errs := engine.All[core.Database](a, core.KindDatabase)
+		for n, d := range dbs {
+			names, err := d.Databases(c)
+			if err != nil {
+				names = []string{"✖ " + err.Error()}
+			}
+			out[n] = names
+		}
+		for n, err := range errs {
+			out[n] = []string{"✖ " + err.Error()}
+		}
+		return dbsMsg{gen: gen, dbs: out}
+	}
 }
 
 func (t *dataTab) refresh(m *model) tea.Cmd {
@@ -53,28 +80,24 @@ func (t *dataTab) refresh(m *model) tea.Cmd {
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
-		s := dataSnap{dbs: map[string][]string{}, queues: map[string][]core.Queue{}, caches: map[string]map[string]string{}, kvs: map[string][]string{}, errs: map[string]error{}}
-		dbs, errs := engine.All[core.Database](a, core.KindDatabase)
-		for n, d := range dbs {
-			s.dbs[n], errs[n] = d.Databases(c)
-		}
-		qs, e2 := engine.All[core.Messaging](a, core.KindMessaging)
+		s := dataSnap{queues: map[string][]core.Queue{}, caches: map[string]map[string]string{}, errs: map[string]error{}}
+		qs, e1 := engine.All[core.Messaging](a, core.KindMessaging)
 		for n, q := range qs {
-			s.queues[n], e2[n] = q.Queues(c)
+			var err error
+			if s.queues[n], err = q.Queues(c); err != nil {
+				e1[n] = err
+			}
 		}
-		cs, e3 := engine.All[core.Cache](a, core.KindCache)
+		cs, e2 := engine.All[core.Cache](a, core.KindCache)
 		for n, x := range cs {
-			s.caches[n], e3[n] = x.Info(c)
+			var err error
+			if s.caches[n], err = x.Info(c); err != nil {
+				e2[n] = err
+			}
 		}
-		kvs, e4 := engine.All[core.KV](a, core.KindKV)
-		for n, k := range kvs {
-			s.kvs[n], e4[n] = k.List(c, "")
-		}
-		for _, m := range []map[string]error{errs, e2, e3, e4} {
+		for _, m := range []map[string]error{e1, e2} {
 			for k, v := range m {
-				if v != nil {
-					s.errs[k] = v
-				}
+				s.errs[k] = v
 			}
 		}
 		return dataMsg{gen: gen, snap: s}
@@ -88,130 +111,81 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		t.snap = msg.snap
+		var rows []grow
 		for comp, qs := range msg.snap.queues {
 			for _, q := range qs {
 				k := comp + "/" + q.Name
-				h := append(t.depth[k], float64(q.Messages))
-				if len(h) > 60 {
-					h = h[len(h)-60:]
+				t.depth[k] = last(append(t.depth[k], float64(q.Messages)), 60)
+				depth := strconv.Itoa(q.Messages)
+				if q.Messages > 0 {
+					depth = sAmber.Render(depth)
 				}
-				t.depth[k] = h
+				cons := strconv.Itoa(q.Consumers)
+				if q.Consumers == 0 {
+					cons = sRed.Render("0")
+				}
+				rows = append(rows, grow{id: k, cells: []string{q.Name, sDim.Render(comp), depth, viz.Sparkline(t.depth[k], 16, viz.Palette[1]), strconv.Itoa(q.Unacked), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")},
+					keys: []any{q.Name, comp, float64(q.Messages), float64(q.Messages), float64(q.Unacked), float64(q.Consumers), q.InRate, q.OutRate}})
 			}
 		}
+		t.queues.set(rows)
+	case dbsMsg:
+		if msg.gen == m.gen {
+			t.dbs = msg.dbs
+		}
 	case tea.KeyMsg:
+		if t.queues.key(msg) {
+			return nil
+		}
 		switch msg.String() {
-		case "left", "h":
-			t.focus = max(0, t.focus-1)
-			t.sel, t.offset = 0, 0
-		case "right", "l":
-			t.focus = min(3, t.focus+1)
-			t.sel, t.offset = 0, 0
+		case "D":
+			return t.loadDBs(m)
 		case "P":
-			comp, q, ok := t.selectedQueue()
+			r, ok := t.queues.current()
 			if !ok {
 				return nil
 			}
+			comp, q, _ := strings.Cut(r.id, "/")
 			a := m.app
-			return m.mutate("purge "+q, func(ctx context.Context) error {
+			return m.act("purge queue "+q, true, func(ctx context.Context) error {
 				mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
 				if err != nil {
 					return err
 				}
 				return mq.Purge(ctx, q)
 			})
-		default:
-			listKeys(msg, &t.sel, t.count())
 		}
 	}
 	return nil
 }
 
-func (t *dataTab) queueRows() [][2]string {
-	var out [][2]string
-	for _, comp := range engine.SortedKeys(t.snap.queues) {
-		for _, q := range t.snap.queues[comp] {
-			out = append(out, [2]string{comp, q.Name})
-		}
-	}
-	return out
-}
-
-func (t *dataTab) selectedQueue() (string, string, bool) {
-	if t.focus != 1 {
-		return "", "", false
-	}
-	rows := t.queueRows()
-	if t.sel >= len(rows) {
-		return "", "", false
-	}
-	return rows[t.sel][0], rows[t.sel][1], true
-}
-
-func (t *dataTab) count() int {
-	switch t.focus {
-	case 0:
-		n := 0
-		for _, d := range t.snap.dbs {
-			n += len(d)
-		}
-		return n
-	case 1:
-		return len(t.queueRows())
-	case 3:
-		n := 0
-		for _, k := range t.snap.kvs {
-			n += len(k)
-		}
-		return n
-	}
-	return 0
+func (t *dataTab) click(m *model, h hit) tea.Cmd {
+	t.queues.click(h)
+	return nil
 }
 
 func (t *dataTab) view(m *model, w, h int) string {
-	if len(t.snap.dbs)+len(t.snap.queues)+len(t.snap.caches)+len(t.snap.kvs)+len(t.snap.errs) == 0 {
-		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, sDim.Render("no database, messaging, cache or kv components in this environment"))
+	if len(t.snap.queues)+len(t.snap.caches)+len(t.snap.errs)+len(t.dbs) == 0 {
+		return panel("data", sDim.Render("no database, messaging or cache components in this environment (or still loading)"), w, h, true)
 	}
-	topH := h / 2
-	lw := w / 3
-
-	// databases
-	var dbRows [][]string
-	for _, comp := range engine.SortedKeys(t.snap.dbs) {
-		for _, d := range t.snap.dbs[comp] {
-			dbRows = append(dbRows, []string{comp, d})
-		}
+	topH := h * 3 / 5
+	var errs strings.Builder
+	for _, n := range engine.SortedKeys(t.snap.errs) {
+		errs.WriteString(sRed.Render(n+": "+t.snap.errs[n].Error()) + "\n")
 	}
-	dbBody := t.errLines("db", t.snap.dbs) + table([]string{"COMPONENT", "DATABASE"}, []int{12, lw - 17}, dbRows, t.selIf(0), t.offIf(0, topH-3, len(dbRows)), topH-2)
-
-	// queues with depth sparkline
-	qw := w - lw
-	var qRows [][]string
-	for _, r := range t.queueRows() {
-		var q core.Queue
-		for _, x := range t.snap.queues[r[0]] {
-			if x.Name == r[1] {
-				q = x
-			}
-		}
-		depth := strconv.Itoa(q.Messages)
-		if q.Messages > 0 {
-			depth = sAmber.Render(depth)
-		}
-		cons := strconv.Itoa(q.Consumers)
-		if q.Consumers == 0 {
-			cons = sRed.Render("0")
-		}
-		qRows = append(qRows, []string{q.Name, depth, viz.Sparkline(t.depth[r[0]+"/"+r[1]], 16, viz.Palette[1]), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")})
+	eh := lipgloss.Height(strings.TrimRight(errs.String(), "\n"))
+	if errs.Len() == 0 {
+		eh = 0
 	}
-	queueBody := t.errLines("queue", t.snap.queues) + table([]string{"QUEUE", "DEPTH", "TREND", "CONS", "IN", "OUT"},
-		[]int{max(10, qw-4-8-16-5-8-8-6), 8, 16, 5, 8, 8}, qRows, t.selIf(1), t.offIf(1, topH-3, len(qRows)), topH-2)
+	qbody := errs.String() + t.queues.view(m, 1, 1+eh, w-2, topH-2-eh, true)
+	queues := panel(fmt.Sprintf("queues · %d", len(t.queues.rows)), qbody, w, topH, true)
 
-	// caches
+	lw := w / 2
 	var cb strings.Builder
 	for _, comp := range engine.SortedKeys(t.snap.caches) {
 		info := t.snap.caches[comp]
 		cb.WriteString(sTitle.Render(comp) + "\n")
-		for _, k := range []string{"redis_version", "used_memory_human", "connected_clients", "instantaneous_ops_per_sec", "keyspace_hits", "keyspace_misses", "db0"} {
+		for _, k := range []string{"redis_version", "used_memory_human", "connected_clients", "instantaneous_ops_per_sec", "db0"} {
 			if v, ok := info[k]; ok {
 				cb.WriteString(sDim.Render(padRight(k, 28)) + v + "\n")
 			}
@@ -219,56 +193,16 @@ func (t *dataTab) view(m *model, w, h int) string {
 		if hits, _ := strconv.ParseFloat(info["keyspace_hits"], 64); hits > 0 {
 			miss, _ := strconv.ParseFloat(info["keyspace_misses"], 64)
 			ratio := hits / (hits + miss)
-			cb.WriteString(sDim.Render(padRight("hit ratio", 28)) + viz.Gauge(ratio, 20) + fmt.Sprintf(" %.1f%%", ratio*100) + "\n")
+			cb.WriteString(sDim.Render(padRight("hit ratio", 28)) + viz.Gauge(ratio, 16) + fmt.Sprintf(" %.1f%%", ratio*100) + "\n")
 		}
 	}
-	cacheBody := t.errLines("cache", t.snap.caches) + cb.String()
-
-	// kv
-	var kvRows [][]string
-	for _, comp := range engine.SortedKeys(t.snap.kvs) {
-		for _, k := range t.snap.kvs[comp] {
-			kvRows = append(kvRows, []string{comp, k})
-		}
+	var db strings.Builder
+	for _, comp := range engine.SortedKeys(t.dbs) {
+		db.WriteString(sTitle.Render(comp) + sDim.Render("  "+strings.Join(t.dbs[comp], " · ")) + "\n")
 	}
-	kvBody := t.errLines("kv", t.snap.kvs) + table([]string{"COMPONENT", "KEY"}, []int{12, w - lw - 17}, kvRows, t.selIf(3), t.offIf(3, h-topH-3, len(kvRows)), h-topH-2)
-
-	top := lipgloss.JoinHorizontal(lipgloss.Top, panel("databases", dbBody, lw, topH, t.focus == 0), panel("queues", queueBody, w-lw, topH, t.focus == 1))
-	bottom := lipgloss.JoinHorizontal(lipgloss.Top, panel("caches", cacheBody, lw, h-topH, t.focus == 2), panel("key-value", kvBody, w-lw, h-topH, t.focus == 3))
-	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
-}
-
-func (t *dataTab) selIf(f int) int {
-	if t.focus == f {
-		return t.sel
+	if db.Len() == 0 {
+		db.WriteString(sDim.Render("loading…"))
 	}
-	return -1
-}
-
-func (t *dataTab) offIf(f, h, n int) int {
-	if t.focus != f {
-		return 0
-	}
-	t.offset = scroll(t.sel, t.offset, h, n)
-	return t.offset
-}
-
-// errLines shows errors of the components of one kind that the snapshot holds no data for.
-func (t *dataTab) errLines(_ string, have any) string {
-	var b strings.Builder
-	for _, n := range engine.SortedKeys(t.snap.errs) {
-		var present bool
-		switch h := have.(type) {
-		case map[string][]string:
-			_, present = h[n]
-		case map[string][]core.Queue:
-			_, present = h[n]
-		case map[string]map[string]string:
-			_, present = h[n]
-		}
-		if present {
-			b.WriteString(sRed.Render(n+": "+t.snap.errs[n].Error()) + "\n")
-		}
-	}
-	return b.String()
+	bottom := lipgloss.JoinHorizontal(lipgloss.Top, panel("caches", cb.String(), lw, h-topH, false), panel("databases", db.String(), w-lw, h-topH, false))
+	return lipgloss.JoinVertical(lipgloss.Left, queues, bottom)
 }

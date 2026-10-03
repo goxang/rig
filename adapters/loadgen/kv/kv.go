@@ -88,6 +88,25 @@ func (g *Gen) scale(ctx context.Context, n int) error {
 func (g *Gen) Start(ctx context.Context) error { return g.scale(ctx, g.opt.Replicas) }
 func (g *Gen) Stop(ctx context.Context) error  { return g.scale(ctx, 0) }
 
+// Replicas is how many generator instances run; each sends at the configured rate.
+func (g *Gen) Replicas(ctx context.Context) (int, error) {
+	n := 0
+	for _, name := range g.opt.Services {
+		rt, s, err := g.env.Owner(name)
+		if err != nil {
+			return 0, err
+		}
+		st, err := rt.Status(ctx, s)
+		if err != nil {
+			return 0, err
+		}
+		n = max(n, st.Desired)
+	}
+	return n, nil
+}
+
+func (g *Gen) SetReplicas(ctx context.Context, n int) error { return g.scale(ctx, max(n, 0)) }
+
 func (g *Gen) read(ctx context.Context) (map[string]any, float64, error) {
 	kv, err := g.store()
 	if err != nil {
@@ -138,12 +157,18 @@ func (g *Gen) Status(ctx context.Context) (core.LoadStatus, error) {
 		return core.LoadStatus{}, err
 	}
 	st := core.LoadStatus{Rate: rate, Extra: map[string]string{"key": g.opt.Key}}
+	replicas := 0
 	for _, name := range g.opt.Services {
-		if s, ok := g.env.Project().Services[name]; ok {
-			if ss, err := g.env.Runtime().Status(ctx, s); err == nil && ss.Ready > 0 {
-				st.Running = true
+		if rt, s, err := g.env.Owner(name); err == nil {
+			if ss, err := rt.Status(ctx, s); err == nil {
+				replicas += ss.Ready
+				st.Running = st.Running || ss.Ready > 0
 			}
 		}
+	}
+	st.Extra["replicas"] = strconv.Itoa(replicas)
+	if replicas > 1 {
+		st.Extra["total"] = strconv.FormatFloat(rate*float64(replicas), 'f', -1, 64) + "/s"
 	}
 	g.counters(ctx, &st)
 	return st, nil
