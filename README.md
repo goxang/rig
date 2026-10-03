@@ -83,3 +83,4 @@ rig do runtime create && rig up --build && rig
 - [docs/config.md](docs/config.md): every field of `rig.yaml`
 - [docs/design.md](docs/design.md): how rig is built, and how to write an adapter
 - [docs/manifests.md](docs/manifests.md): a manifest layout that works well with rig
+# rig
