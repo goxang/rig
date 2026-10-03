@@ -351,6 +351,18 @@ func (s *Set) Bundle(workload *Object) []*Object {
 	for _, e := range s.In(workload.ID()) {
 		add(e.From)
 	}
+	// a service account is only useful with the bindings that grant it something, and their roles
+	for _, o := range out {
+		if o.Kind != "ServiceAccount" {
+			continue
+		}
+		for _, b := range s.In(o.ID()) {
+			add(b.From)
+			for _, r := range s.Out(b.From) {
+				add(r.To)
+			}
+		}
+	}
 	sort.SliceStable(out[1:], func(i, j int) bool { return kindOrder(out[1+i].Kind) < kindOrder(out[1+j].Kind) })
 	return out
 }

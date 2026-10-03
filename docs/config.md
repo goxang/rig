@@ -80,7 +80,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `rabbitmq` | `addr` (management API), `user`, `password`, `vhost` |
 | `consul` | `addr`, `token` |
 | `http` (loadgen) | `target`, `method`, `body`, `headers`, `rate`, `max_in_flight`, `timeout` |
-| `kv` (loadgen) | `store`, `key`, `field`, `services`, `replicas`, `metrics: {source, sent, failed, latency_p99}` |
+| `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99}` |
 | `command` (loadgen) | `start`, `stop`, `rate` (with `{rate}`), `status` |
 | `ssh` | `defaults`, `hosts: [{name, addr, user, port, key, jump, roles, labels}]` |
 | `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure` |

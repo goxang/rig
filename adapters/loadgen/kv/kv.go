@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/goxang/rig/core"
@@ -22,7 +23,7 @@ func init() {
 type Options struct {
 	Store    string   `yaml:"store"` // the kv component
 	Key      string   `yaml:"key"`
-	Field    string   `yaml:"field"` // JSON field holding the rate; empty: the whole value is the number
+	Field    string   `yaml:"field"` // JSON field holding the rate, dotted for nested (a.b); empty: the whole value is the number
 	Services []string `yaml:"services"`
 	Replicas int      `yaml:"replicas"`
 	Metrics  struct {
@@ -104,7 +105,8 @@ func (g *Gen) read(ctx context.Context) (map[string]any, float64, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, 0, fmt.Errorf("%s is not JSON: %w", g.opt.Key, err)
 	}
-	f, _ := doc[g.opt.Field].(float64)
+	parent, leaf := fieldParent(doc, g.opt.Field, false)
+	f, _ := parent[leaf].(float64)
 	return doc, f, nil
 }
 
@@ -124,7 +126,8 @@ func (g *Gen) SetRate(ctx context.Context, rps float64) error {
 	if doc == nil {
 		doc = map[string]any{}
 	}
-	doc[g.opt.Field] = rps
+	parent, leaf := fieldParent(doc, g.opt.Field, true)
+	parent[leaf] = rps
 	raw, _ := json.MarshalIndent(doc, "", "  ")
 	return kv.Put(ctx, g.opt.Key, raw)
 }
@@ -172,4 +175,21 @@ func (g *Gen) counters(ctx context.Context, st *core.LoadStatus) {
 	st.Sent = int64(one(m.Sent))
 	st.Failed = int64(one(m.Failed))
 	st.Latency.P99 = time.Duration(one(m.Latency) * float64(time.Second))
+}
+
+// fieldParent walks a dotted path to the object holding its last part, creating objects when create is set.
+func fieldParent(doc map[string]any, path string, create bool) (map[string]any, string) {
+	parts := strings.Split(path, ".")
+	for _, p := range parts[:len(parts)-1] {
+		next, ok := doc[p].(map[string]any)
+		if !ok {
+			if !create {
+				return map[string]any{}, ""
+			}
+			next = map[string]any{}
+			doc[p] = next
+		}
+		doc = next
+	}
+	return doc, parts[len(parts)-1]
 }
