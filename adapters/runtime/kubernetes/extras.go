@@ -96,6 +96,10 @@ func (r *Runtime) nodeUsage(ctx context.Context, h *core.Host) {
 			Memory struct {
 				WorkingSetBytes int64 `json:"workingSetBytes"`
 			} `json:"memory"`
+			FS struct {
+				CapacityBytes int64 `json:"capacityBytes"`
+				UsedBytes     int64 `json:"usedBytes"`
+			} `json:"fs"`
 		} `json:"node"`
 	}
 	if json.Unmarshal(out, &s) != nil {
@@ -105,6 +109,7 @@ func (r *Runtime) nodeUsage(ctx context.Context, h *core.Host) {
 		h.CPUUsed = s.Node.CPU.UsageNanoCores / 1e9 / float64(h.CPUs)
 	}
 	h.MemUsed = s.Node.Memory.WorkingSetBytes
+	h.DiskTotal, h.DiskUsed = s.Node.FS.CapacityBytes, s.Node.FS.UsedBytes
 }
 
 // Shell opens a root shell on a node through a privileged debug pod.

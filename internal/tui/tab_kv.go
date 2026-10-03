@@ -47,6 +47,7 @@ type kvValueMsg struct {
 }
 
 type kvEditedMsg struct {
+	comp     string
 	key      string
 	file     string
 	original []byte
@@ -197,9 +198,12 @@ func relatedServices(m *model, key string) []string {
 }
 
 func (t *kvTab) save(m *model, key string, value []byte) tea.Cmd {
+	return t.saveIn(m, t.comp, key, value)
+}
+
+func (t *kvTab) saveIn(m *model, comp, key string, value []byte) tea.Cmd {
 	t.related = relatedServices(m, key)
 	t.value, t.valueFor = value, key
-	comp := t.comp
 	a := m.app
 	return m.act("save "+key, true, func(ctx context.Context) error {
 		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
@@ -211,6 +215,11 @@ func (t *kvTab) save(m *model, key string, value []byte) tea.Cmd {
 }
 
 func (t *kvTab) edit(m *model, key string, value []byte) tea.Cmd {
+	return editKV(m, t.comp, key, value)
+}
+
+// editKV opens a key's value in $VISUAL/$EDITOR; the KV screen saves it when the editor exits.
+func editKV(m *model, comp, key string, value []byte) tea.Cmd {
 	f, err := os.CreateTemp("", "rig-kv-*"+extFor(value))
 	if err != nil {
 		m.setStatus(err.Error(), true)
@@ -227,7 +236,9 @@ func (t *kvTab) edit(m *model, key string, value []byte) tea.Cmd {
 	}
 	file := f.Name()
 	c := exec.Command("sh", "-c", ed+` "$1"`, "rig-edit", file)
-	return tea.ExecProcess(c, func(err error) tea.Msg { return kvEditedMsg{key: key, file: file, original: value, err: err} })
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return kvEditedMsg{comp: comp, key: key, file: file, original: value, err: err}
+	})
 }
 
 func extFor(v []byte) string {
@@ -286,7 +297,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			m.setStatus(msg.key+" was JSON and the edit is not: not saved", true)
 			return nil
 		}
-		return t.save(m, msg.key, raw)
+		return t.saveIn(m, msg.comp, msg.key, raw)
 	case tea.KeyMsg:
 		if t.list.key(msg) {
 			if r, ok := t.list.current(); ok && !strings.HasSuffix(r.id, "/") {

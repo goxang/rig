@@ -368,8 +368,11 @@ type Host struct {
 	CPUUsed  float64 // 0..1
 	MemTotal int64
 	MemUsed  int64
-	Load1    float64
-	Labels   map[string]string
+	// DiskTotal and DiskUsed are the root (or kubelet) filesystem's, when the adapter knows them.
+	DiskTotal int64
+	DiskUsed  int64
+	Load1     float64
+	Labels    map[string]string
 }
 
 type Hosts interface {
@@ -463,6 +466,13 @@ type StatusLister interface {
 // runtime under its own name, at the given host:port per service port.
 type Bridger interface {
 	Bridge(ctx context.Context, s *spec.Service, ports map[int]string) error
+}
+
+// LoadConfigured is a load generator whose settings live in a KV key and that runs as services:
+// the Load screen edits that key and those services' env.
+type LoadConfigured interface {
+	ConfigKey() (store, key string)
+	Services() []string
 }
 
 // LoadScaler is a load generator that runs as replicas: more replicas, more load.

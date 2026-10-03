@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,8 @@ type loadMsg struct {
 func (t *loadTab) name() string { return "Load" }
 func (t *loadTab) typing() bool { return false }
 func (t *loadTab) hints() [][2]string {
-	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"}}
+	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"},
+		{"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}}
 }
 
 func (t *loadTab) open(m *model) tea.Cmd {
@@ -114,6 +116,13 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 			h.target = keep(append(h.target, core.Point{T: now, V: target}))
 		}
+	case loadConfigMsg:
+		if msg.err != nil {
+			m.setStatus("load config: "+msg.err.Error(), true)
+			return nil
+		}
+		m.setStatus("rate is read every 5s; other fields need a restart of the generator (b)", false)
+		return editKV(m, msg.comp, msg.key, msg.value)
 	case tea.KeyMsg:
 		if listKeys(msg, &t.sel, len(t.names)) || len(t.names) == 0 {
 			return nil
@@ -162,6 +171,13 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 				}
 				return m.act(fmt.Sprintf("%s to %d instances", n, k), false, func(ctx context.Context) error { return ls.SetReplicas(ctx, k) })
 			})
+		case "c", "v", "b":
+			lc, ok := g.(core.LoadConfigured)
+			if !ok {
+				m.setStatus(n+" has no config key or services", true)
+				return nil
+			}
+			return t.configure(m, msg.String(), n, lc)
 		case "+", "=":
 			return m.do("raise "+n, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, 1); return err })
 		case "-":
@@ -289,4 +305,55 @@ func latency(d time.Duration) string {
 		return fmt.Sprintf("%.0fms", float64(d)/float64(time.Millisecond))
 	}
 	return fmt.Sprintf("%.0fµs", float64(d)/float64(time.Microsecond))
+}
+
+type loadConfigMsg struct {
+	comp, key string
+	value     []byte
+	err       error
+}
+
+// configure edits a generator's KV config in the editor (c), sets its services' env (v) or restarts
+// them (b), which fields other than the rate usually need.
+func (t *loadTab) configure(m *model, op, n string, lc core.LoadConfigured) tea.Cmd {
+	a, svcs := m.app, lc.Services()
+	switch op {
+	case "c":
+		store, key := lc.ConfigKey()
+		return func() tea.Msg {
+			kv, _, err := engine.Get[core.KV](a, core.KindKV, store)
+			if err != nil {
+				return loadConfigMsg{err: err}
+			}
+			v, _, err := kv.Get(m.ctx, key)
+			return loadConfigMsg{comp: store, key: key, value: v, err: err}
+		}
+	case "b":
+		return m.act(label("restart", svcs), false, func(ctx context.Context) error {
+			return each(svcs, func(s string) error { return a.Restart(ctx, s) })
+		})
+	}
+	var cur []string
+	if len(svcs) > 0 {
+		for k, v := range a.EnvOverrides(svcs[0]) {
+			cur = append(cur, k+"="+v)
+		}
+	}
+	sort.Strings(cur)
+	m.ask("env of "+strings.Join(svcs, ", ")+" (K=V ..., K= removes; redeploys)", strings.Join(cur, " "), func(v string) tea.Cmd {
+		kv := map[string]string{}
+		for _, f := range strings.Fields(v) {
+			k, val, ok := strings.Cut(f, "=")
+			if !ok || k == "" {
+				m.setStatus("env: write K=V pairs", true)
+				return nil
+			}
+			kv[k] = val
+		}
+		if len(kv) == 0 {
+			return nil
+		}
+		return m.act("set env of "+n, true, func(ctx context.Context) error { return a.SetEnv(ctx, svcs, kv) })
+	})
+	return nil
 }

@@ -40,6 +40,9 @@ type App struct {
 	infraOnce sync.Once
 	infra     *App
 	infraErr  error
+
+	envMu        sync.Mutex
+	envOverrides map[string]map[string]string // service → env set with SetEnv, nil until read
 }
 
 type entry struct {

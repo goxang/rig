@@ -726,6 +726,21 @@ func (r *Runtime) Deploy(ctx context.Context, s *spec.Service, rel core.Release)
 	return nil
 }
 
+// ApplyManifests applies objects as they are written, with the environment's manifest variables
+// filled in: what rig would deploy, for objects no service owns (or before one does).
+func (r *Runtime) ApplyManifests(ctx context.Context, objs []*manifest.Object) error {
+	if r.Opt.CreateNamespace {
+		_ = r.ensureNamespace(ctx)
+	}
+	y, err := manifest.Render(objs, nil, manifest.RenderOptions{Vars: r.vars(ctx)})
+	if err != nil {
+		return err
+	}
+	cmd := r.kubectl("apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(string(y))
+	return cmd.Run(ctx)
+}
+
 func (r *Runtime) ensureNamespace(ctx context.Context) error {
 	out, _ := sh.New("kubectl", "--context", r.Opt.Context, "get", "namespace", r.Opt.Namespace, "--ignore-not-found", "-o", "name").Output(ctx)
 	if strings.TrimSpace(string(out)) != "" {
