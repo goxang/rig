@@ -32,6 +32,7 @@ rig load rate fleet 200
 rig query db "SELECT count(*) FROM orders"
 rig manifests deploy/ --graph api
 rig hosts ssh node-1
+rig task bootstrap    # a named list of steps from rig.yaml
 ```
 
 `-e <env>` (or `$RIG_ENV`) picks the environment. A `protected: true` environment refuses changes without `--yes`.
