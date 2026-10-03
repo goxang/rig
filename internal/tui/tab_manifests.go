@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"gopkg.in/yaml.v3"
 
-	"github.com/MohammadmahdiAhmadi/rig/internal/viz"
-	"github.com/MohammadmahdiAhmadi/rig/manifest"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/manifest"
 )
 
 // manifestsTab browses any folder of manifests: objects by kind, how each one relates to the rest, what is wrong.

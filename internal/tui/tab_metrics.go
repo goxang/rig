@@ -10,10 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/engine"
-	"github.com/MohammadmahdiAhmadi/rig/internal/viz"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/spec"
 )
 
 var ranges = []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour}

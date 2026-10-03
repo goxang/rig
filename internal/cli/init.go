@@ -111,7 +111,7 @@ func findManifestDirs(root string) []string {
 	return top
 }
 
-var initTmpl = template.Must(template.New("rig").Parse(`# rig.yaml — one file for every environment. Docs: https://github.com/MohammadmahdiAhmadi/rig
+var initTmpl = template.Must(template.New("rig").Parse(`# rig.yaml — one file for every environment. Docs: https://github.com/goxang/rig
 version: 1
 project: {{.Project}}
 default: local

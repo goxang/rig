@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/internal/sh"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 )
 
 // ---- hosts: the cluster's nodes ----

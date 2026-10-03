@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
+	"github.com/goxang/rig/core"
 )
 
 var out = lipgloss.NewRenderer(os.Stdout)

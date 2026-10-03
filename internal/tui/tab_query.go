@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/engine"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 )
 
 // queryTab is a console over every component that speaks a query language.

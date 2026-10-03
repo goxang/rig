@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/engine"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 var Version = "dev"

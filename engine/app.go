@@ -16,9 +16,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/plugin"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 // ErrProtected stops a mutating operation on a protected environment unless the caller confirmed.

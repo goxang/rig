@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
+	"github.com/goxang/rig/core"
 )
 
 // Summarize builds a trace's summary from its spans; shared by every tracing adapter.

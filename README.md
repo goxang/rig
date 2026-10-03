@@ -14,7 +14,7 @@ Every part is an adapter behind a small interface, so a new metrics backend, dat
 ## Install
 
 ```bash
-go install github.com/MohammadmahdiAhmadi/rig/cmd/rig@latest   # Go 1.25+
+go install github.com/goxang/rig/cmd/rig@latest   # Go 1.23+, lands in $(go env GOPATH)/bin — keep it on PATH
 ```
 
 `kubectl`, `docker`, `kind`, `ssh` and `dlv` are used when the matching adapter is.
@@ -83,4 +83,3 @@ rig do runtime create && rig up --build && rig
 - [docs/config.md](docs/config.md): every field of `rig.yaml`
 - [docs/design.md](docs/design.md): how rig is built, and how to write an adapter
 - [docs/manifests.md](docs/manifests.md): a manifest layout that works well with rig
-# rig

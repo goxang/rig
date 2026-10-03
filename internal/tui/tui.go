@@ -12,8 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/engine"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 )
 
 // tab is one screen. Messages a tab sends itself must carry gen so results that arrive after an

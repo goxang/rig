@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 type UpOptions struct {

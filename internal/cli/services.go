@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/engine"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 )
 
 func serviceCommands() []*cobra.Command {

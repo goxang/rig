@@ -10,11 +10,11 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/MohammadmahdiAhmadi/rig/adapters/runtime/kubernetes"
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/internal/sh"
-	"github.com/MohammadmahdiAhmadi/rig/plugin"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/adapters/runtime/kubernetes"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 func init() {

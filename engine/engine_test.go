@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/plugin"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 // fake is an in-memory runtime: the smallest adapter there is, and proof the engine needs nothing more.

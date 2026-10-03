@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
-	"github.com/MohammadmahdiAhmadi/rig/internal/localhost"
-	"github.com/MohammadmahdiAhmadi/rig/internal/sh"
-	"github.com/MohammadmahdiAhmadi/rig/plugin"
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/localhost"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 func init() {

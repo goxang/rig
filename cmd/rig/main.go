@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	_ "github.com/MohammadmahdiAhmadi/rig/adapters/all"
-	"github.com/MohammadmahdiAhmadi/rig/internal/cli"
-	"github.com/MohammadmahdiAhmadi/rig/internal/tui"
+	_ "github.com/goxang/rig/adapters/all"
+	"github.com/goxang/rig/internal/cli"
+	"github.com/goxang/rig/internal/tui"
 )
 
 var version = "dev"

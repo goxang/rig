@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MohammadmahdiAhmadi/rig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 type Kind string

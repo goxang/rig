@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/MohammadmahdiAhmadi/rig/core"
+	"github.com/goxang/rig/core"
 )
 
 var (
