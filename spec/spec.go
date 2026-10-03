@@ -4,6 +4,7 @@ package spec
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,6 +28,8 @@ type Project struct {
 	Manifests    []string                `yaml:"manifests"`
 	// Tasks are named lists of shell steps: `rig task <name>`.
 	Tasks map[string][]string `yaml:"tasks"`
+	// Queries are saved queries: run on demand, or on a schedule while the UI is open.
+	Queries map[string]*Query `yaml:"queries"`
 
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
@@ -44,12 +47,18 @@ type Service struct {
 	Ports     map[string]int    `yaml:"ports"`
 	Env       map[string]string `yaml:"env"`
 	Image     string            `yaml:"image"`
-	Replicas  int               `yaml:"replicas"`
-	Build     *Build            `yaml:"build"`
-	Run       *Run              `yaml:"run"`
-	Health    *Probe            `yaml:"health"`
-	Metrics   *Probe            `yaml:"metrics"`
-	Pprof     *Probe            `yaml:"pprof"`
+	// Replicas left out keeps what the environment has (the manifest's count, or a running workload's);
+	// 0 keeps a service deployed but stopped.
+	Replicas *int   `yaml:"replicas"`
+	Build    *Build `yaml:"build"`
+	Run      *Run   `yaml:"run"`
+	Health   *Probe `yaml:"health"`
+	Metrics  *Probe `yaml:"metrics"`
+	Pprof    *Probe `yaml:"pprof"`
+	// Shared marks infrastructure that one environment runs for others (see Environment.Infra).
+	Shared bool `yaml:"shared"`
+	// Delay is how long up waits after the service's dependencies are ready before starting it.
+	Delay time.Duration `yaml:"delay"`
 
 	// Sections owned by adapters (local:, docker:, k8s:, ...), decoded by the adapter that reads them.
 	Sections map[string]yaml.Node `yaml:",inline"`
@@ -86,6 +95,25 @@ type Environment struct {
 	Services    map[string]yaml.Node  `yaml:"services"`
 	// Tasks replace the project's tasks of the same name in this environment.
 	Tasks map[string][]string `yaml:"tasks"`
+	// Queries replace the project's queries of the same name in this environment.
+	Queries map[string]*Query `yaml:"queries"`
+	// Infra names the environment that runs this one's shared services, so heavy infrastructure
+	// (a database, a broker) runs once for local, docker and kind alike.
+	Infra string `yaml:"infra"`
+}
+
+// Query is a saved query against a component. {{name}} placeholders are filled from Params
+// (the defaults) or from the caller.
+type Query struct {
+	Name   string            `yaml:"-"`
+	Source string            `yaml:"source"`
+	Query  string            `yaml:"query"`
+	Help   string            `yaml:"help"`
+	Group  string            `yaml:"group"`
+	Params map[string]string `yaml:"params"`
+	// Every runs the query on a schedule while the UI is open, when Active (or activated there).
+	Every  time.Duration `yaml:"every"`
+	Active bool          `yaml:"active"`
 }
 
 // Component is one adapter instance: Kind picks the interface, Type the implementation,
@@ -141,6 +169,22 @@ func (s *Service) Section(name string, v any) (bool, error) {
 		return true, fmt.Errorf("service %s, %s: %w", s.Name, name, err)
 	}
 	return true, nil
+}
+
+// Count is the replica count rig.yaml asks for, and whether it asks at all.
+func (s *Service) Count() (int, bool) {
+	if s.Replicas == nil {
+		return 0, false
+	}
+	return *s.Replicas, true
+}
+
+// CountOr is the replica count rig.yaml asks for, else def.
+func (s *Service) CountOr(def int) int {
+	if n, ok := s.Count(); ok {
+		return n
+	}
+	return def
 }
 
 func (s *Service) InGroup(g string) bool {

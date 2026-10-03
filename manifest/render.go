@@ -21,6 +21,19 @@ type RenderOptions struct {
 	Replicas *int
 	// Labels are added to the workload and its pod template.
 	Labels map[string]string
+	// NodePorts keeps the node ports Services already have (service → port → node port), so a redeploy
+	// does not ask for a manifest's port that something else took meanwhile.
+	NodePorts map[string]map[int]int
+	// FreeNodePorts drops node ports NodePorts does not keep, letting the cluster pick them.
+	FreeNodePorts bool
+}
+
+// UnresolvedError names variables left in images or env values: applying them would run a
+// container against a database literally called "$MAIN_DB".
+type UnresolvedError struct{ Names []string }
+
+func (e *UnresolvedError) Error() string {
+	return "manifest variables without a value: " + strings.Join(e.Names, ", ") + " (set them under the runtime's vars)"
 }
 
 var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
@@ -28,10 +41,11 @@ var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Z
 // Render writes objs as one YAML stream, applying o to workload (which should be one of objs).
 func Render(objs []*Object, workload *Object, o RenderOptions) ([]byte, error) {
 	var b bytes.Buffer
+	missing := map[string]bool{}
 	for i, obj := range objs {
 		n := clone(obj.Node)
 		if o.Vars != nil {
-			substitute(n, o.Vars)
+			substitute(n, o.Vars, "", missing)
 		}
 		var m map[string]any
 		if err := n.Decode(&m); err != nil {
@@ -42,6 +56,9 @@ func Render(objs []*Object, workload *Object, o RenderOptions) ([]byte, error) {
 				return nil, fmt.Errorf("%s: %w", obj, err)
 			}
 		}
+		if obj.Kind == "Service" {
+			keepNodePorts(m, o.NodePorts[obj.Name], o.FreeNodePorts)
+		}
 		if i > 0 {
 			b.WriteString("---\n")
 		}
@@ -50,6 +67,17 @@ func Render(objs []*Object, workload *Object, o RenderOptions) ([]byte, error) {
 			return nil, err
 		}
 		b.Write(out)
+	}
+	var left []string
+	for k := range missing {
+		// a reference the workload patch replaced (the image's $TAG, say) is not missing
+		if bytes.Contains(b.Bytes(), []byte("$"+k)) {
+			left = append(left, k)
+		}
+	}
+	if len(left) > 0 {
+		sort.Strings(left)
+		return b.Bytes(), &UnresolvedError{Names: left}
 	}
 	return b.Bytes(), nil
 }
@@ -63,12 +91,17 @@ func clone(n *yaml.Node) *yaml.Node {
 	return &c
 }
 
-func substitute(n *yaml.Node, vars func(string) (string, bool)) {
+// substitute fills variables; key is the mapping key holding n, so references left in an image or an
+// env value are reported (a shell command may use $HOME on purpose).
+func substitute(n *yaml.Node, vars func(string) (string, bool), key string, missing map[string]bool) {
 	if n.Kind == yaml.ScalarNode {
 		v := varRef.ReplaceAllStringFunc(n.Value, func(m string) string {
 			name := strings.Trim(m, "${}")
 			if val, ok := vars(name); ok {
 				return val
+			}
+			if key == "image" || key == "value" {
+				missing[name] = true
 			}
 			return m
 		})
@@ -80,8 +113,33 @@ func substitute(n *yaml.Node, vars func(string) (string, bool)) {
 		}
 		return
 	}
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			substitute(n.Content[i+1], vars, n.Content[i].Value, missing)
+		}
+		return
+	}
 	for _, c := range n.Content {
-		substitute(c, vars)
+		substitute(c, vars, key, missing)
+	}
+}
+
+func keepNodePorts(m map[string]any, live map[int]int, free bool) {
+	if len(live) == 0 && !free {
+		return
+	}
+	ports, _ := child(m, "spec")["ports"].([]any)
+	for _, p := range ports {
+		pm, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		port, _ := pm["port"].(int)
+		if np, ok := live[port]; ok {
+			pm["nodePort"] = np
+		} else if free {
+			delete(pm, "nodePort")
+		}
 	}
 }
 

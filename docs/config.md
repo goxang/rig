@@ -18,6 +18,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `dashboards` | `name: [panel, ...]` |
 | `manifests` | folders `rig manifests` and the TUI scan by default |
 | `tasks` | `name: [shell step, ...]`, run in order by `rig task <name>` (see below) |
+| `queries` | saved queries (see below) |
 
 ## services.<name>
 
@@ -31,12 +32,14 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `run` | local runtime: `command`, `args`, `dir` (default: the binary built from `build.go`) |
 | `ports` | `name: number`; `svc://service:name` resolves names |
 | `env` | environment for every runtime |
-| `replicas` | default 1; on Kubernetes, set here it also overrides the manifest's count |
+| `replicas` | left out: keep the running count (or the manifest's); set (0 included) it wins everywhere |
+| `shared` | infrastructure one environment runs for others: see `environments.<name>.infra` |
+| `delay` | wait this long (`10s`) after the dependencies are ready before starting the service |
 | `health` | `{port, path}`: readiness for local and docker, a readiness probe in generated manifests |
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
 | `k8s` | `workload`, `container`, `service`, `manifests`, `command`, `args` |
-| `docker` | `image`, `command`, `args`, `volumes`, `publish` (port name → host port), `extra_args`, `labels` |
+| `docker` | `image`, `command`, `args`, `volumes`, `publish` (port name → host port), `bind` (host address, default 127.0.0.1), `container` (adopt an existing container by name, e.g. a compose one; never removed), `extra_args`, `labels` |
 
 ## environments.<name>
 
@@ -50,6 +53,8 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `services` | patches merged into services here: `api: { replicas: 3 }` |
 | `components` | components added or replaced here; one without `type` patches the shared one |
 | `tasks` | tasks replacing the project's tasks of the same name |
+| `queries` | saved queries replacing the project's of the same name |
+| `infra` | the environment that runs this one's `shared` services; they are started, stopped and reached there, and a Kubernetes runtime gets a Service pointing at the host for each |
 
 ### runtime options
 
@@ -57,7 +62,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 |---|---|
 | `local` | `env`, `stop_timeout` |
 | `docker` | `network`, `registry`, `env`, `publish` (default true) |
-| `kubernetes` | `context` (required), `namespace`, `registry`, `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image` |
+| `kubernetes` | `context` (required), `namespace`, `registry`, `pull_registry` (the registry as nodes name it, when it differs from where builds push), `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image` |
 | `kind` | the kubernetes options plus `cluster`, `node_image`, `workers`, `registry_port`, `preload` |
 
 ## components.<name>
@@ -89,6 +94,22 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 
 Every load generator also takes `max` (rates above it need `--force`) and `step` (one `+`/`-`).
 
+## queries
+
+```yaml
+queries:
+  db-top-cpu:
+    source: db                     # any component that answers queries, or runtime
+    group: database                # how the Queries screen groups them
+    help: statements by CPU
+    params: { n: "15" }            # defaults for {{n}}
+    query: SELECT TOP {{n}} ...
+    every: 30s                     # schedule while the UI is open...
+    active: true                   # ...from the start (else switch it on with `a`)
+```
+
+`rig query <name> n=5` runs one; `--every 5s` repeats it. Placeholders without a default must be given.
+
 ## dashboards
 
 ```yaml
@@ -111,6 +132,9 @@ tasks:
     - ./scripts/seed-consul.sh svc://consul:8500
     - rig up --build
 ```
+
+`rig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `rig down`
+with no targets leaves it running: `rig infra up|down|restart|status` changes it.
 
 Each step runs with `sh -c` from the project directory and the task stops at the first failure.
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested

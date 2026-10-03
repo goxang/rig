@@ -14,16 +14,25 @@ import (
 	"github.com/goxang/rig/internal/viz"
 )
 
+var lookbacks = []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour}
+
+// tracesTab searches traces by service, operation, minimum duration and time window, sorts them like
+// any grid, and shows the selected one as a waterfall.
 type tracesTab struct {
-	list     []core.TraceSummary
+	list     *grid
+	found    []core.TraceSummary
 	services []string
 	service  string
+	op       string
+	text     string
 	min      time.Duration
-	sel      int
-	offset   int
+	back     int
+	limit    int
+	errsOnly bool
 	spans    []core.Span
 	spansFor string
 	err      string
+	auto     bool
 }
 
 type tracesMsg struct {
@@ -43,22 +52,39 @@ type spansMsg struct {
 func (t *tracesTab) name() string { return "Traces" }
 func (t *tracesTab) typing() bool { return false }
 func (t *tracesTab) hints() [][2]string {
-	return [][2]string{{"enter", "waterfall"}, {"s", "service"}, {"m", "min duration"}}
+	return [][2]string{{"enter", "waterfall"}, {"s", "service"}, {"o", "operation"}, {"m", "min duration"}, {"t", "time window"},
+		{"/", "text"}, {"e", "errors only"}, {"n", "limit"}, {"R", "refresh"}, {"a", "auto refresh"}, {"< >", "sort"}}
 }
 
-func (t *tracesTab) open(m *model) tea.Cmd { return t.refresh(m) }
+func (t *tracesTab) interval() time.Duration {
+	if t.auto {
+		return 15 * time.Second
+	}
+	return 0
+}
+
+func (t *tracesTab) open(m *model) tea.Cmd {
+	t.list = newGrid("traces", col("TIME", 8), rcol("DURATION", 9), col("", 16), rcol("SPANS", 5), col("ROOT", 0), col("SERVICES", 0), col("", 5))
+	t.list.sortBy, t.list.desc = 0, true
+	t.back, t.limit, t.auto = 1, 100, true
+	return t.refresh(m)
+}
 
 func (t *tracesTab) refresh(m *model) tea.Cmd {
 	a, gen, ctx := m.app, m.gen, m.ctx
-	q := core.TraceQuery{Service: t.service, MinDuration: t.min, Lookback: time.Hour, Limit: 100}
+	q := core.TraceQuery{Service: t.service, Operation: t.op, MinDuration: t.min, Lookback: lookbacks[t.back], Limit: t.limit}
+	need := t.services == nil
 	return func() tea.Msg {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		tr, _, err := engine.Get[core.Tracing](a, core.KindTracing, "")
 		if err != nil {
 			return tracesMsg{gen: gen, err: err}
 		}
-		svcs, _ := tr.Services(c)
+		var svcs []string
+		if need {
+			svcs, _ = tr.Services(c)
+		}
 		list, err := tr.Search(c, q)
 		return tracesMsg{gen: gen, list: list, services: svcs, err: err}
 	}
@@ -76,6 +102,37 @@ func (t *tracesTab) load(m *model, id string) tea.Cmd {
 	}
 }
 
+func (t *tracesTab) rows() []grow {
+	maxDur := time.Duration(1)
+	for _, s := range t.found {
+		maxDur = max(maxDur, s.Duration)
+	}
+	text := strings.ToLower(t.text)
+	var rows []grow
+	for _, s := range t.found {
+		if t.errsOnly && !s.Error {
+			continue
+		}
+		svcs := strings.Join(s.Services, ",")
+		if text != "" && !strings.Contains(strings.ToLower(s.Root+" "+svcs+" "+s.ID), text) {
+			continue
+		}
+		bar := lipgloss.NewStyle().Foreground(viz.Palette[2]).Render(strings.Repeat("▇", max(1, int(float64(s.Duration)/float64(maxDur)*16))))
+		e := ""
+		if s.Error {
+			e = sRed.Render("error")
+		}
+		rows = append(rows, grow{id: s.ID, cells: []string{s.Start.Local().Format("15:04:05"), latency(s.Duration), bar, fmt.Sprint(s.Spans), s.Root, svcs, e},
+			keys: []any{float64(s.Start.UnixNano()), float64(s.Duration), float64(s.Duration), float64(s.Spans), s.Root, svcs, map[bool]string{true: "a", false: "b"}[s.Error]}})
+	}
+	return rows
+}
+
+func (t *tracesTab) requery(m *model) tea.Cmd {
+	t.spansFor, t.spans = "", nil
+	return t.refresh(m)
+}
+
 func (t *tracesTab) update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tracesMsg:
@@ -87,9 +144,15 @@ func (t *tracesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.err = msg.err.Error()
 			return nil
 		}
-		t.list, t.services = msg.list, msg.services
-		if t.spansFor == "" && len(t.list) > 0 {
-			return t.load(m, t.list[0].ID)
+		t.found = msg.list
+		if msg.services != nil {
+			t.services = msg.services
+		}
+		t.list.set(t.rows())
+		if t.spansFor == "" {
+			if r, ok := t.list.current(); ok {
+				return t.load(m, r.id)
+			}
 		}
 	case spansMsg:
 		if msg.gen == m.gen {
@@ -99,70 +162,99 @@ func (t *tracesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 		}
 	case tea.KeyMsg:
-		if listKeys(msg, &t.sel, len(t.list)) {
+		if t.list.key(msg) {
 			return nil
 		}
 		switch msg.String() {
 		case "enter":
-			if t.sel < len(t.list) {
-				return t.load(m, t.list[t.sel].ID)
+			if r, ok := t.list.current(); ok {
+				return t.load(m, r.id)
 			}
 		case "s":
-			opts := append([]string{""}, t.services...)
-			for i, s := range opts {
-				if s == t.service {
-					t.service = opts[(i+1)%len(opts)]
-					break
+			opts := append([]string{"(any service)"}, t.services...)
+			m.pick("traces through service", opts, nil, 0, false, func(c []string) tea.Cmd {
+				t.service = ""
+				if len(c) > 0 && c[0] != "(any service)" {
+					t.service = c[0]
 				}
-			}
-			t.sel, t.spansFor = 0, ""
-			return t.refresh(m)
+				return t.requery(m)
+			})
+		case "o":
+			m.ask("operation (span name, empty for any)", t.op, func(v string) tea.Cmd {
+				t.op = strings.TrimSpace(v)
+				return t.requery(m)
+			})
 		case "m":
-			m.ask("min duration", t.min.String(), func(v string) tea.Cmd {
-				if d, err := time.ParseDuration(v); err == nil {
+			m.ask("minimum duration (e.g. 200ms, 0 for any)", t.min.String(), func(v string) tea.Cmd {
+				if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil {
 					t.min = d
 				}
-				t.sel, t.spansFor = 0, ""
-				return t.refresh(m)
+				return t.requery(m)
 			})
+		case "t":
+			t.back = (t.back + 1) % len(lookbacks)
+			return t.requery(m)
+		case "n":
+			m.ask("how many traces", fmt.Sprint(t.limit), func(v string) tea.Cmd {
+				fmt.Sscanf(v, "%d", &t.limit)
+				t.limit = max(t.limit, 1)
+				return t.requery(m)
+			})
+		case "/":
+			m.ask("text in root, services or id", t.text, func(v string) tea.Cmd {
+				t.text = strings.TrimSpace(v)
+				t.list.set(t.rows())
+				return nil
+			})
+		case "e":
+			t.errsOnly = !t.errsOnly
+			t.list.set(t.rows())
+		case "a":
+			t.auto = !t.auto
+		case "R":
+			return t.refresh(m)
+		}
+	}
+	return nil
+}
+
+func (t *tracesTab) click(m *model, h hit) tea.Cmd {
+	if t.list.click(h) {
+		if r, ok := t.list.current(); ok {
+			return t.load(m, r.id)
 		}
 	}
 	return nil
 }
 
 func (t *tracesTab) view(m *model, w, h int) string {
-	title := "traces · last hour"
+	var f []string
+	f = append(f, "last "+lookbacks[t.back].String())
 	if t.service != "" {
-		title += " · " + t.service
+		f = append(f, "service "+t.service)
+	}
+	if t.op != "" {
+		f = append(f, "op "+t.op)
 	}
 	if t.min > 0 {
-		title += " · ≥" + t.min.String()
+		f = append(f, "≥"+t.min.String())
 	}
-	if t.err != "" && len(t.list) == 0 {
+	if t.text != "" {
+		f = append(f, "text "+t.text)
+	}
+	if t.errsOnly {
+		f = append(f, "errors")
+	}
+	if !t.auto {
+		f = append(f, "paused")
+	}
+	title := "traces · " + strings.Join(f, " · ")
+	if t.err != "" && len(t.found) == 0 {
 		return panel(title, sRed.Render(wrap(t.err, w-4))+"\n\n"+sDim.Render("configure a tracing component (zipkin, jaeger) in rig.yaml"), w, h, true)
 	}
-	listH := min(h/2, len(t.list)+3)
-	listH = max(listH, 5)
-	maxDur := time.Duration(1)
-	for _, s := range t.list {
-		maxDur = max(maxDur, s.Duration)
-	}
-	barW := 20
-	var rows [][]string
-	for _, s := range t.list {
-		bar := lipgloss.NewStyle().Foreground(viz.Palette[2]).Render(strings.Repeat("▇", max(1, int(float64(s.Duration)/float64(maxDur)*float64(barW)))))
-		e := ""
-		if s.Error {
-			e = sRed.Render("error")
-		}
-		rows = append(rows, []string{s.Start.Format("15:04:05"), padRight(bar, barW) + " " + latency(s.Duration), fmt.Sprint(s.Spans), s.Root, strings.Join(s.Services, ","), e})
-	}
-	t.sel = min(t.sel, max(0, len(rows)-1))
-	t.offset = scroll(t.sel, t.offset, listH-3, len(rows))
-	cw := w - 4 - 8 - (barW + 9) - 5 - 6 - 6
-	list := panel(title+fmt.Sprintf(" · %d", len(rows)), table([]string{"TIME", "DURATION", "SPANS", "ROOT", "SERVICES", ""},
-		[]int{8, barW + 9, 5, cw * 3 / 5, cw - cw*3/5, 5}, rows, t.sel, t.offset, listH-2), w, listH, true)
-	wf := sDim.Render("select a trace and press enter")
+	listH := max(6, min(h/2, len(t.list.rows)+3))
+	list := panel(fmt.Sprintf("%s · %d", title, len(t.list.rows)), t.list.view(m, 1, 1, w-2, listH-2, true), w, listH, true)
+	wf := sDim.Render("select a trace (enter or click)")
 	if len(t.spans) > 0 {
 		wf = viz.Waterfall(t.spans, w-4)
 	}

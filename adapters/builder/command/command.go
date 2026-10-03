@@ -27,6 +27,9 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 	ref := core.ImageRef(s, o.Registry, o.Tag)
 	cmd := sh.New(s.Build.Command[0], s.Build.Command[1:]...)
 	cmd.Dir = b.env.Project().Dir
+	if o.Dir != "" {
+		cmd.Dir = o.Dir
+	}
 	cmd.Env = []string{"IMAGE=" + ref, "TAG=" + o.Tag, "REGISTRY=" + o.Registry, fmt.Sprintf("PUSH=%t", o.Push)}
 	return ref, cmd.Attach(ctx, nil, o.Out, o.Out)
 }

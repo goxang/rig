@@ -214,9 +214,26 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		}),
 	}
 
+	source := &cobra.Command{
+		Use: "source <git-ref>", Short: "export a git ref of the project (cached per commit) and print its directory", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			a, err := open()
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+			dir, err := a.Source(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Println(dir)
+			return nil
+		},
+	}
+
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, task, manifests, hosts, plugins, version}
+	return []*cobra.Command{initCmd, env, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
 }
 
 func projectManifestDirs() []string {

@@ -105,36 +105,105 @@ func (r *Rabbit) Ping(ctx context.Context) error {
 func (r *Rabbit) QueryLanguage() string { return "rabbitmq" }
 
 // RunQuery GETs a management API path, e.g. "queues", "exchanges", "connections"; JSON lists become tables.
+// RunQuery reads a management API path ("queues", "overview", "connections", ...) and, optionally,
+// the columns to show, dotted for nested fields: `queues name messages message_stats.publish_details.rate`.
 func (r *Rabbit) RunQuery(ctx context.Context, q string) (core.Table, error) {
-	path := "/api/" + strings.TrimPrefix(strings.TrimSpace(q), "/api/")
-	path = strings.TrimSuffix(path, "/")
-	var raw []map[string]any
+	f := strings.Fields(q)
+	if len(f) == 0 {
+		f = []string{"queues"}
+	}
+	path := "/api/" + strings.TrimSuffix(strings.TrimPrefix(f[0], "/api/"), "/")
+	var raw any
 	if err := r.opt.Do(ctx, r.env, "GET", path, nil, &raw); err != nil {
 		return core.Table{}, err
 	}
-	cols := []string{"name", "vhost", "type", "state", "messages", "consumers", "durable"}
-	present := map[string]bool{}
-	for _, m := range raw {
-		for _, c := range cols {
-			if _, ok := m[c]; ok {
-				present[c] = true
+	cols := f[1:]
+	switch v := raw.(type) {
+	case map[string]any:
+		t := core.Table{Columns: []string{"field", "value"}}
+		flat := map[string]string{}
+		flatten("", v, flat)
+		for _, k := range sortedKeys(flat) {
+			if len(cols) == 0 || matchesAny(k, cols) {
+				t.Rows = append(t.Rows, []string{k, flat[k]})
 			}
 		}
+		return t, nil
+	case []any:
+		if len(cols) == 0 {
+			cols = []string{"name", "vhost", "type", "state", "messages", "messages_unacknowledged", "consumers", "message_stats.publish_details.rate", "message_stats.deliver_get_details.rate"}
+		}
+		t := core.Table{}
+		present := map[string]bool{}
+		var rows []map[string]string
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			flat := map[string]string{}
+			flatten("", m, flat)
+			for _, c := range cols {
+				if _, ok := flat[c]; ok {
+					present[c] = true
+				}
+			}
+			rows = append(rows, flat)
+		}
+		for _, c := range cols {
+			if present[c] {
+				t.Columns = append(t.Columns, c)
+			}
+		}
+		for _, flat := range rows {
+			row := make([]string, len(t.Columns))
+			for i, c := range t.Columns {
+				row[i] = flat[c]
+			}
+			t.Rows = append(t.Rows, row)
+		}
+		return t, nil
 	}
-	t := core.Table{}
-	for _, c := range cols {
-		if present[c] {
-			t.Columns = append(t.Columns, c)
+	return core.Table{Columns: []string{"value"}, Rows: [][]string{{fmt.Sprint(raw)}}}, nil
+}
+
+func flatten(prefix string, v any, out map[string]string) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, c := range x {
+			key := k
+			if prefix != "" {
+				key = prefix + "." + k
+			}
+			flatten(key, c, out)
+		}
+	case []any:
+		out[prefix] = fmt.Sprintf("[%d]", len(x))
+	case float64:
+		out[prefix] = strconv.FormatFloat(x, 'f', -1, 64)
+	case nil:
+		out[prefix] = ""
+	default:
+		out[prefix] = fmt.Sprint(x)
+	}
+}
+
+func matchesAny(k string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(k, p) {
+			return true
 		}
 	}
-	for _, m := range raw {
-		row := make([]string, len(t.Columns))
-		for i, c := range t.Columns {
-			row[i] = fmt.Sprint(m[c])
-		}
-		t.Rows = append(t.Rows, row)
+	return false
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
-	return t, nil
+	sort.Strings(out)
+	return out
 }
 
 func (r *Rabbit) Actions() []core.Action {

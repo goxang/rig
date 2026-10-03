@@ -17,17 +17,20 @@ import (
 
 const logCap = 5000
 
+// logsTab streams the logs of the services the user picks (all of them only when asked), merged,
+// or of one instance of one service.
 type logsTab struct {
-	lines   []core.LogLine
-	only    string
-	grep    string
-	paused  bool
-	scroll  int
-	restart bool
-	stream  int
-	cancel  context.CancelFunc
-	ch      <-chan core.LogLine
-	err     string
+	lines    []core.LogLine
+	services []string
+	instance string
+	grep     string
+	paused   bool
+	scroll   int
+	restart  bool
+	stream   int
+	cancel   context.CancelFunc
+	ch       <-chan core.LogLine
+	err      string
 }
 
 type logBatchMsg struct {
@@ -45,10 +48,64 @@ type logStartMsg struct {
 func (t *logsTab) name() string { return "Logs" }
 func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
-	return [][2]string{{"f", "service"}, {"/", "grep"}, {"p", "pause"}, {"↑↓", "scroll"}, {"c", "clear"}}
+	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep"}, {"p", "pause"}, {"↑↓", "scroll"}, {"c", "clear"}}
 }
 
-func (t *logsTab) open(m *model) tea.Cmd { return t.start(m) }
+func (t *logsTab) interval() time.Duration { return time.Second }
+
+// open streams nothing until services are picked: a log of everything is heavy and rarely wanted.
+func (t *logsTab) open(m *model) tea.Cmd {
+	if len(t.services) == 0 {
+		t.pickServices(m)
+		return nil
+	}
+	return t.start(m)
+}
+
+func (t *logsTab) pickServices(m *model) {
+	names := m.app.Spec.ServiceNames()
+	var desc []string
+	for _, n := range names {
+		desc = append(desc, strings.Join(m.app.Spec.Services[n].Groups, ","))
+	}
+	m.pickMany("logs of which services? (space marks several)", names, desc, t.services, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		t.services, t.instance = chosen, ""
+		return t.start(m)
+	})
+}
+
+func (t *logsTab) pickInstance(m *model) {
+	if len(t.services) != 1 {
+		m.setStatus("pick a single service first (f) to choose one of its instances", true)
+		return
+	}
+	svc := t.services[0]
+	var ids, desc []string
+	for _, st := range m.services {
+		if st.Service != svc {
+			continue
+		}
+		ids = append(ids, "all instances")
+		desc = append(desc, "")
+		for _, in := range st.Instances {
+			ids = append(ids, in.ID)
+			desc = append(desc, string(in.State)+" "+in.Host)
+		}
+	}
+	m.pick("instance of "+svc, ids, desc, 0, false, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		t.instance = chosen[0]
+		if t.instance == "all instances" {
+			t.instance = ""
+		}
+		return t.start(m)
+	})
+}
 
 func (t *logsTab) refresh(m *model) tea.Cmd {
 	if t.restart {
@@ -67,9 +124,9 @@ func (t *logsTab) start(m *model) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	t.cancel = cancel
 	a, gen, stream := m.app, m.gen, t.stream
-	q := core.LogQuery{Follow: true, Tail: 200, Match: t.grep}
-	if t.only != "" {
-		q.Services = []string{t.only}
+	q := core.LogQuery{Follow: true, Tail: 200, Match: t.grep, Services: t.services}
+	if len(t.services) == 1 {
+		q.Instance = t.instance
 	}
 	return func() tea.Msg {
 		src, _, err := engine.Get[core.LogSource](a, core.KindLogs, "")
@@ -135,14 +192,9 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "f":
-			names := append([]string{""}, m.app.Spec.ServiceNames()...)
-			for i, n := range names {
-				if n == t.only {
-					t.only = names[(i+1)%len(names)]
-					break
-				}
-			}
-			return t.start(m)
+			t.pickServices(m)
+		case "i":
+			t.pickInstance(m)
 		case "/":
 			m.ask("grep", t.grep, func(v string) tea.Cmd {
 				t.grep = v
@@ -173,9 +225,15 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 }
 
 func (t *logsTab) view(m *model, w, h int) string {
-	title := "all services"
-	if t.only != "" {
-		title = t.only
+	if len(t.services) == 0 {
+		return panel("logs", sDim.Render("press f to pick the services whose logs to follow"), w, h, true)
+	}
+	title := strings.Join(t.services, ", ")
+	if len(t.services) > 3 {
+		title = fmt.Sprintf("%d services", len(t.services))
+	}
+	if t.instance != "" {
+		title += " · " + t.instance
 	}
 	if t.grep != "" {
 		title += " · grep " + t.grep
@@ -198,7 +256,11 @@ func (t *logsTab) view(m *model, w, h int) string {
 	nameW = min(nameW, 18)
 	var b strings.Builder
 	for _, l := range t.lines[start:end] {
-		svc := lipgloss.NewStyle().Foreground(colorFor(l.Service)).Render(padRight(l.Service, nameW))
+		who := l.Service
+		if len(t.services) == 1 && l.Instance != "" {
+			who = shortInstance(l.Instance)
+		}
+		svc := lipgloss.NewStyle().Foreground(colorFor(who)).Render(padRight(who, nameW))
 		text := pretty(l.Text)
 		if t.grep != "" {
 			text = strings.ReplaceAll(text, t.grep, sAmber.Bold(true).Render(t.grep))

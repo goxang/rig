@@ -31,8 +31,9 @@ type hostsMsg struct {
 	err    error
 }
 
-func (t *hostsTab) name() string { return "Hosts" }
-func (t *hostsTab) typing() bool { return false }
+func (t *hostsTab) name() string            { return "Hosts" }
+func (t *hostsTab) interval() time.Duration { return 10 * time.Second }
+func (t *hostsTab) typing() bool            { return false }
 func (t *hostsTab) hints() [][2]string {
 	return [][2]string{{"enter", "shell"}, {"c", "run command"}}
 }

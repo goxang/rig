@@ -1,0 +1,318 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
+)
+
+// Shared services of an environment with `infra:` run in that other environment; every per-service
+// operation goes through Owner so front ends never need to know where a service runs.
+
+// InfraApp opens (once) the environment that runs this one's shared services; nil when there is none.
+func (a *App) InfraApp() (*App, error) {
+	if a.Env == nil || a.Env.Infra == "" || a.Env.Infra == a.Env.Name {
+		return nil, nil
+	}
+	a.infraOnce.Do(func() {
+		a.infra, a.infraErr = Open(a.Spec.File, a.Env.Infra)
+		if a.infra != nil {
+			a.infra.Confirmed = a.Confirmed
+		}
+	})
+	return a.infra, a.infraErr
+}
+
+// Owner returns the runtime that runs the named service and that environment's view of it.
+func (a *App) Owner(name string) (core.Runtime, *spec.Service, error) {
+	s, ok := a.Spec.Services[name]
+	if !ok {
+		return nil, nil, fmt.Errorf("no service %q in %s", name, a.envName())
+	}
+	if !s.Shared {
+		return a.runtime, s, nil
+	}
+	ia, err := a.InfraApp()
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s runs in environment %s: %w", name, a.Env.Infra, err)
+	}
+	if ia == nil {
+		return a.runtime, s, nil
+	}
+	is, ok := ia.Spec.Services[name]
+	if !ok {
+		return nil, nil, fmt.Errorf("%s is shared but environment %s does not define it", name, a.Env.Infra)
+	}
+	return ia.runtime, is, nil
+}
+
+// SharedElsewhere reports whether the service runs in the infra environment rather than this one.
+func (a *App) SharedElsewhere(name string) bool {
+	s, ok := a.Spec.Services[name]
+	return ok && s.Shared && a.Env != nil && a.Env.Infra != "" && a.Env.Infra != a.Env.Name
+}
+
+func (a *App) Start(ctx context.Context, name string) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	return rt.Start(ctx, s)
+}
+
+func (a *App) Stop(ctx context.Context, name string) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	return rt.Stop(ctx, s)
+}
+
+func (a *App) Restart(ctx context.Context, name string) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	return rt.Restart(ctx, s)
+}
+
+func (a *App) Scale(ctx context.Context, name string, n int) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	return rt.Scale(ctx, s, max(n, 0))
+}
+
+func (a *App) Status(ctx context.Context, name string) (core.Status, error) {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return core.Status{}, err
+	}
+	st, err := rt.Status(ctx, s)
+	st.Service = name
+	return st, err
+}
+
+func (a *App) Logs(ctx context.Context, name string, o core.LogOptions) (<-chan core.LogLine, error) {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return nil, err
+	}
+	return rt.Logs(ctx, s, o)
+}
+
+func (a *App) Exec(ctx context.Context, name string, o core.ExecOptions) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	return rt.Exec(ctx, s, o)
+}
+
+// Deploy rolls out a service. A tag deploys that tag of its image from the registry without building.
+func (a *App) Deploy(ctx context.Context, name, tag string) error {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	rel := core.Release{}
+	if tag != "" && s.Build != nil {
+		rel.Image = a.TagImage(s, tag)
+	}
+	return rt.Deploy(ctx, s, rel)
+}
+
+// TagImage is the reference of s's image at tag in this environment's registry.
+func (a *App) TagImage(s *spec.Service, tag string) string {
+	reg := ""
+	if r, ok := a.runtime.(core.Registrar); ok {
+		reg = r.Registry()
+	}
+	return core.ImageRef(s, reg, tag)
+}
+
+// ScaleBy moves each service's replica count by delta (or sets it, when set is true).
+func (a *App) ScaleBy(ctx context.Context, names []string, delta int, set bool) error {
+	return parallel(names, func(n string) error {
+		target := delta
+		if !set {
+			st, err := a.Status(ctx, n)
+			if err != nil {
+				return err
+			}
+			target = st.Desired + delta
+		}
+		if err := a.Scale(ctx, n, target); err != nil {
+			return fmt.Errorf("%s: %w", n, err)
+		}
+		return nil
+	})
+}
+
+// StatusAll asks for every named service, in one call per runtime when the runtime can;
+// errors become StateUnknown rows.
+func (a *App) StatusAll(ctx context.Context, names []string) []core.Status {
+	out := make([]core.Status, len(names))
+	byRT := map[core.Runtime][]int{}
+	svcs := map[int]*spec.Service{}
+	for i, n := range names {
+		rt, s, err := a.Owner(n)
+		if err != nil {
+			out[i] = core.Status{Service: n, State: core.StateUnknown, Message: err.Error()}
+			continue
+		}
+		byRT[rt] = append(byRT[rt], i)
+		svcs[i] = s
+	}
+	var wg sync.WaitGroup
+	for rt, idx := range byRT {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if l, ok := rt.(core.StatusLister); ok {
+				list := make([]*spec.Service, len(idx))
+				for j, i := range idx {
+					list[j] = svcs[i]
+				}
+				sts, err := l.StatusAll(ctx, list)
+				if err == nil && len(sts) == len(idx) {
+					for j, i := range idx {
+						sts[j].Service = names[i]
+						out[i] = sts[j]
+					}
+					return
+				}
+			}
+			var inner sync.WaitGroup
+			for _, i := range idx {
+				inner.Add(1)
+				go func() {
+					defer inner.Done()
+					st, err := rt.Status(ctx, svcs[i])
+					if err != nil {
+						st = core.Status{State: core.StateUnknown, Message: err.Error()}
+					}
+					st.Service = names[i]
+					out[i] = st
+				}()
+			}
+			inner.Wait()
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// bridge makes shared services reachable inside this environment's runtime, when it needs that.
+func (a *App) bridge(ctx context.Context, name string) error {
+	b, ok := a.runtime.(core.Bridger)
+	if !ok || !a.SharedElsewhere(name) {
+		return nil
+	}
+	ia, err := a.InfraApp()
+	if err != nil || ia == nil {
+		return err
+	}
+	s := a.Spec.Services[name]
+	ports := map[int]string{}
+	for _, p := range s.Ports {
+		addr, err := ia.Resolve(ctx, "svc://"+name+":"+strconv.Itoa(p))
+		if err != nil {
+			return fmt.Errorf("bridge %s: %w", name, err)
+		}
+		ports[p] = addr
+	}
+	return b.Bridge(ctx, s, ports)
+}
+
+// ---- saved queries ----
+
+// Queries are the project's saved queries with this environment's replacing those of the same name.
+func (a *App) Queries() map[string]*spec.Query {
+	out := map[string]*spec.Query{}
+	for n, q := range a.Spec.Queries {
+		out[n] = q
+	}
+	if a.Env != nil {
+		for n, q := range a.Env.Queries {
+			out[n] = q
+		}
+	}
+	return out
+}
+
+func (a *App) QueryNames() []string {
+	names := SortedKeys(a.Queries())
+	sort.SliceStable(names, func(i, j int) bool {
+		qs := a.Queries()
+		return qs[names[i]].Group < qs[names[j]].Group
+	})
+	return names
+}
+
+// FillQuery replaces {{name}} placeholders with args, then the query's defaults; it reports
+// placeholders left without a value.
+func FillQuery(q *spec.Query, args map[string]string) (string, []string) {
+	text := q.Query
+	var missing []string
+	for {
+		i := strings.Index(text, "{{")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(text[i:], "}}")
+		if j < 0 {
+			break
+		}
+		key := strings.TrimSpace(text[i+2 : i+j])
+		v, ok := args[key]
+		if !ok {
+			v, ok = q.Params[key]
+		}
+		if !ok {
+			missing = append(missing, key)
+			v = ""
+		}
+		text = text[:i] + v + text[i+j+2:]
+	}
+	return text, missing
+}
+
+// RunSaved runs a saved query with placeholder values.
+func (a *App) RunSaved(ctx context.Context, name string, args map[string]string) (core.Table, error) {
+	q, ok := a.Queries()[name]
+	if !ok {
+		return core.Table{}, fmt.Errorf("no saved query %q (have %v)", name, a.QueryNames())
+	}
+	text, missing := FillQuery(q, args)
+	if len(missing) > 0 {
+		return core.Table{}, fmt.Errorf("%s needs %s", name, strings.Join(missing, ", "))
+	}
+	return a.RunQuery(ctx, q.Source, text)
+}
+
+// RunQuery runs an ad hoc query against a component (or "runtime").
+func (a *App) RunQuery(ctx context.Context, comp, text string) (core.Table, error) {
+	var v any = a.runtime
+	if comp != "runtime" {
+		var err error
+		if v, err = a.Component(comp); err != nil {
+			return core.Table{}, err
+		}
+	}
+	q, ok := v.(core.Querier)
+	if !ok {
+		return core.Table{}, fmt.Errorf("%s does not answer queries", comp)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	return q.RunQuery(ctx, text)
+}

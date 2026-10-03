@@ -49,6 +49,8 @@ type Env interface {
 	StateDir() string
 	// DefaultImage is what to run for s when no release names one: the image last built for it, else its image field.
 	DefaultImage(ctx context.Context, s *spec.Service) string
+	// Owner is the runtime a service runs on (another environment's, for shared infrastructure).
+	Owner(service string) (Runtime, *spec.Service, error)
 }
 
 // ImageRef names the image a builder produces for s: registry/repo:tag, repo being s.Image or s.Name.
@@ -156,7 +158,12 @@ type BuildOptions struct {
 	Registry string
 	Push     bool
 	Out      io.Writer
+	// Dir is the source tree to build from; empty means the project directory.
+	Dir string
 }
+
+// ErrTagExists stops a push that would replace an image tag already in the registry, unless confirmed.
+var ErrTagExists = errors.New("tag already exists in the registry: pass --yes to overwrite it")
 
 type Builder interface {
 	Build(ctx context.Context, s *spec.Service, o BuildOptions) (image string, err error)
@@ -252,6 +259,8 @@ type Debugger interface {
 
 type LogQuery struct {
 	Services []string
+	// Instance narrows a single-service query to one instance (pod, container).
+	Instance string
 	Since    time.Duration
 	Tail     int
 	Follow   bool
@@ -419,6 +428,23 @@ func Confirmed(ctx context.Context) bool {
 // Relauncher restarts a local service with its command wrapped, e.g. under a debugger.
 type Relauncher interface {
 	Relaunch(ctx context.Context, s *spec.Service, wrap func(argv []string) []string) error
+}
+
+// StatusLister answers the status of many services in one round trip (one kubectl or docker call).
+type StatusLister interface {
+	StatusAll(ctx context.Context, services []*spec.Service) ([]Status, error)
+}
+
+// Bridger makes a service that runs elsewhere (on this machine, in docker) reachable inside the
+// runtime under its own name, at the given host:port per service port.
+type Bridger interface {
+	Bridge(ctx context.Context, s *spec.Service, ports map[int]string) error
+}
+
+// LoadScaler is a load generator that runs as replicas: more replicas, more load.
+type LoadScaler interface {
+	Replicas(ctx context.Context) (int, error)
+	SetReplicas(ctx context.Context, n int) error
 }
 
 // Pinger reports whether a component is reachable.

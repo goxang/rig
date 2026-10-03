@@ -210,6 +210,29 @@ func (r *Runtime) Actions() []core.Action {
 			_, err = out.Write(y)
 			return err
 		}},
+		{Name: "diff", Help: "what a deploy would change on the cluster: diff <service> [tag]", Run: func(ctx context.Context, args []string, out io.Writer) error {
+			if len(args) < 1 {
+				return fmt.Errorf("diff <service> [tag]")
+			}
+			s, ok := r.env.Project().Services[args[0]]
+			if !ok {
+				return fmt.Errorf("no service %q", args[0])
+			}
+			rel := core.Release{}
+			if len(args) > 1 {
+				rel.Image = core.ImageRef(s, r.Opt.Registry, args[1])
+			}
+			y, err := r.Render(ctx, s, rel)
+			if err != nil {
+				return err
+			}
+			// kubectl diff exits 1 when there are differences
+			err = r.kubectl("diff", "-f", "-").Attach(ctx, strings.NewReader(string(y)), out, out)
+			if err != nil && strings.Contains(err.Error(), "exit status 1") {
+				return nil
+			}
+			return err
+		}},
 		{Name: "prune", Mutate: true, Help: "delete deployments no rig service owns (dry run without --yes)", Run: func(ctx context.Context, args []string, out io.Writer) error {
 			ws, err := r.Discover(ctx)
 			if err != nil {

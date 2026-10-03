@@ -109,6 +109,12 @@ func Load(file, env string) (*Project, *Environment, error) {
 		c.Name = n
 	}
 
+	for n, s := range p.Services {
+		s.Name = n
+		if s.Role == "" {
+			s.Role = RoleApp
+		}
+	}
 	var e *Environment
 	if env != "" {
 		e = p.Environments[env]
@@ -125,6 +131,14 @@ func Load(file, env string) (*Project, *Environment, error) {
 	}
 	for n, e := range p.Environments {
 		e.Name = n
+	}
+	for n, q := range p.Queries {
+		q.Name = n
+	}
+	if e != nil {
+		for n, q := range e.Queries {
+			q.Name = n
+		}
 	}
 	return p, e, p.validate()
 }

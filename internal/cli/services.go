@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -28,13 +29,16 @@ func serviceCommands() []*cobra.Command {
 		}),
 	}
 	upCmd.Flags().BoolVarP(&up.Build, "build", "b", false, "build images first (container runtimes)")
-	upCmd.Flags().StringVarP(&up.Tag, "tag", "t", "", "image tag (default: a timestamp)")
+	upCmd.Flags().StringVarP(&up.Tag, "tag", "t", "", "image tag: what --build produces (default: a timestamp), or without --build the tag to deploy")
+	upCmd.Flags().StringVar(&up.Ref, "ref", "", "with --build, build from this git branch, tag or commit instead of the working tree")
 	upCmd.Flags().BoolVar(&up.NoDeps, "no-deps", false, "do not bring up dependencies")
 	upCmd.Flags().DurationVar(&up.Wait, "wait", 3*time.Minute, "how long each phase may take to become ready")
+	upCmd.Flags().BoolVar(&up.DryRun, "dry-run", false, "print the phases and what each service would get, change nothing")
+	upCmd.Flags().DurationVar(&up.Settle, "settle", 20*time.Second, "after the last phase, how long to watch for services that crash once ready (0 skips)")
 
 	down := &cobra.Command{
 		Use:   "down [service|group...]",
-		Short: "stop services in reverse dependency order (everything when none given)",
+		Short: "stop services in reverse dependency order (every app when none given; infra only when named)",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			return a.Down(ctx, args, os.Stdout)
 		}),
@@ -51,30 +55,35 @@ func serviceCommands() []*cobra.Command {
 				if err != nil {
 					return err
 				}
-				for _, n := range names {
+				return parallelNames(names, func(n string) error {
 					if err := f(ctx, a, n); err != nil {
 						return fmt.Errorf("%s: %w", n, err)
 					}
 					fmt.Printf("  %s %s\n", green("✓"), n)
-				}
-				return nil
+					return nil
+				})
 			}),
 		}
 	}
 	start := each("start", "start services (deploying what is not there yet)", func(ctx context.Context, a *engine.App, n string) error {
-		return a.Runtime().Start(ctx, a.Spec.Services[n])
+		return a.Start(ctx, n)
 	})
 	stop := each("stop", "stop services, keeping their definitions", func(ctx context.Context, a *engine.App, n string) error {
-		return a.Runtime().Stop(ctx, a.Spec.Services[n])
+		return a.Stop(ctx, n)
 	})
-	restart := each("restart", "restart services", func(ctx context.Context, a *engine.App, n string) error {
-		return a.Runtime().Restart(ctx, a.Spec.Services[n])
+	restart := each("restart", "restart services (e.g. to reload their configuration)", func(ctx context.Context, a *engine.App, n string) error {
+		return a.Restart(ctx, n)
 	})
 
-	var tag string
+	var tag, ref string
 	var buildFirst bool
 	deploy := &cobra.Command{
-		Use: "deploy <service|group...>", Short: "roll out services (with --build, a fresh image first)", Args: cobra.MinimumNArgs(1),
+		Use:   "deploy <service|group...>",
+		Short: "roll out services: --tag deploys that image tag from the registry, --build builds a fresh one first",
+		Example: `  rig deploy app -t master-20261003     # every app at an existing tag, infra untouched
+  rig deploy parser --build             # build from the working tree, push, roll out
+  rig deploy core --build --ref master  # build branch master, push, roll out`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if err := a.Guard(); err != nil {
 				return err
@@ -83,33 +92,46 @@ func serviceCommands() []*cobra.Command {
 			if err != nil {
 				return err
 			}
-			if tag == "" {
+			if buildFirst && tag == "" {
 				tag = time.Now().Format("20060102-150405")
 			}
-			for _, n := range names {
+			err = parallelNames(names, func(n string) error {
 				s := a.Spec.Services[n]
-				rel := core.Release{}
 				if buildFirst && s.Build != nil && a.ImageBased() {
-					if rel.Image, err = a.Build(ctx, s, tag, os.Stdout); err != nil {
+					img, err := a.BuildFrom(ctx, s, tag, ref, os.Stdout)
+					if err != nil {
 						return err
 					}
-				}
-				if err := a.Runtime().Deploy(ctx, s, rel); err != nil {
+					rt, svc, err := a.Owner(n)
+					if err != nil {
+						return err
+					}
+					if err := rt.Deploy(ctx, svc, core.Release{Image: img}); err != nil {
+						return fmt.Errorf("%s: %w", n, err)
+					}
+				} else if err := a.Deploy(ctx, n, tag); err != nil {
 					return fmt.Errorf("%s: %w", n, err)
 				}
 				fmt.Printf("  %s %s deployed\n", green("✓"), n)
+				return nil
+			})
+			if err != nil {
+				return err
 			}
-			if buildFirst {
+			if tag != "" {
 				return a.SetState(ctx, map[string]string{"tag": tag})
 			}
 			return nil
 		}),
 	}
 	deploy.Flags().BoolVarP(&buildFirst, "build", "b", false, "build the image first")
-	deploy.Flags().StringVarP(&tag, "tag", "t", "", "image tag")
+	deploy.Flags().StringVarP(&tag, "tag", "t", "", "image tag to deploy (or to build, with --build)")
+	deploy.Flags().StringVar(&ref, "ref", "", "with --build, build from this git branch, tag or commit")
 
 	build := &cobra.Command{
-		Use: "build <service|group...>", Short: "build images and push them to the environment's registry", Args: cobra.MinimumNArgs(1),
+		Use:   "build <service|group...>",
+		Short: "build images and push them to the environment's registry (an existing tag is overwritten only with --yes)",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			names, err := a.Targets(args, false)
 			if err != nil {
@@ -118,34 +140,47 @@ func serviceCommands() []*cobra.Command {
 			if tag == "" {
 				tag = time.Now().Format("20060102-150405")
 			}
-			for _, n := range names {
+			err = parallelNames(names, func(n string) error {
 				if a.Spec.Services[n].Build == nil {
-					continue
+					return nil
 				}
-				if _, err := a.Build(ctx, a.Spec.Services[n], tag, os.Stdout); err != nil {
-					return err
-				}
+				_, err := a.BuildFrom(ctx, a.Spec.Services[n], tag, ref, os.Stdout)
+				return err
+			})
+			if err == nil {
+				fmt.Printf("tag %s\n", bold(tag))
 			}
-			return nil
+			return err
 		}),
 	}
-	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag")
+	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag (default: a timestamp)")
+	build.Flags().StringVar(&ref, "ref", "", "build from this git branch, tag or commit instead of the working tree")
 
 	scale := &cobra.Command{
-		Use: "scale <service> <replicas>", Short: "set a service's replica count", Args: cobra.ExactArgs(2),
+		Use:   "scale <service|group...> <replicas|+n|-n>",
+		Short: "set replica counts, or move them up or down: rig scale core +1",
+		Args:  cobra.MinimumNArgs(2),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if err := a.Guard(); err != nil {
 				return err
 			}
-			s, err := a.Service(args[0])
+			last := args[len(args)-1]
+			names, err := a.Targets(args[:len(args)-1], false)
 			if err != nil {
 				return err
 			}
-			n, err := strconv.Atoi(args[1])
+			n, err := strconv.Atoi(last)
 			if err != nil {
 				return fmt.Errorf("replicas: %w", err)
 			}
-			return a.Runtime().Scale(ctx, s, n)
+			relative := strings.HasPrefix(last, "+") || strings.HasPrefix(last, "-")
+			if err := a.ScaleBy(ctx, names, n, !relative); err != nil {
+				return err
+			}
+			for _, st := range a.StatusAll(ctx, names) {
+				fmt.Printf("  %s %-28s %d replicas\n", green("✓"), st.Service, st.Desired)
+			}
+			return nil
 		}),
 	}
 
@@ -220,7 +255,7 @@ func serviceCommands() []*cobra.Command {
 					return err
 				}
 			}
-			ch, err := src.Logs(ctx, core.LogQuery{Services: names, Follow: lo.Follow, Tail: lo.Tail, Since: lo.Since, Match: grep})
+			ch, err := src.Logs(ctx, core.LogQuery{Services: names, Follow: lo.Follow, Tail: lo.Tail, Since: lo.Since, Match: grep, Instance: lo.Instance})
 			if err != nil {
 				return err
 			}
@@ -234,21 +269,18 @@ func serviceCommands() []*cobra.Command {
 	logs.Flags().IntVarP(&lo.Tail, "tail", "n", 100, "lines from the end")
 	logs.Flags().DurationVar(&lo.Since, "since", 0, "only newer than this")
 	logs.Flags().StringVarP(&grep, "grep", "g", "", "only lines containing this")
+	logs.Flags().StringVarP(&lo.Instance, "instance", "i", "", "one instance (pod, container) of a single service")
 
 	var instance string
 	exec := &cobra.Command{
 		Use: "exec <service> [-- command...]", Short: "run a command (default: a shell) in a service", Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
-			s, err := a.Service(args[0])
-			if err != nil {
-				return err
-			}
 			cmd := args[1:]
 			if len(cmd) == 0 {
 				cmd = []string{"sh", "-c", "command -v bash >/dev/null && exec bash || exec sh"}
 			}
 			tty := term.IsTerminal(int(os.Stdin.Fd()))
-			return a.Runtime().Exec(ctx, s, core.ExecOptions{Command: cmd, Instance: instance, TTY: tty, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
+			return a.Exec(ctx, args[0], core.ExecOptions{Command: cmd, Instance: instance, TTY: tty, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 		}),
 	}
 	exec.Flags().StringVarP(&instance, "instance", "i", "", "a specific instance (pod, container)")
@@ -293,4 +325,19 @@ func serviceColor(name string) func(...string) string {
 		h = -h
 	}
 	return out.NewStyle().Foreground(lipgloss.Color(palette[h%len(palette)])).Render
+}
+
+func parallelNames(names []string, f func(string) error) error {
+	errs := make([]error, len(names))
+	done := make(chan struct{})
+	for i, n := range names {
+		go func() {
+			errs[i] = f(n)
+			done <- struct{}{}
+		}()
+	}
+	for range names {
+		<-done
+	}
+	return errors.Join(errs...)
 }

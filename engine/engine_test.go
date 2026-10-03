@@ -34,7 +34,7 @@ func (f *fake) Logs(context.Context, *spec.Service, core.LogOptions) (<-chan cor
 }
 func (f *fake) Exec(context.Context, *spec.Service, core.ExecOptions) error { return nil }
 func (f *fake) Deploy(_ context.Context, s *spec.Service, _ core.Release) error {
-	return f.set(s.Name, max(s.Replicas, 1), "deploy")
+	return f.set(s.Name, s.CountOr(1), "deploy")
 }
 func (f *fake) Status(_ context.Context, s *spec.Service) (core.Status, error) {
 	f.mu.Lock()
@@ -68,9 +68,11 @@ func (l *fakeLoad) Status(context.Context) (core.LoadStatus, error) {
 }
 
 var shared = &fake{running: map[string]int{}}
+var other = &fake{running: map[string]int{}}
 
 func init() {
 	plugin.Register(core.KindRuntime, "fake", "test runtime", func(core.Env, *spec.Component) (any, error) { return shared, nil })
+	plugin.Register(core.KindRuntime, "fake2", "second test runtime", func(core.Env, *spec.Component) (any, error) { return other, nil })
 	plugin.Register(core.KindLoad, "fakeload", "test generator", func(core.Env, *spec.Component) (any, error) { return &fakeLoad{}, nil })
 }
 
@@ -116,8 +118,73 @@ func TestUpOrdersAndWaits(t *testing.T) {
 	if err := a.Down(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := shared.log[len(shared.log)-4:]; got[len(got)-1] != "stop db" {
-		t.Fatalf("down must stop dependencies last: %v", shared.log)
+	want = []string{"stop web", "stop gen", "stop api"}
+	if got := shared.log[3:]; got[0] != "stop web" || got[len(got)-1] != "stop api" || len(got) != 3 {
+		t.Fatalf("down must stop apps in reverse order and leave infra: %v, want %v", got, want)
+	}
+	if err := a.Down(context.Background(), []string{"infra"}, nil); err != nil || shared.log[len(shared.log)-1] != "stop db" {
+		t.Fatalf("named infra must stop: %v %v", err, shared.log)
+	}
+}
+
+func TestUpLeavesRunningInfra(t *testing.T) {
+	a := open(t, "")
+	ctx := context.Background()
+	if err := a.Up(ctx, nil, UpOptions{Wait: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	shared.log = nil
+	if err := a.Up(ctx, nil, UpOptions{Wait: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range shared.log {
+		if l == "deploy db" {
+			t.Fatalf("running infra was redeployed: %v", shared.log)
+		}
+	}
+}
+
+func TestSharedInfraRunsInItsEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "rig.yaml")
+	y := `
+project: t
+default: dev
+services:
+  db:  { role: infra, shared: true }
+  api: { depends_on: [db] }
+environments:
+  dev:   { infra: infra, runtime: { type: fake } }
+  infra: { runtime: { type: fake2 } }
+`
+	if err := os.WriteFile(p, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := Open(p, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared.running, shared.log = map[string]int{}, nil
+	other.running, other.log = map[string]int{}, nil
+	if err := a.Up(context.Background(), []string{"api"}, UpOptions{Wait: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(other.log, []string{"deploy db"}) || !reflect.DeepEqual(shared.log, []string{"deploy api"}) {
+		t.Fatalf("db must deploy on the infra runtime: infra %v, dev %v", other.log, shared.log)
+	}
+	if err := a.Down(context.Background(), nil, nil); err != nil || len(other.log) != 1 {
+		t.Fatalf("down must leave shared infra running: %v %v", err, other.log)
+	}
+}
+
+func TestFillQuery(t *testing.T) {
+	q := &spec.Query{Query: "SELECT TOP {{n}} * FROM {{table}}", Params: map[string]string{"n": "10"}}
+	got, missing := FillQuery(q, map[string]string{"table": "t"})
+	if got != "SELECT TOP 10 * FROM t" || len(missing) != 0 {
+		t.Fatalf("fill = %q %v", got, missing)
+	}
+	if _, missing = FillQuery(q, nil); len(missing) != 1 || missing[0] != "table" {
+		t.Fatalf("missing = %v", missing)
 	}
 }
 

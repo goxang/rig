@@ -36,6 +36,10 @@ type App struct {
 	comps   map[string]*entry
 	stateMu sync.Mutex
 	builds  map[string]*buildOnce
+
+	infraOnce sync.Once
+	infra     *App
+	infraErr  error
 }
 
 type entry struct {
@@ -86,6 +90,9 @@ func (a *App) Close() error {
 	a.mu.Unlock()
 	if c, ok := a.runtime.(io.Closer); ok {
 		errs = append(errs, c.Close())
+	}
+	if a.infra != nil {
+		errs = append(errs, a.infra.Close())
 	}
 	return errors.Join(errs...)
 }
@@ -285,6 +292,13 @@ func (a *App) Resolve(ctx context.Context, addr string) (string, error) {
 	}
 	hostport, path, _ := strings.Cut(rest, "/")
 	host, port, _ := strings.Cut(hostport, ":")
+	if a.SharedElsewhere(host) {
+		if ia, err := a.InfraApp(); err != nil {
+			return "", err
+		} else if ia != nil {
+			return ia.Resolve(ctx, addr)
+		}
+	}
 	n := 0
 	if s, ok := a.Spec.Services[host]; ok {
 		n = s.PortNumber(port)

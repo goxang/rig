@@ -51,7 +51,7 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	if o.RegistryPort > 0 && o.Registry == "" {
 		o.Registry = fmt.Sprintf("localhost:%d", o.RegistryPort)
 	}
-	k := &kubernetes.Runtime{Opt: o.Options}
+	k := &kubernetes.Runtime{Opt: o.Options, HostIP: hostIP}
 	k.SetEnv(env)
 	if err := k.Init(); err != nil {
 		return nil, err
@@ -189,4 +189,18 @@ func noProxyEnv() []string {
 		}
 	}
 	return env
+}
+
+// hostIP is this machine as seen from kind's pods: the gateway of the docker network the nodes are on.
+func hostIP(ctx context.Context) (string, error) {
+	out, err := sh.New("docker", "network", "inspect", "kind", "-f", "{{range .IPAM.Config}}{{.Gateway}} {{end}}").Output(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, ip := range strings.Fields(string(out)) {
+		if !strings.Contains(ip, ":") {
+			return ip, nil
+		}
+	}
+	return "", fmt.Errorf("docker network kind has no IPv4 gateway")
 }

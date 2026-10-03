@@ -1,5 +1,7 @@
-// Package tui is rig's terminal control plane: one screen per concern (services, metrics, load,
-// logs, traces, data, queries, manifests, hosts), all driven by the same engine as the CLI.
+// Package tui is rig's terminal control plane: one screen per concern (services, logs, metrics,
+// traces, queries, key-value, data, load, manifests, hosts), all driven by the same engine as the CLI.
+// Screens load nothing until opened and refresh only while showing; the service list is one runtime
+// call per refresh.
 package tui
 
 import (
@@ -28,6 +30,26 @@ type tab interface {
 	typing() bool
 }
 
+// interval is how often a showing tab refreshes; tabs without one refresh every 3s.
+type intervaler interface{ interval() time.Duration }
+
+// clicker receives clicks on the zones a tab registered while rendering.
+type clicker interface {
+	click(m *model, z hit) tea.Cmd
+}
+
+// hit is a click inside a zone, in zone-relative cells; double is a second click on the same cell.
+type hit struct {
+	id     string
+	x, y   int
+	double bool
+}
+
+type zone struct {
+	id         string
+	x, y, w, h int
+}
+
 type model struct {
 	ctx    context.Context
 	app    *engine.App
@@ -44,11 +66,21 @@ type model struct {
 
 	confirm *confirm
 	prompt  *prompt
-	envPick *envPick
+	picker  *picker
 	help    bool
 
 	services []core.Status
 	svcAt    time.Time
+	svcBusy  bool
+
+	refreshed map[int]time.Time
+	sched     *scheduler
+
+	zones   []zone
+	originY int
+	tabSpan [][2]int
+	lastHit hit
+	lastAt  time.Time
 }
 
 type confirm struct {
@@ -60,11 +92,6 @@ type prompt struct {
 	label  string
 	input  textinput.Model
 	submit func(string) tea.Cmd
-}
-
-type envPick struct {
-	names []string
-	sel   int
 }
 
 type (
@@ -84,15 +111,16 @@ type (
 )
 
 func newTabs() []tab {
-	return []tab{&overviewTab{}, &servicesTab{}, &metricsTab{}, &loadTab{}, &logsTab{}, &tracesTab{}, &dataTab{}, &queryTab{}, &manifestsTab{}, &hostsTab{}}
+	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}}
 }
 
 func Run(ctx context.Context, a *engine.App) error {
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs()}
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}}
+	m.sched = newScheduler(a)
+	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx)).Run()
 	if err == tea.ErrProgramKilled {
 		return nil
 	}
@@ -103,10 +131,11 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(m.openTab(0), m.fetchServices(), tick())
 }
 
-func tick() tea.Cmd { return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
+func tick() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
 
 func (m *model) openTab(i int) tea.Cmd {
 	m.active = i
+	m.refreshed[i] = time.Now()
 	if !m.opened[i] {
 		m.opened[i] = true
 		return m.tabs[i].open(m)
@@ -114,7 +143,7 @@ func (m *model) openTab(i int) tea.Cmd {
 	return m.tabs[i].refresh(m)
 }
 
-// do runs a read-only slow operation off the UI loop and reports its outcome in the footer.
+// do runs a slow operation off the UI loop and reports its outcome in the footer.
 func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 	m.busy++
 	m.setStatus(label+"…", false)
@@ -127,21 +156,35 @@ func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 	}
 }
 
-// mutate asks before a change; the answer also counts as the confirmation a protected environment needs.
-func (m *model) mutate(label string, f func(ctx context.Context) error) tea.Cmd {
-	text := label + "?"
-	if m.app.Env.Protected {
-		text = label + " on PROTECTED " + m.app.Env.Name + "?"
-	}
+// needsConfirm: only dangerous changes on a real Kubernetes cluster, and every change on a protected
+// environment, wait for enter. Local, docker and kind run at once.
+func (m *model) needsConfirm(dangerous bool) bool {
+	e := m.app.Env
+	return e.Protected || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
+}
+
+// act runs a change, asking first when needsConfirm says so; the answer also counts as the
+// confirmation a protected environment needs.
+func (m *model) act(label string, dangerous bool, f func(ctx context.Context) error) tea.Cmd {
 	a, ctx := m.app, core.WithConfirmed(m.ctx)
-	m.confirm = &confirm{text: text, run: func() tea.Msg {
+	run := func() tea.Msg {
 		a.Confirmed = true
 		defer func() { a.Confirmed = false }()
 		if err := f(ctx); err != nil {
 			return statusMsg{text: label + ": " + err.Error(), err: true}
 		}
 		return statusMsg{text: label + " ✓"}
-	}}
+	}
+	if !m.needsConfirm(dangerous) {
+		m.busy++
+		m.setStatus(label+"…", false)
+		return run
+	}
+	text := label + " on " + m.app.Env.Name + "?"
+	if m.app.Env.Protected {
+		text = label + " on PROTECTED " + m.app.Env.Name + "?"
+	}
+	m.confirm = &confirm{text: text, run: run}
 	return nil
 }
 
@@ -159,12 +202,21 @@ func (m *model) setStatus(s string, err bool) {
 }
 
 func (m *model) fetchServices() tea.Cmd {
+	if m.svcBusy {
+		return nil
+	}
+	m.svcBusy = true
 	gen, a, ctx := m.gen, m.app, m.ctx
 	return func() tea.Msg {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		return servicesMsg{gen: gen, sts: a.StatusAll(c, a.Spec.ServiceNames())}
 	}
+}
+
+// zone registers a clickable area of the tab body being rendered (body-relative cells).
+func (m *model) zone(id string, x, y, w, h int) {
+	m.zones = append(m.zones, zone{id: id, x: x, y: y + m.originY, w: w, h: h})
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -173,16 +225,32 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 		return m, nil
 	case tickMsg:
-		return m, tea.Batch(tick(), m.fetchServices(), m.tabs[m.active].refresh(m))
+		cmds := []tea.Cmd{tick(), m.sched.due(m)}
+		if time.Since(m.svcAt) >= 3*time.Second {
+			cmds = append(cmds, m.fetchServices())
+		}
+		every := 3 * time.Second
+		if iv, ok := m.tabs[m.active].(intervaler); ok {
+			every = iv.interval()
+		}
+		if every > 0 && time.Since(m.refreshed[m.active]) >= every {
+			m.refreshed[m.active] = time.Now()
+			cmds = append(cmds, m.tabs[m.active].refresh(m))
+		}
+		return m, tea.Batch(cmds...)
 	case servicesMsg:
 		if msg.gen == m.gen {
-			m.services, m.svcAt = msg.sts, time.Now()
+			m.services, m.svcAt, m.svcBusy = msg.sts, time.Now(), false
 		}
 		return m, nil
 	case statusMsg:
 		m.busy = max(0, m.busy-1)
 		m.setStatus(msg.text, msg.err)
-		return m, tea.Batch(m.fetchServices(), m.tabs[m.active].refresh(m))
+		m.svcAt = time.Time{}
+		return m, m.tabs[m.active].refresh(m)
+	case schedMsg:
+		m.sched.done(msg)
+		return m, nil
 	case envMsg:
 		if msg.err != nil {
 			m.setStatus("switch environment: "+msg.err.Error(), true)
@@ -191,13 +259,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		old := m.app
 		m.app, m.gen = msg.app, m.gen+1
 		go old.Close()
-		m.services = nil
-		m.opened = map[int]bool{}
+		m.services, m.svcBusy = nil, false
+		m.opened, m.refreshed = map[int]bool{}, map[int]time.Time{}
 		m.tabs = newTabs()
+		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
 		return m, tea.Batch(m.openTab(m.active), m.fetchServices())
 	case tea.KeyMsg:
 		return m, m.key(msg)
+	case tea.MouseMsg:
+		return m, m.mouse(msg)
 	}
 	// data arriving for a tab must reach it even when another tab is showing
 	var cmds []tea.Cmd
@@ -207,6 +278,55 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
+	if m.confirm != nil || m.prompt != nil {
+		return nil
+	}
+	switch e.Button {
+	case tea.MouseButtonWheelUp:
+		if m.picker != nil {
+			return m.picker.key(m, tea.KeyMsg{Type: tea.KeyUp})
+		}
+		return m.tabs[m.active].update(m, tea.KeyMsg{Type: tea.KeyUp})
+	case tea.MouseButtonWheelDown:
+		if m.picker != nil {
+			return m.picker.key(m, tea.KeyMsg{Type: tea.KeyDown})
+		}
+		return m.tabs[m.active].update(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if e.Action != tea.MouseActionPress || e.Button != tea.MouseButtonLeft {
+		return nil
+	}
+	if m.help {
+		m.help = false
+		return nil
+	}
+	if e.Y == 1 && m.picker == nil {
+		for i, sp := range m.tabSpan {
+			if e.X >= sp[0] && e.X < sp[1] {
+				return m.openTab(i)
+			}
+		}
+		return nil
+	}
+	for i := len(m.zones) - 1; i >= 0; i-- {
+		z := m.zones[i]
+		if e.X >= z.x && e.X < z.x+z.w && e.Y >= z.y && e.Y < z.y+z.h {
+			h := hit{id: z.id, x: e.X - z.x, y: e.Y - z.y}
+			h.double = m.lastHit.id == h.id && m.lastHit.y == h.y && time.Since(m.lastAt) < 400*time.Millisecond
+			m.lastHit, m.lastAt = h, time.Now()
+			if m.picker != nil {
+				return m.picker.click(m, h)
+			}
+			if c, ok := m.tabs[m.active].(clicker); ok {
+				return c.click(m, h)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if k.String() == "ctrl+c" {
 		return tea.Quit
@@ -214,7 +334,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if m.confirm != nil {
 		c := m.confirm
 		m.confirm = nil
-		if k.String() == "y" || k.String() == "Y" {
+		if k.String() == "enter" {
 			m.busy++
 			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
 			return c.run
@@ -236,25 +356,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		m.prompt.input, cmd = m.prompt.input.Update(k)
 		return cmd
 	}
-	if m.envPick != nil {
-		p := m.envPick
-		switch k.String() {
-		case "esc", "q":
-			m.envPick = nil
-		case "up", "k":
-			p.sel = max(0, p.sel-1)
-		case "down", "j":
-			p.sel = min(len(p.names)-1, p.sel+1)
-		case "enter":
-			m.envPick = nil
-			name, file := p.names[p.sel], m.app.Spec.File
-			m.setStatus("opening "+name+"…", false)
-			return func() tea.Msg {
-				a, err := engine.Open(file, name)
-				return envMsg{app: a, err: err}
-			}
-		}
-		return nil
+	if m.picker != nil {
+		return m.picker.key(m, k)
 	}
 	if m.help {
 		m.help = false
@@ -265,18 +368,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		switch s := k.String(); s {
 		case "q":
 			return tea.Quit
-		case "?":
+		case "?", "f1":
 			m.help = true
 			return nil
 		case "E":
-			names := m.app.Spec.EnvironmentNames()
-			sel := 0
-			for i, n := range names {
-				if n == m.app.Env.Name {
-					sel = i
-				}
-			}
-			m.envPick = &envPick{names: names, sel: sel}
+			m.pickEnv()
 			return nil
 		case "tab":
 			return m.openTab((m.active + 1) % len(m.tabs))
@@ -295,20 +391,54 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	return t.update(m, k)
 }
 
+func (m *model) pickEnv() {
+	names := m.app.Spec.EnvironmentNames()
+	var desc []string
+	sel := 0
+	for i, n := range names {
+		e := m.app.Spec.Environments[n]
+		d := ""
+		if e.Runtime != nil {
+			d = padRight(e.Runtime.Type, 11)
+		}
+		if e.Protected {
+			d += sRed.Render("protected ")
+		}
+		desc = append(desc, d+e.Description)
+		if n == m.app.Env.Name {
+			sel = i
+		}
+	}
+	file := m.app.Spec.File
+	m.pick("environment", names, desc, sel, false, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 || chosen[0] == m.app.Env.Name {
+			return nil
+		}
+		name := chosen[0]
+		m.setStatus("opening "+name+"…", false)
+		return func() tea.Msg {
+			a, err := engine.Open(file, name)
+			return envMsg{app: a, err: err}
+		}
+	})
+}
+
 func (m *model) View() string {
 	if m.w == 0 {
 		return "loading…"
 	}
+	m.zones = m.zones[:0]
 	header := m.header()
 	tabs := m.tabBar()
 	footer := m.footer()
-	bodyH := m.h - lipgloss.Height(header) - lipgloss.Height(tabs) - lipgloss.Height(footer)
+	m.originY = lipgloss.Height(header) + lipgloss.Height(tabs)
+	bodyH := m.h - m.originY - lipgloss.Height(footer)
 	var body string
 	switch {
 	case m.help:
 		body = m.overlay(m.helpView(), bodyH)
-	case m.envPick != nil:
-		body = m.overlay(m.envView(), bodyH)
+	case m.picker != nil:
+		body = m.picker.view(m, bodyH)
 	default:
 		body = m.tabs[m.active].view(m, m.w, bodyH)
 	}
@@ -327,13 +457,23 @@ func (m *model) header() string {
 	if a.Env.Protected {
 		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
 	}
-	up := 0
+	up, bad := 0, 0
 	for _, s := range m.services {
 		if engine.Ready(s) {
 			up++
 		}
+		if s.State == core.StateFailed || s.State == core.StateDegraded {
+			bad++
+		}
 	}
-	right := fmt.Sprintf("%s %d/%d up  %s ", sGreen.Render("●"), up, len(m.services), sDim.Render(time.Now().Format("15:04:05")))
+	right := fmt.Sprintf("%s %d/%d up", sGreen.Render("●"), up, len(m.services))
+	if bad > 0 {
+		right += sRed.Render(fmt.Sprintf("  ✖ %d failing", bad))
+	}
+	if n := m.sched.activeCount(); n > 0 {
+		right += sDim.Render(fmt.Sprintf("  ⏱ %d scheduled", n))
+	}
+	right += "  " + sDim.Render(time.Now().Format("15:04:05")) + " "
 	if m.busy > 0 {
 		right = sAmber.Render("⟳ working  ") + right
 	}
@@ -343,13 +483,20 @@ func (m *model) header() string {
 
 func (m *model) tabBar() string {
 	var parts []string
+	m.tabSpan = m.tabSpan[:0]
+	x := 0
 	for i, t := range m.tabs {
 		key := fmt.Sprint((i + 1) % 10)
+		var p string
 		if i == m.active {
-			parts = append(parts, sTabOn.Render(key+" "+t.name()))
+			p = sTabOn.Render(key + " " + t.name())
 		} else {
-			parts = append(parts, sTabOff.Render(key+" "+t.name()))
+			p = sTabOff.Render(sKey.Render(key) + " " + t.name())
 		}
+		w := lipgloss.Width(p)
+		m.tabSpan = append(m.tabSpan, [2]int{x, x + w})
+		x += w
+		parts = append(parts, p)
 	}
 	return truncate(strings.Join(parts, ""), m.w)
 }
@@ -358,15 +505,17 @@ func (m *model) footer() string {
 	var line string
 	switch {
 	case m.confirm != nil:
-		line = sAmber.Render(" "+m.confirm.text) + sDim.Render("  y to confirm, any key to cancel")
+		line = sAmber.Bold(true).Render(" "+m.confirm.text) + sDim.Render("   ") + sKey.Render("enter") + sDim.Render(" confirm · any other key cancels")
 	case m.prompt != nil:
 		line = sAccent.Render(" "+m.prompt.label+": ") + m.prompt.input.View() + sDim.Render("   enter ok · esc cancel")
+	case m.picker != nil:
+		line = " " + m.picker.hints()
 	default:
 		var hs []string
 		for _, h := range m.tabs[m.active].hints() {
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
-		hs = append(hs, sKey.Render("E")+" "+sDim.Render("env"), sKey.Render("?")+" "+sDim.Render("help"), sKey.Render("q")+" "+sDim.Render("quit"))
+		hs = append(hs, sKey.Render("?")+" "+sDim.Render("help"), sKey.Render("E")+" "+sDim.Render("env"), sKey.Render("q")+" "+sDim.Render("quit"))
 		line = " " + strings.Join(hs, "  ")
 	}
 	status := ""
@@ -382,40 +531,29 @@ func (m *model) footer() string {
 
 func (m *model) helpView() string {
 	rows := [][2]string{
-		{"1-9 0 / tab", "switch screen"}, {"E", "switch environment"}, {"↑↓ / j k", "move"}, {"enter", "open / act"},
-		{"?", "this help"}, {"q / ctrl+c", "quit"},
+		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"},
+		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
+		{"esc", "back"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
-	rows = append(rows, m.tabs[m.active].hints()...)
 	var b strings.Builder
 	for _, r := range rows {
-		b.WriteString(sKey.Render(padRight(r[0], 14)) + " " + r[1] + "\n")
+		b.WriteString(sKey.Render(padRight(r[0], 18)) + " " + r[1] + "\n")
 	}
-	b.WriteString("\n" + sDim.Render("services, components and environments come from "+m.app.Spec.File))
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
-		Render(sTitle.Render("keys — "+m.tabs[m.active].name()) + "\n\n" + b.String())
-}
-
-func (m *model) envView() string {
-	var b strings.Builder
-	for i, n := range m.envPick.names {
-		e := m.app.Spec.Environments[n]
-		rt := ""
-		if e.Runtime != nil {
-			rt = e.Runtime.Type
-		}
-		line := padRight(n, 14) + sDim.Render(padRight(rt, 12)+e.Description)
-		if e.Protected {
-			line += " " + sRed.Render("protected")
-		}
-		if i == m.envPick.sel {
-			line = sSelected.Render("▸ " + line)
-		} else {
-			line = "  " + line
-		}
-		b.WriteString(line + "\n")
+	b.WriteString("\n" + sTitle.Render(m.tabs[m.active].name()) + "\n")
+	for _, r := range m.tabs[m.active].hints() {
+		b.WriteString(sKey.Render(padRight(r[0], 18)) + " " + r[1] + "\n")
 	}
+	ask := "nothing asks for confirmation here"
+	if m.needsConfirm(true) {
+		ask = "dangerous changes (stop, deploy, delete, edits) ask first: enter confirms"
+	}
+	if m.app.Env.Protected {
+		ask = "protected: every change asks first, enter confirms"
+	}
+	b.WriteString("\n" + sDim.Render(ask) + "\n")
+	b.WriteString(sDim.Render("screens load only when opened; services, components and environments come from " + m.app.Spec.File))
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
-		Render(sTitle.Render("environment") + "\n\n" + b.String())
+		Render(sTitle.Render("rig — keys") + "\n\n" + b.String())
 }
 
 // listKeys moves a selection with the usual keys and reports whether the key was one of them.

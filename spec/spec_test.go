@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const project = `
@@ -83,7 +84,7 @@ func TestEnvironmentPatchesAndVars(t *testing.T) {
 		t.Fatalf("namespace = %q, %v", opt.Namespace, err)
 	}
 	api := p.Services["api"]
-	if api.Replicas != 3 || api.Env["EXTRA"] != "1" || api.Env["NS"] != "shop-kind" || api.Env["MODE"] != "fast" {
+	if api.CountOr(0) != 3 || api.Env["EXTRA"] != "1" || api.Env["NS"] != "shop-kind" || api.Env["MODE"] != "fast" {
 		t.Fatalf("patch not merged: %+v", api)
 	}
 	if len(api.DependsOn) != 1 {
@@ -171,4 +172,36 @@ func contains(s []string, x string) bool {
 		}
 	}
 	return false
+}
+
+func TestDelaySurvivesEnvironmentPatch(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "rig.yaml")
+	y := "project: x\ndefault: e\nservices:\n  a: { delay: 10s, shared: true }\nenvironments:\n  e: { runtime: { type: local }, services: { a: { replicas: 2 } } }\n"
+	if err := os.WriteFile(f, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := Load(f, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := p.Services["a"]; a.Delay != 10*time.Second || !a.Shared || a.CountOr(0) != 2 {
+		t.Fatalf("patched service = %+v", a)
+	}
+}
+
+func TestOnlyByRole(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "rig.yaml")
+	y := "project: x\ndefault: e\nservices:\n  a: {}\n  db: { role: infra }\nenvironments:\n  e: { runtime: { type: local }, only: [app] }\n"
+	if err := os.WriteFile(f, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := Load(f, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Services["a"]; !ok || len(p.Services) != 1 {
+		t.Fatalf("only: [app] must keep the app services: %v", p.ServiceNames())
+	}
 }

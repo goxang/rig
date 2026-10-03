@@ -39,7 +39,9 @@ interface of one **kind**.
 What an adapter can do beyond its interface it offers through **optional interfaces**, found by type
 assertion: `Forwarder` (reach a service port), `Querier` (ad hoc queries in its own language),
 `Actioner` (named actions: `kind create`, `db seed`, `queue purge-all`, ...), `StateStore`,
-`ImageLoader`, `Registrar`, `ProcessLocator`, `Relauncher`, `Pinger`. Front ends discover them, so a
+`ImageLoader`, `Registrar`, `ProcessLocator`, `Relauncher`, `Pinger`, `StatusLister` (every service's
+status in one call: what keeps the TUI light), `Bridger` (reach a service that runs outside the
+runtime under its own name), `LoadScaler` (a generator that runs as instances). Front ends discover them, so a
 new capability needs no change outside the adapter.
 
 ## Writing an adapter
@@ -78,6 +80,10 @@ Runtimes read their per-service settings from a section named after them (`k8s:`
   kubeconfig, contexts, ssh config and agents exactly as the terminal does, and the binary stays small.
 - **The Kubernetes runtime never uses the current context.** An environment names its context; a
   protected environment refuses changes until confirmed (`--yes`, or the TUI's confirm prompt).
+- **Shared infrastructure**: an environment with `infra: <env>` hands its `shared` services to that
+  environment's runtime (`App.Owner`), so status, logs, start and stop go there and `svc://` resolves there.
+- **Front ends load lazily**: the TUI asks the runtime for all services in one call every 3s, and a
+  screen fetches only while it is showing.
 - **Run state lives with the environment**: a ConfigMap on Kubernetes (the whole team sees the tag,
   images and rates), `.rig/<env>/state.json` elsewhere.
 - **Builds**: the `go` builder compiles on the host and adds one layer to a base image with

@@ -310,37 +310,120 @@ func loadCommand() *cobra.Command {
 	run.Flags().DurationVarP(&dur, "for", "d", 0, "stop after")
 	run.Flags().BoolVar(&force, "force", false, "exceed max")
 
-	load.AddCommand(ls, start, stop, rate, upCmd, downCmd, run)
+	scale := one("scale <generator> <replicas|+n|-n>", "run more or fewer generator instances (each sends at the rate)", func(ctx context.Context, a *engine.App, n string, g core.LoadGenerator, args []string) error {
+		if err := a.Guard(); err != nil {
+			return err
+		}
+		ls, ok := g.(core.LoadScaler)
+		if !ok {
+			return fmt.Errorf("%s does not run as replicas", n)
+		}
+		if len(args) != 1 {
+			return fmt.Errorf("scale <generator> <replicas|+n|-n>")
+		}
+		v, err := strconv.Atoi(args[0])
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(args[0], "+") || strings.HasPrefix(args[0], "-") {
+			cur, err := ls.Replicas(ctx)
+			if err != nil {
+				return err
+			}
+			v += cur
+		}
+		if err := ls.SetReplicas(ctx, max(v, 0)); err != nil {
+			return err
+		}
+		fmt.Printf("%s → %d replicas\n", n, max(v, 0))
+		return nil
+	})
+	load.AddCommand(ls, start, stop, rate, upCmd, downCmd, run, scale)
 	return load
 }
 
 func queryCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "query [component] [query...]",
-		Short: "ad hoc query in a component's language: SQL, PromQL, LogQL, redis, kubectl, http, ...",
-		Long:  "With no arguments, lists the components that answer queries and their languages.",
+	var every time.Duration
+	cmd := &cobra.Command{
+		Use:   "query [saved-query [name=value...] | component query...]",
+		Short: "run a saved query from rig.yaml, or an ad hoc one in a component's language (SQL, PromQL, redis, kubectl, ...)",
+		Long:  "With no arguments, lists saved queries and the components that answer queries.",
+		Example: `  rig query                                   # what can be queried
+  rig query db-top-cpu                        # a saved query
+  rig query db-table-rows table=transactions  # a saved query with a parameter
+  rig query db "@Switch SELECT TOP 5 * FROM terminals"
+  rig query prom 'sum(rate(http_requests_total[1m]))' --every 5s`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
-			if len(args) < 2 {
-				qs := a.Queriers()
+			if len(args) == 0 {
+				saved := a.Queries()
 				var rows [][]string
+				for _, n := range a.QueryNames() {
+					q := saved[n]
+					sched := ""
+					if q.Every > 0 {
+						sched = q.Every.String()
+						if q.Active {
+							sched += " (active)"
+						}
+					}
+					rows = append(rows, []string{n, q.Group, q.Source, sched, q.Help})
+				}
+				if len(rows) > 0 {
+					printTable(os.Stdout, []string{"SAVED QUERY", "GROUP", "SOURCE", "EVERY", "WHAT"}, rows)
+					fmt.Println()
+				}
+				qs := a.Queriers()
+				rows = nil
 				for _, n := range engine.SortedKeys(qs) {
 					rows = append(rows, []string{n, qs[n].QueryLanguage()})
 				}
 				printTable(os.Stdout, []string{"COMPONENT", "LANGUAGE"}, rows)
 				return nil
 			}
-			return runQuery(ctx, a, args[0], strings.Join(args[1:], " "))
+			run := func() (core.Table, error) {
+				if _, ok := a.Queries()[args[0]]; ok {
+					params := map[string]string{}
+					for _, kv := range args[1:] {
+						k, v, ok := strings.Cut(kv, "=")
+						if !ok {
+							return core.Table{}, fmt.Errorf("saved query parameters are name=value, got %q", kv)
+						}
+						params[k] = v
+					}
+					return a.RunSaved(ctx, args[0], params)
+				}
+				if len(args) < 2 {
+					return core.Table{}, fmt.Errorf("%s is neither a saved query nor followed by a query (see `rig query`)", args[0])
+				}
+				return a.RunQuery(ctx, args[0], strings.Join(args[1:], " "))
+			}
+			for {
+				t, err := run()
+				if err != nil {
+					return err
+				}
+				if every > 0 {
+					fmt.Print("\033[H\033[2J")
+					fmt.Println(dim(time.Now().Format("15:04:05") + "  every " + every.String()))
+				}
+				printCoreTable(os.Stdout, t)
+				if every == 0 {
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(every):
+				}
+			}
 		}),
 	}
+	cmd.Flags().DurationVarP(&every, "every", "w", 0, "run again on this interval until Ctrl-C")
+	return cmd
 }
 
 func runQuery(ctx context.Context, a *engine.App, comp, q string) error {
-	qs := a.Queriers()
-	qr, ok := qs[comp]
-	if !ok {
-		return fmt.Errorf("%s does not answer queries; have %v", comp, engine.SortedKeys(qs))
-	}
-	t, err := qr.RunQuery(ctx, q)
+	t, err := a.RunQuery(ctx, comp, q)
 	if err != nil {
 		return err
 	}

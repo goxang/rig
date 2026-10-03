@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
@@ -84,6 +85,9 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 	}
 	cmd := sh.New("go", append(args, s.Build.Go)...)
 	cmd.Dir = b.env.Project().Dir
+	if o.Dir != "" {
+		cmd.Dir = o.Dir
+	}
 	cmd.Env = []string{"CGO_ENABLED=0", "GOOS=" + goos, "GOARCH=" + goarch}
 	if err := cmd.Run(ctx); err != nil {
 		return "", err
@@ -121,7 +125,7 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 		return "", err
 	}
 	if o.Push {
-		return ref, remote.Write(tagRef, img, remote.WithContext(ctx))
+		return ref, remote.Write(tagRef, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	}
 	file := filepath.Join(tmp, "image.tar")
 	if err := tarball.WriteToFile(file, tagRef, img); err != nil {
@@ -158,7 +162,7 @@ func (b *Builder) base(ctx context.Context, dir string) (v1.Image, error) {
 		return nil, err
 	}
 	goos, goarch, _ := strings.Cut(b.opt.Platform, "/")
-	return remote.Image(ref, remote.WithContext(ctx), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}))
+	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}))
 }
 
 func (b *Builder) ldflags(ctx context.Context, tag string) string {
