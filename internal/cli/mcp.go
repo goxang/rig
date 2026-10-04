@@ -356,6 +356,23 @@ func mcpTools() []mcpTool {
 		{Name: "rig_task", Description: "run a named task from rig.yaml (e.g. bootstrap); without name lists tasks",
 			InputSchema: schema(map[string]any{"name": pString("task name")}),
 			argv:        func(a map[string]any) ([]string, error) { return append([]string{"task"}, list(a, "name")...), nil }},
+		{Name: "rig_test", Description: "run a test suite from rig.yaml (go test -json) and get its failures with output; failed=true reruns the last run's failures; report=true reads the last run instead of running; without suite lists suites",
+			InputSchema: schema(map[string]any{"suite": pString("suite name"), "run": pString("only tests matching (go test -run)"), "failed": pBool("rerun the last run's failures"),
+				"race": pBool("race detector"), "cover": pBool("coverage"), "bench": pString("benchmarks matching"), "count": pString("run each test n times"), "report": pBool("report of the last run, no run")}),
+			argv: func(a map[string]any) ([]string, error) {
+				if str(a, "report") == "true" {
+					argv := []string{"test", "report"}
+					if s := str(a, "suite"); s != "" {
+						argv = append(argv, "--suite", s)
+					}
+					return argv, nil
+				}
+				argv := append([]string{"test"}, list(a, "suite")...)
+				for _, f := range []string{"run", "failed", "race", "cover", "bench", "count"} {
+					argv = append(argv, flag(a, f, "--"+f)...)
+				}
+				return argv, nil
+			}},
 		{Name: "rig", Description: "any rig command line, for what the other tools do not cover (e.g. [\"do\", \"runtime\", \"events\"], [\"traces\", \"--min\", \"500ms\"])",
 			InputSchema: schema(map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "args"),
 			argv: func(a map[string]any) ([]string, error) {

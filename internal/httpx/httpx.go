@@ -96,10 +96,18 @@ func (e Endpoint) DoURL(ctx context.Context, method, url string, body any, out a
 	}
 	if resp.StatusCode >= 300 {
 		msg := strings.TrimSpace(string(raw))
+		// an API's own error message says more than its JSON envelope; the query string is noise
+		var e struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(raw, &e) == nil && e.Error != "" {
+			msg = e.Error
+		}
 		if len(msg) > 300 {
 			msg = msg[:300]
 		}
-		return fmt.Errorf("%s %s: %s: %s", method, url, resp.Status, msg)
+		path, _, _ := strings.Cut(url, "?")
+		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, msg)
 	}
 	switch o := out.(type) {
 	case nil:

@@ -203,3 +203,19 @@ func TestRenderExpandsEnvVars(t *testing.T) {
 		t.Fatalf("err %v\n%s", err, out)
 	}
 }
+
+func TestFolders(t *testing.T) {
+	root := t.TempDir()
+	write := func(p, s string) {
+		_ = os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755)
+		_ = os.WriteFile(filepath.Join(root, p), []byte(s), 0o644)
+	}
+	write(".docker/k8s/test/a.yaml", "apiVersion: v1\nkind: Service\n")
+	write(".docker/k8s/test/b.yml", "kind: Pod\napiVersion: v1\n")
+	write(".git/x.yaml", "apiVersion: v1\nkind: Service\n")
+	write("configs/app.yaml", "port: 1\n")
+	got := Folders(root)
+	if len(got) != 1 || got[filepath.Join(".docker", "k8s", "test")] != 2 {
+		t.Fatalf("%v", got)
+	}
+}

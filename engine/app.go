@@ -66,11 +66,15 @@ func Open(file, env string) (*App, error) {
 		return nil, err
 	}
 	a := &App{Spec: p, Env: e, comps: map[string]*entry{}}
+	ignoreState(p.Dir)
 	if e == nil {
 		return a, nil
 	}
 	if e.Runtime == nil || e.Runtime.Type == "" {
 		return nil, fmt.Errorf("environment %s: no runtime", e.Name)
+	}
+	if err := a.pickNamespace(); err != nil {
+		return nil, err
 	}
 	rc := *e.Runtime
 	rc.Name, rc.Kind = "runtime", string(core.KindRuntime)
@@ -407,4 +411,33 @@ func (a *App) DefaultImage(ctx context.Context, s *spec.Service) string {
 		return ""
 	}
 	return st["image."+s.Name]
+}
+
+// ignoreState adds .rig/ to the project's .gitignore once rig keeps state there, so pids, logs,
+// profiles and reports never show up as changes to commit. Projects outside git are left alone.
+func ignoreState(dir string) {
+	if _, err := os.Stat(filepath.Join(dir, ".rig")); err != nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return
+	}
+	file := filepath.Join(dir, ".gitignore")
+	raw, _ := os.ReadFile(file)
+	for _, l := range strings.Split(string(raw), "\n") {
+		switch strings.TrimSpace(l) {
+		case ".rig", ".rig/", "/.rig", "/.rig/":
+			return
+		}
+	}
+	text := "\n# rig: pids, logs, profiles, reports, test runs (rig.yaml)\n.rig/\n"
+	if len(raw) == 0 || raw[len(raw)-1] == '\n' {
+		text = text[1:]
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(text)
 }

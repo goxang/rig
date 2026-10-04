@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,16 +30,24 @@ func observeCommands() []*cobra.Command {
 			var panels []panel
 			switch {
 			case len(args) == 1 && a.Spec.Dashboards[args[0]] != nil:
-				for _, p := range a.Spec.Dashboards[args[0]] {
-					panels = append(panels, panel{title: p.Title, query: p.Query, unit: p.Unit})
+				defaults := map[string][]string{}
+				for n, v := range a.Spec.Dashboards[args[0]].Vars {
+					vs, _ := a.VarValues(ctx, v)
+					defaults[n] = engine.DefaultVar(v, vs)
+				}
+				for _, p := range a.Spec.Dashboards[args[0]].Panels {
+					for _, t := range p.Targets() {
+						q := engine.ExpandQuery(t.Query, defaults, since, max(since/60, time.Second))
+						panels = append(panels, panel{title: p.Title, query: q, unit: p.Unit})
+					}
 				}
 			case len(args) > 0:
 				q := strings.Join(args, " ")
 				panels = []panel{{title: q, query: q}}
 			default:
-				for _, d := range engine.SortedKeys(a.Spec.Dashboards) {
-					for _, p := range a.Spec.Dashboards[d] {
-						if p.Source == "" || p.Source == name {
+				for _, d := range a.Spec.DashboardOrder {
+					for _, p := range a.Spec.Dashboards[d].Panels {
+						if p.Query != "" && !strings.Contains(p.Query, "$") && (p.Source == "" || p.Source == name) {
 							panels = append(panels, panel{title: p.Title, query: p.Query, unit: p.Unit})
 						}
 					}
@@ -66,6 +75,41 @@ func observeCommands() []*cobra.Command {
 			return nil
 		}),
 	}
+	var targetsOut, targetsHost string
+	targets := &cobra.Command{
+		Use:   "targets",
+		Short: "the environment's services with metrics as a Prometheus file_sd list (for a local Prometheus container)",
+		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
+			ts, err := a.ScrapeTargets(ctx, targetsHost)
+			if err != nil {
+				return err
+			}
+			raw, err := engine.MarshalTargets(ts)
+			if err != nil {
+				return err
+			}
+			if targetsOut == "" {
+				fmt.Println(string(raw))
+				return nil
+			}
+			if err := os.MkdirAll(filepath.Dir(targetsOut), 0o755); err != nil {
+				return err
+			}
+			// file_sd reloads on rename, never on a half-written file
+			tmp := targetsOut + ".tmp"
+			if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+				return err
+			}
+			if err := os.Rename(tmp, targetsOut); err != nil {
+				return err
+			}
+			fmt.Printf("%d targets of %s in %s\n", len(ts), a.Env.Name, targetsOut)
+			return nil
+		}),
+	}
+	targets.Flags().StringVarP(&targetsOut, "output", "o", "", "write the list to this file instead of printing it")
+	targets.Flags().StringVar(&targetsHost, "host", "host.docker.internal", "the host's name inside the Prometheus container, for local processes")
+	metrics.AddCommand(targets)
 	metrics.Flags().StringVar(&source, "source", "", "metrics component (default: the first)")
 	metrics.Flags().DurationVar(&since, "since", 15*time.Minute, "time range")
 
@@ -201,7 +245,7 @@ func observeCommands() []*cobra.Command {
 			return nil
 		}),
 	}
-	return []*cobra.Command{metrics, traces, profile, debug, alerts}
+	return []*cobra.Command{metrics, traces, profile, debug, ideCommand(), alerts}
 }
 
 type panel struct{ title, query, unit string }

@@ -24,10 +24,12 @@ type Project struct {
 	Services     map[string]*Service     `yaml:"services"`
 	Environments map[string]*Environment `yaml:"environments"`
 	Components   map[string]*Component   `yaml:"components"`
-	Dashboards   map[string][]Panel      `yaml:"dashboards"`
-	Manifests    []string                `yaml:"manifests"`
+	Dashboards   map[string]*Dashboard   `yaml:"dashboards"`
+	// Tests are named test suites: `rig test <name>` and the Tests screen.
+	Tests     map[string]*TestSuite `yaml:"tests"`
+	Manifests []string              `yaml:"manifests"`
 	// Tasks are named lists of shell steps: `rig task <name>`.
-	Tasks map[string][]string `yaml:"tasks"`
+	Tasks map[string]Task `yaml:"tasks"`
 	// Queries are saved queries: run on demand, or on a schedule while the UI is open.
 	Queries map[string]*Query `yaml:"queries"`
 	// Secrets are names ${NAME} may use whose values live outside the repo: the environment, then
@@ -35,6 +37,16 @@ type Project struct {
 	Secrets map[string]Secret `yaml:"secrets"`
 	// Alerts are watched while the UI is open and shown in its header; `rig alerts` checks them once.
 	Alerts []Alert `yaml:"alerts"`
+	// Reports name the metrics a run is measured by: `rig report <name>`, a test suite's report:,
+	// the Load screen's W.
+	Reports map[string]*Report `yaml:"reports"`
+	// Sections split the Services screen by business area; services in none fall under "other".
+	Sections map[string]*Section `yaml:"sections"`
+
+	// DashboardOrder, TestOrder and SectionOrder are the names as rig.yaml lists them.
+	DashboardOrder []string `yaml:"-"`
+	TestOrder      []string `yaml:"-"`
+	SectionOrder   []string `yaml:"-"`
 
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
@@ -64,6 +76,9 @@ type Service struct {
 	Shared bool `yaml:"shared"`
 	// Delay is how long up waits after the service's dependencies are ready before starting it.
 	Delay time.Duration `yaml:"delay"`
+	// Manual services start only when named (or through their group or section), never with "all"
+	// or their role (rig infra up).
+	Manual bool `yaml:"manual"`
 
 	// Sections owned by adapters (local:, docker:, k8s:, ...), decoded by the adapter that reads them.
 	Sections map[string]yaml.Node `yaml:",inline"`
@@ -99,7 +114,7 @@ type Environment struct {
 	Components  map[string]*Component `yaml:"components"`
 	Services    map[string]yaml.Node  `yaml:"services"`
 	// Tasks replace the project's tasks of the same name in this environment.
-	Tasks map[string][]string `yaml:"tasks"`
+	Tasks map[string]Task `yaml:"tasks"`
 	// Queries replace the project's queries of the same name in this environment.
 	Queries map[string]*Query `yaml:"queries"`
 	// Alerts add to the project's alerts in this environment.
@@ -157,13 +172,188 @@ func (c *Component) Decode(v any) error {
 	return nil
 }
 
+// Section is a part of the Services screen; Services are names, groups or roles.
+type Section struct {
+	Name     string   `yaml:"-"`
+	Help     string   `yaml:"help"`
+	Services []string `yaml:"services"`
+}
+
+// SectionMap maps each service to the first section listing it; services in none are left out.
+func (p *Project) SectionMap() map[string]string {
+	out := map[string]string{}
+	for _, n := range p.SectionOrder {
+		if len(p.Sections[n].Services) == 0 {
+			continue
+		}
+		for _, svc := range p.Select(p.Sections[n].Services) {
+			if _, ok := out[svc]; !ok {
+				out[svc] = n
+			}
+		}
+	}
+	return out
+}
+
+// Dashboard is a list of panels, or {vars:, panels:} when its queries use $variables.
+// Task is a list of shell steps, or {help, steps} to say what it is for.
+type Task struct {
+	Help  string   `yaml:"help"`
+	Steps []string `yaml:"steps"`
+}
+
+func (t *Task) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		return n.Decode(&t.Steps)
+	}
+	type plain Task
+	return n.Decode((*plain)(t))
+}
+
+type Dashboard struct {
+	Help string `yaml:"help"`
+	// Vars are the dashboard's $variables, picked in the UI; queries use them as $name.
+	Vars   map[string]*DashVar `yaml:"vars"`
+	Panels []Panel             `yaml:"panels"`
+	// VarOrder is Vars as rig.yaml lists them.
+	VarOrder []string `yaml:"-"`
+}
+
+func (d *Dashboard) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		return n.Decode(&d.Panels)
+	}
+	type plain Dashboard
+	if err := n.Decode((*plain)(d)); err != nil {
+		return err
+	}
+	d.VarOrder = mappingKeys(n, "vars")
+	return nil
+}
+
+// DashVar is a dashboard variable: fixed Values, or the values of Label over the series Query
+// returns (Grafana's label_values). Multi lets several be picked; All adds an "all" choice.
+type DashVar struct {
+	Values  []string `yaml:"values"`
+	Source  string   `yaml:"source"`
+	Query   string   `yaml:"query"`
+	Label   string   `yaml:"label"`
+	Default string   `yaml:"default"`
+	Multi   bool     `yaml:"multi"`
+	All     bool     `yaml:"all"`
+}
+
 type Panel struct {
-	Title  string `yaml:"title"`
+	// Row starts a new titled row of panels; a panel with only row: is the row's header.
+	Row   string `yaml:"row"`
+	Title string `yaml:"title"`
+	Query string `yaml:"query"`
+	// Queries are several queries drawn together (p50, p95 and p99), each with its own legend.
+	Queries []PanelQuery `yaml:"queries"`
+	Unit    string       `yaml:"unit"`
+	Source  string       `yaml:"source"`
+	Legend  string       `yaml:"legend"`
+	Help    string       `yaml:"help"`
+	// Kind: line (default), stat, gauge, bar (one bar per series, its last value), table.
+	Kind string `yaml:"kind"`
+	// Width is out of 24 columns, like Grafana (default 12, stat and gauge 6); Height in lines.
+	Width  int `yaml:"width"`
+	Height int `yaml:"height"`
+	// Min and Max bound a gauge (default 0..100 for %, else 0..the largest value).
+	Min *float64 `yaml:"min"`
+	Max *float64 `yaml:"max"`
+	// Warn and Crit colour stat, gauge and bar values amber and red past them.
+	Warn *float64 `yaml:"warn"`
+	Crit *float64 `yaml:"crit"`
+	// Stack draws line series stacked.
+	Stack bool `yaml:"stack"`
+}
+
+type PanelQuery struct {
 	Query  string `yaml:"query"`
-	Unit   string `yaml:"unit"`
-	Source string `yaml:"source"`
 	Legend string `yaml:"legend"`
-	Kind   string `yaml:"kind"` // line (default), stat, bar
+}
+
+// Targets are the panel's queries: Queries, else Query with the panel's legend.
+func (p Panel) Targets() []PanelQuery {
+	if len(p.Queries) > 0 {
+		return p.Queries
+	}
+	if p.Query == "" {
+		return nil
+	}
+	return []PanelQuery{{Query: p.Query, Legend: p.Legend}}
+}
+
+// TestSuite is a set of Go packages tested together (go test -json), with the flags it always needs.
+type TestSuite struct {
+	Name     string   `yaml:"-"`
+	Help     string   `yaml:"help"`
+	Group    string   `yaml:"group"`
+	Packages []string `yaml:"packages"`
+	// Exclude drops packages from Packages (go list patterns: ./pkg/tests/...), so a suite can be
+	// "everything but the integration tests".
+	Exclude []string `yaml:"exclude"`
+	// Dir is where go test runs (default the project directory).
+	Dir  string `yaml:"dir"`
+	Run  string `yaml:"run"`
+	Skip string `yaml:"skip"`
+	Tags string `yaml:"tags"`
+	// Env reaches the test binaries; svc:// addresses resolve in the active environment.
+	Env      map[string]string `yaml:"env"`
+	Timeout  time.Duration     `yaml:"timeout"`
+	Race     bool              `yaml:"race"`
+	Cover    bool              `yaml:"cover"`
+	Short    bool              `yaml:"short"`
+	Count    int               `yaml:"count"`
+	Parallel int               `yaml:"parallel"`
+	// Bench runs benchmarks matching it (go test -bench); Benchtime and Benchmem tune them.
+	Bench     string `yaml:"bench"`
+	Benchtime string `yaml:"benchtime"`
+	Benchmem  bool   `yaml:"benchmem"`
+	// Flags are more go test flags; Args go to the test binary after -args.
+	Flags []string `yaml:"flags"`
+	Args  []string `yaml:"args"`
+	// Needs are services (or groups) the suite expects up; the UI warns when they are not.
+	Needs []string `yaml:"needs"`
+	// Report is a reports: entry measured over each run and saved with it.
+	Report string `yaml:"report"`
+}
+
+type Report struct {
+	Help string `yaml:"help"`
+	// Source is the metrics component (default the first).
+	Source  string         `yaml:"source"`
+	Metrics []ReportMetric `yaml:"metrics"`
+}
+
+// ReportMetric is one query, summarised per series by Stats over the run's window: avg, min, max,
+// last, p50, p90, p95, p99 (default avg, max, last).
+type ReportMetric struct {
+	Title  string   `yaml:"title"`
+	Query  string   `yaml:"query"`
+	Unit   string   `yaml:"unit"`
+	Legend string   `yaml:"legend"`
+	Stats  []string `yaml:"stats"`
+}
+
+// mappingKeys lists the keys of the mapping under key in n, in file order.
+func mappingKeys(n *yaml.Node, key string) []string {
+	if n.Kind == yaml.DocumentNode && len(n.Content) > 0 {
+		n = n.Content[0]
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != key || n.Content[i+1].Kind != yaml.MappingNode {
+			continue
+		}
+		var out []string
+		m := n.Content[i+1]
+		for j := 0; j+1 < len(m.Content); j += 2 {
+			out = append(out, m.Content[j].Value)
+		}
+		return out
+	}
+	return nil
 }
 
 // Section decodes an adapter-owned section of the service, false when absent.

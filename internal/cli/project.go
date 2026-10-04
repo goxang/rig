@@ -87,7 +87,7 @@ func projectCommands() []*cobra.Command {
 	}
 
 	var graph string
-	var lint, tree bool
+	var lint, tree, folders bool
 	manifests := &cobra.Command{
 		Use:   "manifests [dir...]",
 		Short: "scan Kubernetes manifests (any layout): objects, how they relate, what is broken",
@@ -95,6 +95,20 @@ func projectCommands() []*cobra.Command {
 environment's runtime manifests, else .), renders kustomizations, links the objects (Service→workload,
 Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccount, ...) and lints them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if folders {
+				root := "."
+				if a, err := open(); err == nil {
+					root = a.Spec.Dir
+					a.Close()
+				}
+				found := manifest.Folders(root)
+				var rows [][]string
+				for _, d := range engine.SortedKeys(found) {
+					rows = append(rows, []string{d, fmt.Sprint(found[d])})
+				}
+				printTable(os.Stdout, []string{"FOLDER", "FILES"}, rows)
+				return nil
+			}
 			dirs := args
 			if len(dirs) == 0 {
 				dirs = projectManifestDirs()
@@ -147,6 +161,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	manifests.Flags().StringVar(&graph, "graph", "", "relations of one object: Kind/name or name")
 	manifests.Flags().BoolVar(&lint, "lint", false, "every issue")
 	manifests.Flags().BoolVar(&tree, "tree", false, "files and the objects in them")
+	manifests.Flags().BoolVar(&folders, "folders", false, "every folder of the project holding manifests")
 
 	hosts := &cobra.Command{
 		Use: "hosts [ssh <host> [command...]]", Short: "servers and nodes: usage, and a shell on any of them",
@@ -199,12 +214,11 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		Use: "task [name [args...]]", Short: "run a task from rig.yaml (its shell steps, in order, args as $1... and $RIG_ARGS), or list them",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
-				tasks := a.Tasks()
 				var rows [][]string
 				for _, n := range a.TaskNames() {
-					rows = append(rows, []string{n, strings.Join(tasks[n], " && ")})
+					rows = append(rows, []string{n, a.TaskHelp(n)})
 				}
-				printTable(os.Stdout, []string{"TASK", "STEPS"}, rows)
+				printTable(os.Stdout, []string{"TASK", "WHAT IT DOES"}, rows)
 				return nil
 			}
 			return a.RunTask(ctx, args[0], args[1:], os.Stdout)
@@ -348,7 +362,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, vars, secret, infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
+	return []*cobra.Command{initCmd, env, vars, secret, nsCommand(), infraCommand(), task, source, manifests, hosts, mcpCommand(), plugins, version}
 }
 
 func projectManifestDirs() []string {

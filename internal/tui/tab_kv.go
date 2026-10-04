@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func (t *kvTab) hints() [][2]string {
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
-	return append(h, [2]string{"c", "store"}, [2]string{"F", "fill from configs (kv-* tasks)"})
+	return append(h, [2]string{"o", "editor"}, [2]string{"c", "store"}, [2]string{"F", "load config files (kv-* tasks)"})
 }
 func (t *kvTab) interval() time.Duration { return 0 }
 
@@ -227,17 +228,81 @@ func editKV(m *model, comp, key string, value []byte) tea.Cmd {
 	}
 	_, _ = f.Write(pretty2(value))
 	f.Close()
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if ed == "" {
-		ed = "vi"
-	}
 	file := f.Name()
-	c := exec.Command("sh", "-c", ed+` "$1"`, "rig-edit", file)
+	c := exec.Command("sh", "-c", editorCmd()+` "$1"`, "rig-edit", file)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return kvEditedMsg{comp: comp, key: key, file: file, original: value, err: err}
+	})
+}
+
+// editors are the choices of o; each command must wait until the file is closed, since the value is
+// saved when it returns.
+var editors = [][2]string{
+	{"nano", "nano"},
+	{"vim", "vim"},
+	{"VS Code", "code --wait"},
+	{"text editor (GNOME)", "gnome-text-editor --standalone"},
+	{"Kate", "kate --block"},
+	{"Mousepad", "mousepad --disable-server"},
+	{"Notepad", "notepad"},
+}
+
+func editorFile() string {
+	dir, _ := os.UserConfigDir()
+	return filepath.Join(dir, "rig", "editor")
+}
+
+// editorCmd is $RIG_EDITOR, the one picked with o, $VISUAL, $EDITOR, or vi.
+func editorCmd() string {
+	if e := os.Getenv("RIG_EDITOR"); e != "" {
+		return e
+	}
+	if raw, err := os.ReadFile(editorFile()); err == nil && len(bytes.TrimSpace(raw)) > 0 {
+		return string(bytes.TrimSpace(raw))
+	}
+	for _, v := range []string{"VISUAL", "EDITOR"} {
+		if e := os.Getenv(v); e != "" {
+			return e
+		}
+	}
+	return "vi"
+}
+
+// pickEditor offers the editors installed here and remembers the choice for every project.
+func pickEditor(m *model) {
+	var names, desc []string
+	cmds := map[string]string{}
+	sel := 0
+	for _, e := range editors {
+		bin, _, _ := strings.Cut(e[1], " ")
+		if _, err := exec.LookPath(bin); err != nil {
+			continue
+		}
+		if e[1] == editorCmd() {
+			sel = len(names)
+		}
+		names, desc = append(names, e[0]), append(desc, e[1])
+		cmds[e[0]] = e[1]
+	}
+	if len(names) == 0 {
+		m.setStatus("none of nano, vim, code, gnome-text-editor is installed: set $RIG_EDITOR", true)
+		return
+	}
+	m.pick("edit values with", names, desc, sel, false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		f := editorFile()
+		err := os.MkdirAll(filepath.Dir(f), 0o755)
+		if err == nil {
+			err = os.WriteFile(f, []byte(cmds[c[0]]+"\n"), 0o644)
+		}
+		if err != nil {
+			m.setStatus("remember editor: "+err.Error(), true)
+			return nil
+		}
+		m.setStatus("values open in "+c[0], false)
+		return nil
 	})
 }
 
@@ -352,6 +417,9 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 		case "F":
 			m.pickTask("kv-")
+			return nil
+		case "o":
+			pickEditor(m)
 			return nil
 		case "R":
 			if len(t.related) > 0 {

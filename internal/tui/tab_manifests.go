@@ -35,6 +35,44 @@ type manifestsTab struct {
 	file string // in the tree: the file whose objects are listed
 }
 
+type manifestFoldersMsg struct {
+	root    string
+	folders map[string]int
+}
+
+// pickFolders offers every manifest folder of the project, the ones showing marked.
+func (t *manifestsTab) pickFolders(m *model, msg manifestFoldersMsg) {
+	if len(msg.folders) == 0 {
+		m.setStatus("no manifests under "+msg.root, true)
+		return
+	}
+	names := make([]string, 0, len(msg.folders))
+	for d := range msg.folders {
+		names = append(names, d)
+	}
+	sort.Strings(names)
+	var desc, chosen []string
+	for _, d := range names {
+		desc = append(desc, fmt.Sprintf("%d files", msg.folders[d]))
+		for _, cur := range t.dirs {
+			if abs(cur) == filepath.Join(msg.root, d) {
+				chosen = append(chosen, d)
+			}
+		}
+	}
+	m.pickMany("manifest folders to show (space marks, enter shows them)", names, desc, chosen, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		t.dirs = nil
+		for _, d := range c {
+			t.dirs = append(t.dirs, filepath.Join(msg.root, d))
+		}
+		t.sel, t.offset, t.cwd, t.file = 0, 0, "", ""
+		return t.scan(m)
+	})
+}
+
 type manifestsMsg struct {
 	gen int
 	set *manifest.Set
@@ -49,8 +87,8 @@ type applier interface {
 func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
-	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"/", "filter"}, {"space", "mark"}, {"a", "apply"}, {"n", "new service"},
-		{"i/I", "issues file/all"}, {"d", "folders"}, {"r", "rescan"}, {"J/K", "yaml"}}
+	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+		{"a", "apply"}, {"/", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"J/K", "yaml"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
@@ -230,6 +268,8 @@ func (t *manifestsTab) fileInView() string {
 
 func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case manifestFoldersMsg:
+		t.pickFolders(m, msg)
 	case manifestsMsg:
 		if msg.gen == m.gen {
 			t.set, t.err = msg.set, ""
@@ -292,16 +332,29 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.issues = "all"
 		case "a":
 			return t.apply(m)
+		case "e", "s", "L":
+			e, ok := t.current()
+			if !ok || e.obj == nil {
+				m.setStatus("select an object (t shows objects)", true)
+				return nil
+			}
+			switch msg.String() {
+			case "e":
+				return editManifest(m, e.obj, nil)
+			case "s":
+				return syncManifest(m, e.obj, t.serviceOf(m, e.obj))
+			}
+			return editLive(m, e.obj)
+		case "o":
+			pickEditor(m)
 		case "n":
 			return t.newService(m)
 		case "r":
 			return t.scan(m)
 		case "d":
-			m.ask("folders (space separated)", strings.Join(t.dirs, " "), func(v string) tea.Cmd {
-				t.dirs = strings.Fields(v)
-				t.sel, t.offset, t.cwd, t.file = 0, 0, "", ""
-				return t.scan(m)
-			})
+			root := m.app.Spec.Dir
+			m.setStatus("looking for manifest folders…", false)
+			return func() tea.Msg { return manifestFoldersMsg{root: root, folders: manifest.Folders(root)} }
 		case "J":
 			t.yamlOff += 5
 		case "K":
@@ -426,6 +479,28 @@ func addService(file, name, role, groups, image, workload, manifestFile string) 
 }
 
 func (t *manifestsTab) view(m *model, w, h int) string {
+	return m.withStrip("mf:mode", []string{"objects", "folders and files"}, boolInt(t.tree), h, func(h int) string { return t.body(m, w, h) })
+}
+
+func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
+	if i, ok := stripHit(h, "mf:mode"); ok {
+		if (i == 1) != t.tree {
+			t.tree, t.sel, t.offset, t.file = i == 1, 0, 0, ""
+		}
+		return nil
+	}
+	if h.id == "mf:rows" && t.issues == "" {
+		if i := t.offset + h.y; i < len(t.entries()) {
+			t.sel = i
+			if h.double {
+				return t.update(m, tea.KeyMsg{Type: tea.KeyEnter})
+			}
+		}
+	}
+	return nil
+}
+
+func (t *manifestsTab) body(m *model, w, h int) string {
 	if t.err != "" {
 		return panel("manifests", sRed.Render(t.err), w, h, true)
 	}
@@ -502,6 +577,7 @@ func (t *manifestsTab) view(m *model, w, h int) string {
 		title += fmt.Sprintf(" · %d marked", n)
 	}
 	list := panel(title, table([]string{"KIND", "NAME", ""}, []int{16, lw - 26, 4}, rows, t.sel, t.offset, h-2), lw, h, true)
+	m.zone("mf:rows", 1, 2, lw-2, min(h-3, len(rows)-t.offset))
 	rw := w - lw
 	e, ok := t.current()
 	if !ok || e.obj == nil {
@@ -630,4 +706,24 @@ func masked(o *manifest.Object) any {
 		}
 	}
 	return m
+}
+
+// serviceOf is the rig service whose workload o is (or is bundled with), for the env vars its deploys inject.
+func (t *manifestsTab) serviceOf(m *model, o *manifest.Object) string {
+	k, ok := m.k8s()
+	if !ok {
+		return ""
+	}
+	for _, n := range m.app.Spec.ServiceNames() {
+		objs, _, err := k.Objects(m.app.Spec.Services[n])
+		if err != nil {
+			continue
+		}
+		for _, x := range objs {
+			if x.ID() == o.ID() && abs(x.File) == abs(o.File) {
+				return n
+			}
+		}
+	}
+	return ""
 }

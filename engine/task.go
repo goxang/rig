@@ -11,22 +11,39 @@ import (
 	"strings"
 
 	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 var svcRef = regexp.MustCompile(`svc://[A-Za-z0-9_.-]+(:[A-Za-z0-9_-]+)?`)
 
 // Tasks are the project's tasks with this environment's replacing those of the same name.
-func (a *App) Tasks() map[string][]string {
-	out := map[string][]string{}
-	for n, steps := range a.Spec.Tasks {
-		out[n] = steps
+func (a *App) Tasks() map[string]spec.Task {
+	out := map[string]spec.Task{}
+	for n, t := range a.Spec.Tasks {
+		out[n] = t
 	}
 	if a.Env != nil {
-		for n, steps := range a.Env.Tasks {
-			out[n] = steps
+		for n, t := range a.Env.Tasks {
+			out[n] = t
 		}
 	}
 	return out
+}
+
+// TaskHelp is a task's help, or its steps' first lines when it has none.
+func (a *App) TaskHelp(name string) string {
+	t := a.Tasks()[name]
+	if t.Help != "" {
+		return t.Help
+	}
+	var steps []string
+	for _, st := range t.Steps {
+		first, _, _ := strings.Cut(strings.TrimSpace(st), "\n")
+		if !strings.HasPrefix(first, `[ -n "${RIG_YES`) {
+			steps = append(steps, first)
+		}
+	}
+	return strings.Join(steps, " && ")
 }
 
 func (a *App) TaskNames() []string {
@@ -42,7 +59,8 @@ func (a *App) TaskNames() []string {
 // failure. svc:// addresses in a step become a host:port reachable from here, and a nested `rig`
 // inherits this project, environment and confirmation. args reach every step as $1... and $RIG_ARGS.
 func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Writer) error {
-	steps, ok := a.Tasks()[name]
+	task, ok := a.Tasks()[name]
+	steps := task.Steps
 	if !ok {
 		return fmt.Errorf("no task %q in %s (have %v)", name, a.envName(), a.TaskNames())
 	}

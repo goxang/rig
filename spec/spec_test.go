@@ -1,12 +1,15 @@
 package spec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const project = `
@@ -226,5 +229,49 @@ func TestSecretsResolve(t *testing.T) {
 	}
 	if st, _ := os.Stat(func() string { s, _ := SecretsFile("p"); return s }()); st.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", st.Mode())
+	}
+}
+
+func TestSections(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "rig.yaml")
+	y := `version: 1
+project: p
+services:
+  db: { role: infra }
+  api: { groups: [core] }
+  worker: { groups: [core] }
+  ui: {}
+sections:
+  web: { services: [ui, api] }
+  core: { services: [core] }
+`
+	if err := os.WriteFile(f, []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := Load(f, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := p.SectionMap()
+	want := map[string]string{"ui": "web", "api": "web", "worker": "core"}
+	if fmt.Sprint(got) != fmt.Sprint(want) || fmt.Sprint(p.SectionOrder) != "[web core]" {
+		t.Fatalf("sections %v order %v", got, p.SectionOrder)
+	}
+	if err := os.WriteFile(f, []byte(y+"  bad: { services: [nope] }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(f, ""); err == nil {
+		t.Fatal("a section naming an unknown service loads")
+	}
+}
+
+func TestTaskForms(t *testing.T) {
+	var ts map[string]Task
+	if err := yaml.Unmarshal([]byte("a: [x, y]\nb: {help: hi, steps: [z]}\n"), &ts); err != nil {
+		t.Fatal(err)
+	}
+	if len(ts["a"].Steps) != 2 || ts["b"].Help != "hi" || ts["b"].Steps[0] != "z" {
+		t.Fatalf("%+v", ts)
 	}
 }

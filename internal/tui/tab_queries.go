@@ -449,6 +449,12 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 }
 
 func (t *queriesTab) click(m *model, h hit) tea.Cmd {
+	if i, ok := stripHit(h, "q:mode"); ok {
+		if (i == 1) != t.history {
+			t.history, t.resultFor = i == 1, ""
+		}
+		return nil
+	}
 	if strings.HasPrefix(h.id, "result:") {
 		t.focusRes = true
 		t.result.click(h)
@@ -561,9 +567,15 @@ func (t *queriesTab) historyView(m *model, w, h int) string {
 }
 
 func (t *queriesTab) view(m *model, w, h int) string {
-	if t.history {
-		return t.historyView(m, w, h)
-	}
+	return m.withStrip("q:mode", []string{"saved queries", "history (H)"}, boolInt(t.history), h, func(h int) string {
+		if t.history {
+			return t.historyView(m, w, h)
+		}
+		return t.savedView(m, w, h)
+	})
+}
+
+func (t *queriesTab) savedView(m *model, w, h int) string {
 	t.list.set(t.rows(m))
 	if len(t.list.rows) == 0 && len(t.langs) == 0 {
 		return panel("queries", sDim.Render("no saved queries and no component that answers queries.\n\nadd saved queries to rig.yaml:\n\nqueries:\n  slow-requests:\n    source: prom\n    query: topk(5, rate(http_request_duration_seconds_sum[5m]))\n    every: 30s"), w, h, true)

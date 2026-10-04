@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -221,3 +222,38 @@ func Encode(objs []*Object) ([]byte, error) {
 	}
 	return b.Bytes(), nil
 }
+
+// Folders finds every folder under root holding Kubernetes manifests (a YAML file with apiVersion:
+// and kind:), as root-relative paths with their manifest file counts. Hidden folders are skipped,
+// except .docker, where projects tend to keep them.
+func Folders(root string) map[string]int {
+	out := map[string]int{}
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			n := d.Name()
+			if p != root && (strings.HasPrefix(n, ".") && n != ".docker" || n == "node_modules" || n == "vendor" || n == "testdata") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ext := filepath.Ext(p); ext != ".yml" && ext != ".yaml" {
+			return nil
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil || !apiVersionLine.Match(raw) || !kindLine.Match(raw) {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, filepath.Dir(p))
+		out[rel]++
+		return nil
+	})
+	return out
+}
+
+var (
+	apiVersionLine = regexp.MustCompile(`(?m)^apiVersion:\s*\S`)
+	kindLine       = regexp.MustCompile(`(?m)^kind:\s*\S`)
+)

@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"io"
 	"os/exec"
 	"regexp"
@@ -101,6 +102,30 @@ type Status struct {
 	Image     string
 	Message   string
 	Instances []Instance
+	// Autoscale is the range an autoscaler keeps the replica count in, nil when none does.
+	Autoscale *Bounds
+}
+
+// Bounds is an autoscaler's replica range; CPU and Memory are the average utilization (percent of
+// requests) it scales on, used when SetAutoscale creates one (0: not a target).
+type Bounds struct{ Min, Max, CPU, Memory int }
+
+// Autoscaler is a runtime whose services can have an autoscaler (a Kubernetes HPA) bounding their scale.
+// SetAutoscale moves an existing autoscaler's range, or creates one with b's targets.
+type Autoscaler interface {
+	SetAutoscale(ctx context.Context, s *spec.Service, b Bounds) error
+}
+
+// Resources are one container's requests and limits, as Kubernetes quantities ("" leaves one unset).
+type Resources struct {
+	Container                                  string
+	CPURequest, CPULimit, MemRequest, MemLimit string
+}
+
+// Resourcer is a runtime whose services' containers have requests and limits to read and change.
+type Resourcer interface {
+	Resources(ctx context.Context, s *spec.Service) ([]Resources, error)
+	SetResources(ctx context.Context, s *spec.Service, r Resources) error
 }
 
 // Workload is something running in the environment, managed by rig or not.
@@ -248,6 +273,14 @@ type Profiler interface {
 	Capture(ctx context.Context, r ProfileRequest) (Profile, error)
 }
 
+// DebugPort is the local port a service's debugger listens on: the same every time, so an IDE's
+// remote-debug configuration written once keeps working.
+func DebugPort(service string) int {
+	h := fnv.New32a()
+	h.Write([]byte(service))
+	return 40000 + int(h.Sum32()%5000)
+}
+
 type DebugSession struct {
 	Addr  string
 	Hint  string
@@ -346,6 +379,8 @@ type LoadStatus struct {
 	Failed  int64
 	Latency Latency
 	Extra   map[string]string
+	// PerInstance is each generator instance's sent counter, when the generator reports one.
+	PerInstance map[string]int64
 }
 
 type LoadGenerator interface {
@@ -407,6 +442,13 @@ type Browser interface {
 type PathQuerier interface {
 	QueryAt(ctx context.Context, path []string, q string) (Table, error)
 	SuggestQuery(path []string) string
+}
+
+// Editor changes what a Browse of path returned in t: Delete removes rows (indexes into t.Rows), Set
+// writes one cell. Each refuses a level it cannot change safely.
+type Editor interface {
+	Delete(ctx context.Context, path []string, t Table, rows []int) error
+	Set(ctx context.Context, path []string, t Table, row, col int, value string) error
 }
 
 type Querier interface {

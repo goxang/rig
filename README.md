@@ -6,7 +6,8 @@ CLI and one terminal UI.
 
 - **Services**: up (in dependency order, with start delays), down, start, stop, restart, scale (also `+1`), deploy by tag, build (also from a git ref), logs, exec
 - **Infrastructure**: started once and left alone; one shared instance can serve local processes, docker and kind (`rig infra`)
-- **Observe**: Grafana-style charts, traces filtered by service, operation and duration, profiles, debuggers
+- **Observe**: Grafana-style dashboards (rows, variables, stat/gauge/bar/table panels, clickable legends), traces filtered by service, operation and duration, profiles, debuggers
+- **Tests**: go test suites from `rig.yaml` with live results, filters, output, reruns of failures, race, coverage, benchmarks against the last run, JUnit
 - **Data & load**: databases, caches, queues, key-value stores (browse, edit, restart readers), load generators (rate and instances), saved queries that run on a schedule
 - **Alerts**: node cpu/memory/disk (or any query) over a threshold, in the TUI header and `rig alerts`
 - **Secrets**: `rig secret set`, kept outside the repo; `helm:` charts deploy like manifests
@@ -42,12 +43,18 @@ rig vars set MAIN_DB=x        # manifest variables per environment; rig setenv a
 rig data db Switch tables     # walk databases and caches
 rig logs -E '(?i)timeout' api # regex over logs
 rig alerts                    # what is over its thresholds
+rig test unit --race          # a test suite; --failed reruns the failures, -o file saves the report
+rig test ./pkg/x/...          # any packages, no suite needed
+rig report load --since 20m   # metrics of a load test (reports: in rig.yaml) as a markdown table
+rig ns --create me            # Kubernetes: switch the environment to a new namespace (rig ns lists them)
+rig metrics targets -o f.json # services as Prometheus file_sd targets, for a local Prometheus
 rig resume last               # the TUI as a saved session (S) left it
+rig ide                       # GoLand / VS Code "rig: <service>" remote-debug configs; D in the TUI, then run one
 rig mcp                       # MCP server for AI agents
 ```
 
 `-e <env>` (or `$RIG_ENV`) picks the environment. A `protected: true` environment refuses changes
-without `--yes`; pushing over an existing image tag needs it too.
+without `--yes`; pushing over an existing image tag needs it too. In the TUI the confirmation is the `--yes`.
 
 ## Terminal UI
 
@@ -58,20 +65,26 @@ and kind never ask. `?` shows the keys of the current screen.
 
 | screen | |
 |---|---|
-| Services | your services, `i` switches to infrastructure or both; mark several with `space` (`a` all shown), then start/stop/restart/scale/deploy them together; `enter` opens one: instances and its live log |
-| Logs | the services you pick, merged, or one instance |
-| Metrics | dashboards from rig.yaml, on demand |
+| Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
+| Logs | the services you pick, merged, or one instance; `←` `→` scroll sideways, dragging over lines copies them |
+| Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session |
-| KV | browse and edit keys; `R` restarts the services that read the edited key; `F` fills the store (`kv-*` tasks) |
-| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `Q` queries where you stand; `/` filters with globs |
-| Load | generators: rate, instances, `c` their KV config, `v` their env |
-| Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`) |
-| Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell |
+| KV | browse, edit and delete keys right in the store; `o` picks the editor (nano, vim, VS Code, the desktop's); `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
+| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand; `/` filters with globs |
+| Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report |
+| Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`); `e` edits an object in your editor and saves it into its file, `s` writes what the cluster runs into the file (only fields someone set, `$VARS` kept), `L` edits it on the cluster; `d` picks among every manifest folder of the project |
+| Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell (double-click) |
+| Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
-`T` runs a task from rig.yaml. `S` saves the session (screens, query results and history) for `rig resume`,
+Screens switch with `1`-`0` and `` ` `` (Tests), or a click on their name; tabs inside a screen
+(dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too.
+`T` runs a task from rig.yaml, `N` switches or creates a Kubernetes namespace, and the Metrics screen's
+`m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
-the terminal can select text; the header shows alerts (`A`).
+the terminal can select text; the header shows alerts (`A`). `q` quits at once unless a test run or an
+operation is still going, or load generators are sending: those stop with rig (tests, queries, port
+forwards) or keep going without it (generators, services), and it asks.
 
 ## Agents
 
@@ -84,7 +97,7 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 `rig load`, `rig data`, `rig alerts`.
 
 Tools: `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
-`rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, and `rig` for any other command.
+`rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, and `rig` for any other command.
 Each runs the CLI, so protections apply: changes to a protected environment need `"confirm": true`.
 
 ## rig.yaml

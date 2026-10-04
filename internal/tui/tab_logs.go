@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -23,18 +21,15 @@ const logCap = 5000
 // logsTab streams the logs of the services the user picks (all of them only when asked), merged,
 // or of one instance of one service.
 type logsTab struct {
-	lines    []core.LogLine
+	log      *logView
 	services []string
 	instance string
 	grep     string
-	paused   bool
-	scroll   int
 	restart  bool
 	stream   int
 	cancel   context.CancelFunc
 	ch       <-chan core.LogLine
 	err      string
-	shown    int // lines the last render showed
 }
 
 type logBatchMsg struct {
@@ -52,8 +47,8 @@ type logStartMsg struct {
 func (t *logsTab) name() string { return "Logs" }
 func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
-	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep (regex)"}, {"p", "pause"}, {"↑↓", "scroll"},
-		{"y/Y", "copy shown/all"}, {"M", "mouse off: select text"}, {"c", "clear"}}
+	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep (regex)"}, {"p", "pause"}, {"↑↓ ←→", "scroll, sideways"},
+		{"drag", "select lines: copied"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear"}, {"M", "mouse off: terminal selection"}}
 }
 
 func (t *logsTab) interval() time.Duration { return time.Second }
@@ -61,6 +56,9 @@ func (t *logsTab) interval() time.Duration { return time.Second }
 // open streams nothing until services are picked (f): a log of everything is heavy and rarely wanted.
 // It does not open the picker itself, which would take the keys that switch screens.
 func (t *logsTab) open(m *model) tea.Cmd {
+	if t.log == nil {
+		t.log = newLogView("logs:body", logCap)
+	}
 	if len(t.services) == 0 {
 		return nil
 	}
@@ -125,7 +123,11 @@ func (t *logsTab) start(m *model) tea.Cmd {
 		t.cancel()
 	}
 	t.stream++
-	t.lines, t.scroll, t.err = nil, 0, ""
+	if t.log == nil {
+		t.log = newLogView("logs:body", logCap)
+	}
+	t.log.reset()
+	t.err = ""
 	ctx, cancel := context.WithCancel(m.ctx)
 	t.cancel = cancel
 	a, gen, stream := m.app, m.gen, t.stream
@@ -186,13 +188,7 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
-		t.lines = append(t.lines, msg.lines...)
-		if len(t.lines) > logCap {
-			t.lines = t.lines[len(t.lines)-logCap:]
-		}
-		if t.paused {
-			t.scroll += len(msg.lines)
-		}
+		t.log.add(msg.lines)
 		if msg.done {
 			return nil
 		}
@@ -208,30 +204,10 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.grep = v
 				return t.start(m)
 			})
-		case "p":
-			t.paused = !t.paused
-			if !t.paused {
-				t.scroll = 0
+		default:
+			if t.log != nil {
+				t.log.key(m, msg, true)
 			}
-		case "up", "k":
-			t.paused = true
-			t.scroll = min(t.scroll+1, max(0, len(t.lines)-1))
-		case "down", "j":
-			t.scroll = max(0, t.scroll-1)
-		case "pgup":
-			t.paused = true
-			t.scroll = min(t.scroll+20, max(0, len(t.lines)-1))
-		case "pgdown":
-			t.scroll = max(0, t.scroll-20)
-		case "G", "end":
-			t.scroll, t.paused = 0, false
-		case "c":
-			t.lines, t.scroll = nil, 0
-		case "y":
-			end := len(t.lines) - t.scroll
-			return t.copy(m, t.lines[max(0, end-t.shown):end])
-		case "Y":
-			return t.copy(m, t.lines)
 		}
 	}
 	return nil
@@ -239,7 +215,8 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 
 func (t *logsTab) view(m *model, w, h int) string {
 	if len(t.services) == 0 {
-		return panel("logs", sDim.Render("press f (or enter) to pick the services whose logs to follow"), w, h, true)
+		m.zone("logs:body", 1, 1, w-2, h-2)
+		return panel("logs", sDim.Render("press f (or enter, or click here) to pick the services whose logs to follow"), w, h, true)
 	}
 	title := strings.Join(t.services, ", ")
 	if len(t.services) > 3 {
@@ -251,40 +228,33 @@ func (t *logsTab) view(m *model, w, h int) string {
 	if t.grep != "" {
 		title += " · grep " + t.grep
 	}
-	state := sGreen.Render("● following")
-	if t.paused {
-		state = sAmber.Render("❚❚ paused")
-	}
-	title += fmt.Sprintf(" · %d lines · ", len(t.lines)) + state
-	inner := h - 2
-	t.shown = inner
+	title += fmt.Sprintf(" · %d lines · ", len(t.log.lines)) + t.log.state()
 	if t.err != "" {
 		return panel(title, sRed.Render(t.err), w, h, true)
 	}
-	end := len(t.lines) - t.scroll
-	start := max(0, end-inner)
+	if len(t.log.lines) == 0 {
+		m.zone("logs:body", 1, 1, w-2, h-2)
+		return panel(title, sDim.Render("waiting for log lines…"), w, h, true)
+	}
 	nameW := 0
-	for _, l := range t.lines[start:end] {
+	for _, l := range t.log.lines[max(0, len(t.log.lines)-t.log.scroll-h):max(0, len(t.log.lines)-t.log.scroll)] {
 		nameW = max(nameW, len(l.Service))
 	}
 	nameW = min(nameW, 18)
-	var b strings.Builder
-	for _, l := range t.lines[start:end] {
+	re := t.grepRe()
+	body := t.log.render(m, 1, 1, w-2, h-2, func(l core.LogLine) string {
 		who := l.Service
 		if len(t.services) == 1 && l.Instance != "" {
 			who = shortInstance(l.Instance)
 		}
 		svc := lipgloss.NewStyle().Foreground(colorFor(who)).Render(padRight(who, nameW))
 		text := pretty(l.Text)
-		if re := t.grepRe(); re != nil {
+		if re != nil {
 			text = re.ReplaceAllStringFunc(text, func(s string) string { return sAmber.Bold(true).Render(s) })
 		}
-		b.WriteString(sDim.Render(l.Time.Local().Format("15:04:05.000")) + " " + svc + " " + text + "\n")
-	}
-	if len(t.lines) == 0 {
-		b.WriteString(sDim.Render("waiting for log lines…"))
-	}
-	return panel(title, strings.TrimRight(b.String(), "\n"), w, h, true)
+		return sDim.Render(l.Time.Local().Format("15:04:05.000")) + " " + svc + " " + text
+	})
+	return panel(title, body, w, h, true)
 }
 
 func colorFor(name string) lipgloss.Color {
@@ -358,23 +328,43 @@ func (t *logsTab) grepRe() *regexp.Regexp {
 	return regexp.MustCompile(regexp.QuoteMeta(t.grep))
 }
 
-// copy puts lines on the clipboard (OSC 52, which most terminals and tmux honour) and in a file
-// under the environment's state directory, for terminals that ignore it.
-func (t *logsTab) copy(m *model, lines []core.LogLine) tea.Cmd {
-	if len(lines) == 0 {
+// click on the empty screen picks services; a double-click on a line follows only its service (or,
+// following one service, only its instance).
+func (t *logsTab) click(m *model, h hit) tea.Cmd {
+	if h.id != "logs:body" {
 		return nil
 	}
-	var b strings.Builder
-	for _, l := range lines {
-		b.WriteString(l.Time.Local().Format("15:04:05.000") + " " + l.Service + " " + l.Text + "\n")
+	if len(t.services) == 0 {
+		t.pickServices(m)
+		return nil
 	}
-	text := b.String()
-	dir := filepath.Join(m.app.StateDir(), "logs")
-	file := filepath.Join(dir, time.Now().Format("20060102-150405")+".log")
-	if err := os.MkdirAll(dir, 0o755); err == nil {
-		_ = os.WriteFile(file, []byte(text), 0o644)
+	if !h.double || h.y >= len(t.log.visible) {
+		return nil
 	}
-	osc52(text)
-	m.setStatus(fmt.Sprintf("copied %d lines (also in %s)", len(lines), file), false)
-	return nil
+	l := t.log.visible[h.y]
+	switch {
+	case len(t.services) > 1:
+		t.services, t.instance = []string{l.Service}, ""
+	case l.Instance != "" && t.instance == "":
+		t.instance = l.Instance
+	default:
+		return nil
+	}
+	return t.start(m)
+}
+
+func (t *logsTab) drag(m *model, h hit, phase dragPhase) bool {
+	if h.id != "logs:body" || t.log == nil || len(t.services) == 0 {
+		return false
+	}
+	t.log.drag(m, h, phase)
+	return true
+}
+
+func (t *logsTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
+	if h.id != "logs:body" || t.log == nil {
+		return nil, false
+	}
+	t.log.wheel(up)
+	return nil, true
 }

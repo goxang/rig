@@ -247,11 +247,12 @@ func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
 			}
 		}
 		line := strings.Join(cells, " ")
-		if i == g.sel && focused {
-			line = sSelected.Render(stripStyles(line, w))
+		if i != g.sel && m.hovering(x, y+1+i-g.offset, w, 1) {
+			line = highlight(sHover, line, w)
+		} else if i == g.sel && focused {
+			line = highlight(sSelected, line, w)
 		} else if i == g.sel {
-			// underlining styled cells garbles their escape codes into visible text
-			line = lipgloss.NewStyle().Underline(true).Render(stripStyles(line, w))
+			line = highlight(sUnderline, line, w)
 		}
 		b.WriteString("\n" + line)
 	}
@@ -263,8 +264,19 @@ func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
 	return b.String()
 }
 
-// stripStyles keeps a selected row readable: the highlight replaces the cells' own colours.
-func stripStyles(s string, w int) string { return padRight(stripANSIKeepSpace(s), w) }
+// highlight lays st (a background, bold, underline) over a styled line padded to w and keeps the
+// cells' own colours: lipgloss would end st at the first reset inside the line, or, for underline,
+// split the escape codes into visible text, so st's codes are re-opened after every reset instead.
+func highlight(st lipgloss.Style, line string, w int) string {
+	open, _, _ := strings.Cut(st.Render("\x00"), "\x00")
+	line = padRight(line, w)
+	if open == "" {
+		return line
+	}
+	line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+open)
+	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+open)
+	return open + line + "\x1b[0m"
+}
 
 func stripANSIKeepSpace(s string) string {
 	var b strings.Builder

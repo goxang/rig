@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,11 +42,18 @@ type clicker interface {
 	click(m *model, z hit) tea.Cmd
 }
 
-// hit is a click inside a zone, in zone-relative cells; double is a second click on the same cell.
+// wheeler scrolls what is under the mouse; false leaves the wheel to the default (up/down keys).
+type wheeler interface {
+	wheel(m *model, z hit, up bool) (tea.Cmd, bool)
+}
+
+// hit is a click inside a zone, in zone-relative cells; double is a second click on the same cell,
+// mod a click with ctrl, alt or shift held.
 type hit struct {
 	id     string
 	x, y   int
 	double bool
+	mod    bool
 }
 
 type zone struct {
@@ -91,9 +99,13 @@ type model struct {
 
 	zones   []zone
 	originY int
+	// hx, hy is the cell under the mouse (-1 when unknown), for hover highlights
+	hx, hy  int
 	tabSpan [][2]int
 	lastHit hit
 	lastAt  time.Time
+	// dragZone is the zone a press started a drag on; moves and the release go to its tab
+	dragZone string
 }
 
 type confirm struct {
@@ -129,7 +141,7 @@ type (
 )
 
 func newTabs() []tab {
-	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}}
+	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}, &testsTab{}}
 }
 
 func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil) }
@@ -138,12 +150,12 @@ func run(ctx context.Context, a *engine.App, s *Session) error {
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}}
+	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
 	m.sched = newScheduler(a)
 	if s != nil {
 		m.restore(s)
 	}
-	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	_, err := program.Run()
 	if err == tea.ErrProgramKilled {
 		return nil
@@ -316,6 +328,25 @@ func (m *model) alertsView() string {
 		Render(sTitle.Render("alerts") + "\n\n" + b.String())
 }
 
+// hovering reports whether the mouse is over a body-relative area.
+func (m *model) hovering(x, y, w, h int) bool {
+	y += m.originY
+	return m.hx >= x && m.hx < x+w && m.hy >= y && m.hy < y+h
+}
+
+// buttons draws clickable yes/no buttons on the footer's first line, starting at column x.
+func (m *model) buttons(yes, no string, x int) string {
+	y := m.h - 2
+	by := sTabOn.Render(yes)
+	bn := sTabOff.Render(no)
+	if m.hy == y && m.hx >= x+lipgloss.Width(by)+1 && m.hx < x+lipgloss.Width(by)+1+lipgloss.Width(bn) {
+		bn = sTabHover.Render(no)
+	}
+	m.zones = append(m.zones, zone{id: "confirm:yes", x: x, y: y, w: lipgloss.Width(by), h: 1},
+		zone{id: "confirm:no", x: x + lipgloss.Width(by) + 1, y: y, w: lipgloss.Width(bn), h: 1})
+	return by + " " + bn
+}
+
 // zone registers a clickable area of the tab body being rendered (body-relative cells).
 func (m *model) zone(id string, x, y, w, h int) {
 	m.zones = append(m.zones, zone{id: id, x: x, y: y + m.originY, w: w, h: h})
@@ -352,16 +383,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case servicesMsg:
 		if msg.gen == m.gen {
 			m.services, m.svcAt, m.svcBusy = msg.sts, time.Now(), false
+			for _, t := range m.tabs {
+				if st, ok := t.(*servicesTab); ok {
+					for _, s := range msg.sts {
+						st.noteScale(s)
+					}
+				}
+			}
 		}
 		return m, nil
 	case statusMsg:
 		m.busy = max(0, m.busy-1)
 		m.setStatus(msg.text, msg.err)
 		m.svcAt = time.Time{}
+		for _, t := range m.tabs {
+			if d, ok := t.(*dataTab); ok {
+				if cmd := d.changed(m, msg.text); cmd != nil {
+					return m, cmd
+				}
+			}
+		}
 		return m, m.tabs[m.active].refresh(m)
 	case schedMsg:
 		m.sched.done(msg)
 		return m, nil
+	case namespacesMsg:
+		return m, m.showNamespaces(msg)
+	case manifestEditedMsg:
+		return m, m.manifestEdited(msg)
+	case syncedMsg:
+		return m, m.synced(msg)
+	case resourcesMsg:
+		return m, m.gotResources(msg)
 	case envMsg:
 		if msg.err != nil {
 			m.setStatus("switch environment: "+msg.err.Error(), true)
@@ -390,20 +443,60 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
+	m.hx, m.hy = e.X, e.Y
+	if m.dragZone != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
+		return m.dragTo(e)
+	}
+	if e.Action == tea.MouseActionMotion {
+		return nil
+	}
+	if (m.confirm != nil || m.prompt != nil) && e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft {
+		if z, ok := m.zoneAt(e.X, e.Y); ok && (z.id == "confirm:yes" || z.id == "confirm:no") {
+			key := tea.KeyMsg{Type: tea.KeyEnter}
+			if z.id == "confirm:no" {
+				key = tea.KeyMsg{Type: tea.KeyEsc}
+			}
+			return m.key(key)
+		}
+	}
 	if m.confirm != nil || m.prompt != nil {
 		return nil
 	}
 	switch e.Button {
-	case tea.MouseButtonWheelUp:
-		if m.picker != nil {
-			return m.picker.key(m, tea.KeyMsg{Type: tea.KeyUp})
+	case tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight:
+		key := tea.KeyMsg{Type: tea.KeyLeft}
+		if e.Button == tea.MouseButtonWheelRight {
+			key = tea.KeyMsg{Type: tea.KeyRight}
 		}
-		return m.tabs[m.active].update(m, tea.KeyMsg{Type: tea.KeyUp})
-	case tea.MouseButtonWheelDown:
-		if m.picker != nil {
-			return m.picker.key(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.picker == nil && !m.help && !m.showAlerts {
+			return m.tabs[m.active].update(m, key)
 		}
-		return m.tabs[m.active].update(m, tea.KeyMsg{Type: tea.KeyDown})
+		return nil
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		if e.Shift && m.picker == nil {
+			// shift+wheel scrolls sideways, as most terminals do
+			key := tea.KeyMsg{Type: tea.KeyRight}
+			if e.Button == tea.MouseButtonWheelUp {
+				key = tea.KeyMsg{Type: tea.KeyLeft}
+			}
+			return m.tabs[m.active].update(m, key)
+		}
+		up := e.Button == tea.MouseButtonWheelUp
+		key := tea.KeyMsg{Type: tea.KeyDown}
+		if up {
+			key = tea.KeyMsg{Type: tea.KeyUp}
+		}
+		if m.picker != nil {
+			return m.picker.key(m, key)
+		}
+		if wh, ok := m.tabs[m.active].(wheeler); ok && !m.help && !m.showAlerts {
+			if z, ok := m.zoneAt(e.X, e.Y); ok {
+				if cmd, done := wh.wheel(m, z, up); done {
+					return cmd
+				}
+			}
+		}
+		return m.tabs[m.active].update(m, key)
 	}
 	if e.Action != tea.MouseActionPress || e.Button != tea.MouseButtonLeft {
 		return nil
@@ -420,22 +513,111 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		}
 		return nil
 	}
-	for i := len(m.zones) - 1; i >= 0; i-- {
-		z := m.zones[i]
-		if e.X >= z.x && e.X < z.x+z.w && e.Y >= z.y && e.Y < z.y+z.h {
-			h := hit{id: z.id, x: e.X - z.x, y: e.Y - z.y}
-			h.double = m.lastHit.id == h.id && m.lastHit.y == h.y && time.Since(m.lastAt) < 400*time.Millisecond
-			m.lastHit, m.lastAt = h, time.Now()
-			if m.picker != nil {
-				return m.picker.click(m, h)
-			}
-			if c, ok := m.tabs[m.active].(clicker); ok {
-				return c.click(m, h)
-			}
+	h, ok := m.zoneAt(e.X, e.Y)
+	if !ok {
+		return nil
+	}
+	h.mod = e.Ctrl || e.Alt || e.Shift
+	h.double = m.lastHit.id == h.id && m.lastHit.y == h.y && time.Since(m.lastAt) < 400*time.Millisecond
+	m.lastHit, m.lastAt = h, time.Now()
+	if m.picker != nil {
+		return m.picker.click(m, h)
+	}
+	if d, ok := m.tabs[m.active].(dragger); ok && !h.double && d.drag(m, h, dragPress) {
+		m.dragZone = h.id
+	}
+	if c, ok := m.tabs[m.active].(clicker); ok {
+		return c.click(m, h)
+	}
+	return nil
+}
+
+// dragTo hands a move or the release of a drag to the tab, in cells relative to the zone it began on.
+func (m *model) dragTo(e tea.MouseMsg) tea.Cmd {
+	phase := dragMove
+	if e.Action == tea.MouseActionRelease {
+		phase = dragRelease
+	}
+	id := m.dragZone
+	if phase == dragRelease {
+		m.dragZone = ""
+	}
+	d, ok := m.tabs[m.active].(dragger)
+	if !ok {
+		return nil
+	}
+	for _, z := range m.zones {
+		if z.id == id {
+			d.drag(m, hit{id: id, x: e.X - z.x, y: e.Y - z.y}, phase)
 			return nil
 		}
 	}
 	return nil
+}
+
+// showMetrics opens the Metrics screen on the first dashboard with a $service variable, set to service.
+func (m *model) showMetrics(service string) tea.Cmd {
+	for i, t := range m.tabs {
+		if mt, ok := t.(*metricsTab); ok {
+			open := m.openTab(i)
+			return batch(open, mt.jump(m, service))
+		}
+	}
+	return nil
+}
+
+// zoneAt is the topmost zone under a screen cell, as a hit in zone-relative cells.
+func (m *model) zoneAt(x, y int) (hit, bool) {
+	for i := len(m.zones) - 1; i >= 0; i-- {
+		z := m.zones[i]
+		if x >= z.x && x < z.x+z.w && y >= z.y && y < z.y+z.h {
+			return hit{id: z.id, x: x - z.x, y: y - z.y}, true
+		}
+	}
+	return hit{}, false
+}
+
+// strip renders labels as a row of tabs at (x, y) of the tab body, active highlighted; a click on
+// label i arrives as a hit with id "<id>:<i>" (stripHit reads it back).
+func (m *model) strip(id string, x, y int, labels []string, active int) string {
+	var b strings.Builder
+	for i, l := range labels {
+		var p string
+		switch {
+		case i == active:
+			p = sTabOn.Render(l)
+		case m.hovering(x, y, lipgloss.Width(sTabOff.Render(l)), 1):
+			p = sTabHover.Render(l)
+		default:
+			p = sTabOff.Render(l)
+		}
+		w := lipgloss.Width(p)
+		m.zone(fmt.Sprintf("%s:%d", id, i), x, y, w, 1)
+		x += w
+		b.WriteString(p)
+	}
+	return b.String()
+}
+
+// withStrip puts a row of tabs above a screen's body; the body is drawn h-1 high and its zones
+// shift down under the strip.
+func (m *model) withStrip(id string, labels []string, active, h int, body func(h int) string) string {
+	s := " " + m.strip(id, 1, 0, labels, active)
+	m.originY++
+	b := body(h - 1)
+	m.originY--
+	return s + "\n" + b
+}
+
+// stripHit is the label index a click on strip id landed on, false for any other zone.
+func stripHit(h hit, id string) (int, bool) {
+	rest, ok := strings.CutPrefix(h.id, id+":")
+	if !ok {
+		return 0, false
+	}
+	var i int
+	_, err := fmt.Sscanf(rest, "%d", &i)
+	return i, err == nil
 }
 
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
@@ -483,10 +665,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if !t.typing() {
 		switch s := k.String(); s {
 		case "q":
-			if m.session != nil {
-				_, _ = m.saveSession()
-			}
-			return tea.Quit
+			return m.quit()
 		case "S":
 			id, err := m.saveSession()
 			if err != nil {
@@ -507,6 +686,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "T":
 			m.pickTask("")
 			return nil
+		case "N":
+			return m.pickNamespace()
 		case "M":
 			m.mouseOff = !m.mouseOff
 			if m.mouseOff {
@@ -514,7 +695,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 				return tea.DisableMouse
 			}
 			m.setStatus("mouse on", false)
-			return tea.EnableMouseCellMotion
+			return tea.EnableMouseAllMotion
 		case "tab":
 			return m.openTab((m.active + 1) % len(m.tabs))
 		case "shift+tab":
@@ -527,9 +708,89 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			if i < len(m.tabs) {
 				return m.openTab(i)
 			}
+		case "`":
+			// the eleventh screen has no digit
+			if len(m.tabs) > 10 {
+				return m.openTab(10)
+			}
 		}
 	}
 	return t.update(m, k)
+}
+
+// quit leaves at once unless that would cut something short: a test run and operations still
+// working stop with rig, while load generators keep sending without it, so it asks first.
+func (m *model) quit() tea.Cmd {
+	var stops, gens []string
+	for _, t := range m.tabs {
+		switch t := t.(type) {
+		case *testsTab:
+			if t.running != "" {
+				stops = append(stops, "the tests of "+t.running)
+			}
+		case *loadTab:
+			for _, n := range t.names {
+				if t.stats[n].Running {
+					gens = append(gens, n)
+				}
+			}
+		}
+	}
+	if m.busy > 0 {
+		stops = append(stops, fmt.Sprintf("%d operations still working", m.busy))
+	}
+	leave := func() tea.Msg {
+		if m.session != nil {
+			_, _ = m.saveSession()
+		}
+		return tea.QuitMsg{}
+	}
+	if len(stops) == 0 && len(gens) == 0 {
+		return leave
+	}
+	var opts, desc []string
+	what := "stops " + strings.Join(stops, ", ")
+	if len(stops) == 0 {
+		what = ""
+	}
+	if len(gens) > 0 {
+		opts, desc = append(opts, "stop the load generators, then quit"), append(desc, strings.Join(gens, ", ")+" stop sending")
+		keep := "keeps sending: " + strings.Join(gens, ", ")
+		if what != "" {
+			keep = what + "; " + keep
+		}
+		opts, desc = append(opts, "quit, leave them sending"), append(desc, keep)
+	} else {
+		opts, desc = append(opts, "quit"), append(desc, what)
+	}
+	opts, desc = append(opts, "stay"), append(desc, "")
+	a, ctx := m.app, core.WithConfirmed(m.ctx)
+	m.pick("quit rig?", opts, desc, 0, false, func(c []string) tea.Cmd {
+		if len(c) == 0 || c[0] == "stay" {
+			return nil
+		}
+		if !strings.HasPrefix(c[0], "stop") {
+			return leave
+		}
+		m.busy++
+		m.setStatus("stopping "+strings.Join(gens, ", ")+"…", false)
+		return func() tea.Msg {
+			a.Confirmed = true
+			err := each(gens, func(n string) error {
+				g, _, err := engine.Get[core.LoadGenerator](a, core.KindLoad, n)
+				if err == nil {
+					err = g.Stop(ctx)
+				}
+				return err
+			})
+			if err != nil {
+				a.Confirmed = false
+				return statusMsg{text: "stop generators: " + err.Error() + " (not quitting)", err: true}
+			}
+			return leave()
+		}
+	})
+	return nil
 }
 
 // pickTask runs a rig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
@@ -546,17 +807,9 @@ func (m *model) pickTask(prefix string) {
 		m.setStatus("no "+prefix+"* tasks in "+m.app.Spec.File, true)
 		return
 	}
-	tasks := m.app.Tasks()
 	var desc []string
 	for _, n := range names {
-		var steps []string
-		for _, st := range tasks[n] {
-			first, _, _ := strings.Cut(strings.TrimSpace(st), "\n")
-			if !strings.HasPrefix(first, `[ -n "${RIG_YES`) {
-				steps = append(steps, first)
-			}
-		}
-		desc = append(desc, strings.Join(steps, " && "))
+		desc = append(desc, m.app.TaskHelp(n))
 	}
 	m.pick("task", names, desc, 0, false, func(chosen []string) tea.Cmd {
 		if len(chosen) == 0 {
@@ -580,6 +833,80 @@ func (m *model) pickTask(prefix string) {
 		m.confirm = &confirm{text: "run task " + name + " on " + m.app.Env.Name + "?", run: run}
 		return nil
 	})
+}
+
+type namespacesMsg struct {
+	names []string
+	err   error
+}
+
+// pickNamespace lists the cluster's namespaces; picking one (or a new one) reopens the environment in it.
+func (m *model) pickNamespace() tea.Cmd {
+	a := m.app
+	if a.Namespace() == "" {
+		m.setStatus(a.Env.Name+" is not on Kubernetes", true)
+		return nil
+	}
+	if a.Env.Protected {
+		m.setStatus(a.Env.Name+" is protected: its namespace is fixed in "+filepath.Base(a.Spec.File), true)
+		return nil
+	}
+	ctx := m.ctx
+	m.setStatus("listing namespaces…", false)
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		names, err := a.Namespaces(c)
+		return namespacesMsg{names: names, err: err}
+	}
+}
+
+func (m *model) showNamespaces(msg namespacesMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setStatus("namespaces: "+msg.err.Error(), true)
+		return nil
+	}
+	const create = "+ new namespace…"
+	names := append([]string{create}, msg.names...)
+	sel := 0
+	for i, n := range names {
+		if n == m.app.Namespace() {
+			sel = i
+		}
+	}
+	file, env := m.app.Spec.File, m.app.Env.Name
+	use := func(ns string, fresh bool) tea.Cmd {
+		a := m.app
+		m.setStatus("switching to namespace "+ns+"…", false)
+		return func() tea.Msg {
+			if fresh {
+				if err := a.CreateNamespace(m.ctx, ns); err != nil {
+					return envMsg{err: err}
+				}
+			}
+			if err := a.UseNamespace(ns); err != nil {
+				return envMsg{err: err}
+			}
+			b, err := engine.Open(file, env)
+			return envMsg{app: b, err: err}
+		}
+	}
+	m.pick("namespace of "+env+" (kept until rig ns --reset)", names, nil, sel, false, func(c []string) tea.Cmd {
+		switch {
+		case len(c) == 0 || c[0] == m.app.Namespace():
+			return nil
+		case c[0] == create:
+			m.ask("new namespace", "", func(v string) tea.Cmd {
+				if v = strings.TrimSpace(v); v == "" {
+					return nil
+				}
+				return use(v, true)
+			})
+			return nil
+		}
+		return use(c[0], false)
+	})
+	return nil
 }
 
 func (m *model) pickEnv() {
@@ -647,6 +974,9 @@ func (m *model) header() string {
 	a := m.app
 	left := sAccent.Render(" ◆ rig ") + sTitle.Render(a.Spec.Name) + sDim.Render("  env ") + sTitle.Render(a.Env.Name) +
 		sDim.Render(" ("+a.Env.Runtime.Type+")")
+	if ns := a.Namespace(); ns != "" {
+		left += sDim.Render("  ns ") + sTitle.Render(ns)
+	}
 	if a.Env.Protected {
 		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
 	}
@@ -678,16 +1008,40 @@ func (m *model) header() string {
 }
 
 func (m *model) tabBar() string {
+	// names shrink until every screen fits, so each stays clickable on a narrow terminal
+	n := 0
+	for _, t := range m.tabs {
+		n = max(n, len(t.name()))
+	}
+	for ; n > 3; n-- {
+		w := 0
+		for _, t := range m.tabs {
+			w += 4 + min(n, len(t.name()))
+		}
+		if w <= m.w {
+			break
+		}
+	}
 	var parts []string
 	m.tabSpan = m.tabSpan[:0]
 	x := 0
 	for i, t := range m.tabs {
 		key := fmt.Sprint((i + 1) % 10)
+		if i == 10 {
+			key = "`"
+		}
+		name := t.name()
+		if len(name) > n {
+			name = name[:n]
+		}
 		var p string
-		if i == m.active {
-			p = sTabOn.Render(key + " " + t.name())
-		} else {
-			p = sTabOff.Render(sKey.Render(key) + " " + t.name())
+		switch {
+		case i == m.active:
+			p = sTabOn.Render(key + " " + name)
+		case m.hy == 1 && m.hx >= x && m.hx < x+lipgloss.Width(sTabOff.Render(key+" "+name)) && m.picker == nil:
+			p = " " + sKey.Render(key) + sTabHover.Padding(0).Render(" "+name) + " "
+		default:
+			p = sTabOff.Render(sKey.Render(key) + " " + name)
 		}
 		w := lipgloss.Width(p)
 		m.tabSpan = append(m.tabSpan, [2]int{x, x + w})
@@ -701,17 +1055,26 @@ func (m *model) footer() string {
 	var line string
 	switch {
 	case m.confirm != nil:
-		line = sAmber.Bold(true).Render(" "+m.confirm.text) + sDim.Render("   ") + sKey.Render("enter") + sDim.Render(" confirm · any other key cancels")
+		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3)
 	case m.prompt != nil:
-		line = sAccent.Render(" "+m.prompt.label+": ") + m.prompt.input.View() + sDim.Render("   enter ok · esc cancel")
+		head := sAccent.Render(" "+m.prompt.label+": ") + m.prompt.input.View()
+		line = head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3)
 	case m.picker != nil:
 		line = " " + m.picker.hints()
 	default:
+		// the first few keys of the screen only: ? lists them all, so the footer stays readable
 		var hs []string
-		for _, h := range m.tabs[m.active].hints() {
+		for i, h := range m.tabs[m.active].hints() {
+			if i == footerHints {
+				break
+			}
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
-		hs = append(hs, sKey.Render("?")+" "+sDim.Render("help"), sKey.Render("E")+" "+sDim.Render("env"), sKey.Render("T")+" "+sDim.Render("tasks"), sKey.Render("q")+" "+sDim.Render("quit"))
+		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("E")+" "+sDim.Render("env"))
+		if m.app.Namespace() != "" && !m.app.Env.Protected {
+			hs = append(hs, sKey.Render("N")+" "+sDim.Render("namespace"))
+		}
+		hs = append(hs, sKey.Render("T")+" "+sDim.Render("tasks"), sKey.Render("q")+" "+sDim.Render("quit"))
 		line = " " + strings.Join(hs, "  ")
 	}
 	status := ""
@@ -725,9 +1088,26 @@ func (m *model) footer() string {
 	return truncate(line, m.w) + "\n" + status
 }
 
+const footerHints = 5
+
+// screenHelp says what each screen is for, at the top of its help.
+var screenHelp = map[string]string{
+	"Services":  "what runs in this environment: start, stop, restart, scale, deploy, logs, debug",
+	"Logs":      "follow the logs of one or more services, filter and search them",
+	"Metrics":   "the dashboards of rig.yaml over the environment's Prometheus",
+	"Traces":    "find a request's trace (Zipkin/Jaeger) and walk its spans",
+	"Queries":   "saved queries (SQL, PromQL, redis, HTTP): run, schedule, chart",
+	"Data":      "walk databases, queues and caches; edit or delete rows and keys",
+	"KV":        "the config store (Consul): browse, edit and delete keys right in it; F loads the config files",
+	"Load":      "load generators: start, stop, change the rate, watch what they send",
+	"Hosts":     "the machines the environment runs on: CPU, memory, disk, a shell",
+	"Manifests": "Kubernetes manifests of the project: objects, links, issues, apply",
+	"Tests":     "the test suites of rig.yaml: run, rerun failures, reports",
+}
+
 func (m *model) helpView() string {
 	rows := [][2]string{
-		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"T", "run a task (clear-db, clear-queues, ship, ...)"},
+		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
 		{"esc", "back"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
@@ -735,7 +1115,8 @@ func (m *model) helpView() string {
 	for _, r := range rows {
 		b.WriteString(sKey.Render(padRight(r[0], 18)) + " " + r[1] + "\n")
 	}
-	b.WriteString("\n" + sTitle.Render(m.tabs[m.active].name()) + "\n")
+	name := m.tabs[m.active].name()
+	b.WriteString("\n" + sTitle.Render(name) + "  " + sDim.Render(screenHelp[name]) + "\n")
 	for _, r := range m.tabs[m.active].hints() {
 		b.WriteString(sKey.Render(padRight(r[0], 18)) + " " + r[1] + "\n")
 	}

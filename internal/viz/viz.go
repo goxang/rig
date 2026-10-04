@@ -5,6 +5,7 @@ package viz
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,19 @@ func FromSeries(ss []core.Series) []Line {
 	out := make([]Line, 0, len(ss))
 	for i, s := range ss {
 		out = append(out, Line{Name: LabelName(s.Labels), Points: s.Points, Color: Palette[i%len(Palette)]})
+	}
+	return out
+}
+
+var seriesLegendLabel = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
+
+// LegendOf fills a {{label}} template from a series' labels; empty, it names the series by them.
+func LegendOf(tmpl string, labels map[string]string) string {
+	out := strings.TrimSpace(seriesLegendLabel.ReplaceAllStringFunc(tmpl, func(m string) string {
+		return labels[seriesLegendLabel.FindStringSubmatch(m)[1]]
+	}))
+	if out == "" {
+		return LabelName(labels)
 	}
 	return out
 }
@@ -70,9 +84,76 @@ func LineChart(lines []Line, w, h int, unit string) string {
 	if h < 4 || w < 20 {
 		return ""
 	}
+	return Plot(lines, w, h-1, Opts{Unit: unit, Highlight: -1, Cursor: -1}) + "\n" + Legend(lines, w, unit)
+}
+
+// Opts tune Plot: Hidden lines are left out (the axes fit the rest), Highlight draws one line on
+// top with the others faded, Cursor (0..1 across the time axis, <0 none) draws a vertical marker,
+// Stack piles the lines up.
+type Opts struct {
+	// From and To fix the time axis (a dashboard's range); zero fits it to the data.
+	From, To  time.Time
+	Unit      string
+	Hidden    map[int]bool
+	Highlight int
+	Cursor    float64
+	Stack     bool
+}
+
+// Span is the time range the lines cover.
+func Span(lines []Line) (tmin, tmax time.Time) {
+	for _, l := range lines {
+		for _, p := range l.Points {
+			if math.IsNaN(p.V) || math.IsInf(p.V, 0) {
+				continue
+			}
+			if tmin.IsZero() || p.T.Before(tmin) {
+				tmin = p.T
+			}
+			if p.T.After(tmax) {
+				tmax = p.T
+			}
+		}
+	}
+	return tmin, tmax
+}
+
+// Stacked adds each line's values to the ones before it, point by point at equal times.
+func Stacked(lines []Line, hidden map[int]bool) []Line {
+	out := make([]Line, len(lines))
+	acc := map[int64]float64{}
+	for i, l := range lines {
+		out[i] = l
+		if hidden[i] {
+			continue
+		}
+		pts := make([]core.Point, len(l.Points))
+		for j, p := range l.Points {
+			if !math.IsNaN(p.V) && !math.IsInf(p.V, 0) {
+				acc[p.T.UnixNano()] += p.V
+				p.V = acc[p.T.UnixNano()]
+			}
+			pts[j] = p
+		}
+		out[i].Points = pts
+	}
+	return out
+}
+
+// Plot draws the chart without a legend: h-2 rows of plot, the x axis and the time labels.
+func Plot(lines []Line, w, h int, o Opts) string {
+	if h < 3 || w < 20 {
+		return ""
+	}
+	if o.Stack {
+		lines = Stacked(lines, o.Hidden)
+	}
 	var tmin, tmax time.Time
 	ymin, ymax := math.Inf(1), math.Inf(-1)
-	for _, l := range lines {
+	for i, l := range lines {
+		if o.Hidden[i] {
+			continue
+		}
 		for _, p := range l.Points {
 			if math.IsNaN(p.V) || math.IsInf(p.V, 0) {
 				continue
@@ -86,22 +167,29 @@ func LineChart(lines []Line, w, h int, unit string) string {
 			ymin, ymax = math.Min(ymin, p.V), math.Max(ymax, p.V)
 		}
 	}
-	plotH := h - 3 // x axis, time labels, legend
+	if !o.From.IsZero() {
+		tmin, tmax = o.From, o.To
+	}
+	plotH := h - 2 // x axis, time labels
 	if math.IsInf(ymin, 1) {
 		return faint.Render(center("no data", w, plotH))
 	}
-	if ymin >= 0 {
-		ymin = 0
-	}
+	ymin = floor0(ymin, ymax)
 	if ymax == ymin {
 		ymax = ymin + 1
 	}
 	ymax = niceCeil(ymax)
 
-	yl := []string{Human(ymax, unit), Human((ymax+ymin)/2, unit), Human(ymin, unit)}
+	ticks := 3
+	if plotH >= 10 {
+		ticks = 5
+	}
+	tickRow := map[int]string{}
 	yw := 0
-	for _, s := range yl {
-		yw = max(yw, len(s))
+	for i := 0; i < ticks; i++ {
+		r := i * (plotH - 1) / (ticks - 1)
+		tickRow[r] = Human(tick(ymin, ymax, r, plotH), o.Unit)
+		yw = max(yw, len(tickRow[r]))
 	}
 	cw := w - yw - 2
 	pw, ph := cw*2, plotH*4
@@ -127,7 +215,17 @@ func LineChart(lines []Line, w, h int, unit string) string {
 		cells[y/4][x/2] |= dots[x%2][y%4]
 		colors[y/4][x/2] = c
 	}
-	for li, l := range lines {
+	order := make([]int, 0, len(lines))
+	for i := range lines {
+		if !o.Hidden[i] && i != o.Highlight {
+			order = append(order, i)
+		}
+	}
+	if o.Highlight >= 0 && o.Highlight < len(lines) && !o.Hidden[o.Highlight] {
+		order = append(order, o.Highlight)
+	}
+	for _, li := range order {
+		l := lines[li]
 		var prev *core.Point
 		for i := range l.Points {
 			p := l.Points[i]
@@ -143,25 +241,31 @@ func LineChart(lines []Line, w, h int, unit string) string {
 			prev = &l.Points[i]
 		}
 	}
+	cursorCol := -1
+	if o.Cursor >= 0 {
+		cursorCol = int(math.Round(math.Min(o.Cursor, 1) * float64(cw-1)))
+	}
+	faded := lipgloss.AdaptiveColor{Light: "#C4C4C4", Dark: "#3A3F44"}
 
 	var b strings.Builder
 	for r := 0; r < plotH; r++ {
-		lab := ""
-		switch r {
-		case 0:
-			lab = yl[0]
-		case plotH / 2:
-			lab = yl[1]
-		case plotH - 1:
-			lab = yl[2]
-		}
+		lab, tick := tickRow[r]
 		b.WriteString(label.Render(fmt.Sprintf("%*s", yw, lab)))
-		b.WriteString(axis.Render(" ┤"))
+		if tick {
+			b.WriteString(axis.Render(" ┤"))
+		} else {
+			b.WriteString(axis.Render(" │"))
+		}
 		for c := 0; c < cw; {
+			if c == cursorCol && cells[r][c] == 0 {
+				b.WriteString(axis.Render("│"))
+				c++
+				continue
+			}
 			// group runs of one colour into one styled string
 			col := colors[r][c]
 			var run strings.Builder
-			for c < cw && colors[r][c] == col {
+			for c < cw && colors[r][c] == col && !(c == cursorCol && cells[r][c] == 0) {
 				if cells[r][c] == 0 {
 					run.WriteRune(' ')
 				} else {
@@ -169,17 +273,160 @@ func LineChart(lines []Line, w, h int, unit string) string {
 				}
 				c++
 			}
-			if col < 0 {
+			switch {
+			case col < 0:
 				b.WriteString(run.String())
-			} else {
+			case o.Highlight >= 0 && col != o.Highlight:
+				b.WriteString(lipgloss.NewStyle().Foreground(faded).Render(run.String()))
+			default:
 				b.WriteString(lipgloss.NewStyle().Foreground(colorOf(lines, col)).Render(run.String()))
 			}
 		}
 		b.WriteByte('\n')
 	}
 	b.WriteString(strings.Repeat(" ", yw+1) + axis.Render("└"+strings.Repeat("─", cw)) + "\n")
-	b.WriteString(strings.Repeat(" ", yw+2) + label.Render(timeAxis(tmin, tmax, cw)) + "\n")
-	b.WriteString(Legend(lines, w, unit))
+	b.WriteString(strings.Repeat(" ", yw+2) + label.Render(timeAxis(tmin, tmax, cw)))
+	return b.String()
+}
+
+// tick is the value at plot row r of plotH, with float noise around zero rounded away.
+func tick(ymin, ymax float64, r, plotH int) float64 {
+	v := ymax - (ymax-ymin)*float64(r)/float64(max(plotH-1, 1))
+	if math.Abs(v) < 1e-9*math.Max(math.Abs(ymax), math.Abs(ymin)) {
+		return 0
+	}
+	return v
+}
+
+// floor0 starts the y axis at zero unless values go clearly below it (a rate's float noise of -1e-16 does not).
+func floor0(ymin, ymax float64) float64 {
+	if ymin >= -1e-9*math.Max(math.Abs(ymax), 1) {
+		return 0
+	}
+	return ymin
+}
+
+// PlotOffset is how many cells the plot area starts right of the chart's left edge, for a chart
+// drawn with these lines and options: clicks on the plot map to a cursor through it.
+func PlotOffset(lines []Line, h int, o Opts) int {
+	if o.Stack {
+		lines = Stacked(lines, o.Hidden)
+	}
+	ymin, ymax := math.Inf(1), math.Inf(-1)
+	for i, l := range lines {
+		if o.Hidden[i] {
+			continue
+		}
+		for _, p := range l.Points {
+			if !math.IsNaN(p.V) && !math.IsInf(p.V, 0) {
+				ymin, ymax = math.Min(ymin, p.V), math.Max(ymax, p.V)
+			}
+		}
+	}
+	if math.IsInf(ymin, 1) {
+		return 0
+	}
+	ymin = floor0(ymin, ymax)
+	if ymax == ymin {
+		ymax = ymin + 1
+	}
+	ymax = niceCeil(ymax)
+	plotH := h - 2
+	ticks := 3
+	if plotH >= 10 {
+		ticks = 5
+	}
+	yw := 0
+	for i := 0; i < ticks; i++ {
+		r := i * (plotH - 1) / (ticks - 1)
+		yw = max(yw, len(Human(tick(ymin, ymax, r, plotH), o.Unit)))
+	}
+	return yw + 2
+}
+
+// Stats summarises a line the way a Grafana table legend does.
+type Stats struct {
+	Min, Max, Mean, Last, Total float64
+	N                           int
+}
+
+func LineStats(l Line) Stats {
+	s := Stats{Min: math.NaN(), Max: math.NaN(), Mean: math.NaN(), Last: math.NaN()}
+	for _, p := range l.Points {
+		if math.IsNaN(p.V) || math.IsInf(p.V, 0) {
+			continue
+		}
+		if s.N == 0 || p.V < s.Min {
+			s.Min = p.V
+		}
+		if s.N == 0 || p.V > s.Max {
+			s.Max = p.V
+		}
+		s.Total += p.V
+		s.Last = p.V
+		s.N++
+	}
+	if s.N > 0 {
+		s.Mean = s.Total / float64(s.N)
+	}
+	return s
+}
+
+// At is the line's value nearest to t, NaN when it has none.
+func At(l Line, t time.Time) float64 {
+	best, v := time.Duration(math.MaxInt64), math.NaN()
+	for _, p := range l.Points {
+		d := p.T.Sub(t)
+		if d < 0 {
+			d = -d
+		}
+		if d < best {
+			best, v = d, p.V
+		}
+	}
+	return v
+}
+
+// Bar is one row of a bar gauge.
+type Bar struct {
+	Name  string
+	Value float64
+	Color lipgloss.Color
+}
+
+// BarGauge draws one horizontal bar per item, scaled to top (the largest value when 0), name on
+// the left and value on the right, coloured by the item.
+func BarGauge(items []Bar, w int, unit string, top float64) string {
+	if top <= 0 {
+		for _, it := range items {
+			top = math.Max(top, it.Value)
+		}
+	}
+	nameW, valW := 0, 0
+	for _, it := range items {
+		nameW = max(nameW, lipgloss.Width(it.Name))
+		valW = max(valW, len(Human(it.Value, unit)))
+	}
+	nameW = min(nameW, max(8, w/3))
+	barW := max(4, w-nameW-valW-2)
+	var b strings.Builder
+	for i, it := range items {
+		name := it.Name
+		if lipgloss.Width(name) > nameW {
+			name = string([]rune(name)[:max(1, nameW-1)]) + "…"
+		}
+		frac := 0.0
+		if top > 0 && !math.IsNaN(it.Value) {
+			frac = math.Max(0, math.Min(1, it.Value/top))
+		}
+		full := int(math.Round(frac * float64(barW)))
+		b.WriteString(label.Render(fmt.Sprintf("%-*s", nameW, name)) + " ")
+		b.WriteString(lipgloss.NewStyle().Foreground(it.Color).Render(strings.Repeat("■", full)) + axis.Render(strings.Repeat("·", barW-full)))
+		b.WriteString(" " + lipgloss.NewStyle().Foreground(it.Color).Render(fmt.Sprintf("%*s", valW, Human(it.Value, unit))))
+		if i < len(items)-1 {
+			b.WriteByte('\n')
+		}
+	}
 	return b.String()
 }
 
@@ -340,8 +587,12 @@ func si(v float64) string {
 		return trim(v/1e3) + "k"
 	case a == 0:
 		return "0"
+	case a < 1e-6:
+		return trim(v*1e9) + "n"
+	case a < 1e-3:
+		return trim(v*1e6) + "µ"
 	case a < 0.01:
-		return fmt.Sprintf("%.1e", v)
+		return trim(v*1e3) + "m"
 	}
 	return trim(v)
 }

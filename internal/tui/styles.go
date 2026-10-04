@@ -20,17 +20,20 @@ var (
 	cPanel  = lipgloss.AdaptiveColor{Light: "#D0D0D0", Dark: "#2C3235"}
 	cBar    = lipgloss.AdaptiveColor{Light: "#ECECEC", Dark: "#181B1F"}
 
-	sTitle    = lipgloss.NewStyle().Bold(true).Foreground(cText)
-	sDim      = lipgloss.NewStyle().Foreground(cDim)
-	sAccent   = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
-	sGreen    = lipgloss.NewStyle().Foreground(cGreen)
-	sAmber    = lipgloss.NewStyle().Foreground(cAmber)
-	sRed      = lipgloss.NewStyle().Foreground(cRed)
-	sSelected = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#DCE7FB", Dark: "#22344F"}).Bold(true)
-	sTabOn    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(cAccent).Bold(true).Padding(0, 1)
-	sTabOff   = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
-	sHeader   = lipgloss.NewStyle().Background(cBar).Foreground(cText)
-	sKey      = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	sTitle     = lipgloss.NewStyle().Bold(true).Foreground(cText)
+	sDim       = lipgloss.NewStyle().Foreground(cDim)
+	sAccent    = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	sGreen     = lipgloss.NewStyle().Foreground(cGreen)
+	sAmber     = lipgloss.NewStyle().Foreground(cAmber)
+	sRed       = lipgloss.NewStyle().Foreground(cRed)
+	sSelected  = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#DCE7FB", Dark: "#22344F"}).Bold(true)
+	sHover     = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#EEF2F8", Dark: "#1C2430"})
+	sUnderline = lipgloss.NewStyle().Underline(true)
+	sTabHover  = lipgloss.NewStyle().Foreground(cText).Underline(true).Padding(0, 1)
+	sTabOn     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(cAccent).Bold(true).Padding(0, 1)
+	sTabOff    = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
+	sHeader    = lipgloss.NewStyle().Background(cBar).Foreground(cText)
+	sKey       = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
 )
 
 // panel draws a titled, rounded box exactly w×h.

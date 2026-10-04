@@ -18,6 +18,8 @@ type picker struct {
 	filter string
 	off    int
 	done   func(chosen []string) tea.Cmd
+	// zx, zy is where the last frame drew the rows, for hover
+	zx, zy int
 }
 
 func (m *model) pick(title string, items, desc []string, sel int, multi bool, done func([]string) tea.Cmd) {
@@ -174,7 +176,9 @@ func (p *picker) view(m *model, h int) string {
 		}
 		line = padRight(line, w)
 		if off+r == p.sel {
-			line = sSelected.Render(line)
+			line = highlight(sSelected, line, w)
+		} else if m.hovering(p.zx, p.zy+r, w, 1) {
+			line = highlight(sHover, line, w)
 		}
 		b.WriteString(line + "\n")
 	}
@@ -186,5 +190,6 @@ func (p *picker) view(m *model, h int) string {
 	x, y := max(0, (m.w-bw)/2), max(0, (h-bh)/2)
 	// rows start below the border, padding and the title line
 	m.zone("picker", x+3, y+4, w, rows)
+	p.zx, p.zy = x+3, y+4
 	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, box)
 }

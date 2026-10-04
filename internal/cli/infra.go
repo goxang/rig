@@ -30,7 +30,7 @@ rig up never redeploys infrastructure that already runs; these commands are how 
 		ia.Confirmed = a.Confirmed
 		borrowed = nil
 		for _, n := range a.Spec.ServiceNames() {
-			if a.SharedElsewhere(n) {
+			if a.SharedElsewhere(n) && !a.Spec.Services[n].Manual {
 				borrowed = append(borrowed, n)
 			}
 		}
