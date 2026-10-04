@@ -50,7 +50,22 @@ type savedLoadHist struct {
 	Target, Actual, Failed []core.Point
 }
 
-func sessionDir(projectDir string) string { return filepath.Join(projectDir, ".rig", "sessions") }
+func sessionDir(projectDir string) string {
+	dir, err := spec.DataDir(projectDir)
+	if err != nil {
+		return filepath.Join(projectDir, ".rig", "sessions")
+	}
+	dir = filepath.Join(dir, "sessions")
+	// sessions used to live in the project's .rig; bring them along once
+	if old := filepath.Join(projectDir, ".rig", "sessions"); exists(old) && !exists(dir) {
+		if os.MkdirAll(filepath.Dir(dir), 0o755) == nil {
+			_ = os.Rename(old, dir)
+		}
+	}
+	return dir
+}
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // snapshot gathers the session from the screens.
 func (m *model) snapshot() *Session {

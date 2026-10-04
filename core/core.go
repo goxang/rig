@@ -402,6 +402,13 @@ type Browser interface {
 	Browse(ctx context.Context, path []string) (t Table, leaf bool, err error)
 }
 
+// PathQuerier runs a query where a Browser walk stands (the database of path[0], say) and suggests one
+// for a path: the Data screen's "query this".
+type PathQuerier interface {
+	QueryAt(ctx context.Context, path []string, q string) (Table, error)
+	SuggestQuery(path []string) string
+}
+
 type Querier interface {
 	QueryLanguage() string
 	RunQuery(ctx context.Context, q string) (Table, error)

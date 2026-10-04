@@ -40,8 +40,8 @@ func (a *App) TaskNames() []string {
 
 // RunTask runs a task's steps in order with sh -c from the project directory, stopping at the first
 // failure. svc:// addresses in a step become a host:port reachable from here, and a nested `rig`
-// inherits this project, environment and confirmation.
-func (a *App) RunTask(ctx context.Context, name string, out io.Writer) error {
+// inherits this project, environment and confirmation. args reach every step as $1... and $RIG_ARGS.
+func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Writer) error {
 	steps, ok := a.Tasks()[name]
 	if !ok {
 		return fmt.Errorf("no task %q in %s (have %v)", name, a.envName(), a.TaskNames())
@@ -60,7 +60,7 @@ func (a *App) RunTask(ctx context.Context, name string, out io.Writer) error {
 	if a.Confirmed {
 		env = append(env, "RIG_YES=1")
 	}
-	env = append(env, "RIG_TASK="+name)
+	env = append(env, "RIG_TASK="+name, "RIG_ARGS="+strings.Join(args, " "))
 	vars, _ := a.Vars(ctx)
 	for k, v := range vars {
 		env = append(env, k+"="+v.Value)
@@ -82,7 +82,7 @@ func (a *App) RunTask(ctx context.Context, name string, out io.Writer) error {
 			title += " …"
 		}
 		fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
-		cmd := sh.New("sh", "-c", line)
+		cmd := sh.New("sh", append([]string{"-c", line, name}, args...)...)
 		cmd.Dir = a.Spec.Dir
 		cmd.Env = env
 		if err := cmd.Attach(ctx, os.Stdin, out, out); err != nil {

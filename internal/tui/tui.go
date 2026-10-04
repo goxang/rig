@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -503,6 +504,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "E":
 			m.pickEnv()
 			return nil
+		case "T":
+			m.pickTask("")
+			return nil
 		case "M":
 			m.mouseOff = !m.mouseOff
 			if m.mouseOff {
@@ -526,6 +530,56 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		}
 	}
 	return t.update(m, k)
+}
+
+// pickTask runs a rig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
+// may read input, so the TUI steps aside until it ends. Enter on the confirmation is the task's --yes.
+// prefix narrows the list (the KV screen's kv-*).
+func (m *model) pickTask(prefix string) {
+	var names []string
+	for _, n := range m.app.TaskNames() {
+		if strings.HasPrefix(n, prefix) {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		m.setStatus("no "+prefix+"* tasks in "+m.app.Spec.File, true)
+		return
+	}
+	tasks := m.app.Tasks()
+	var desc []string
+	for _, n := range names {
+		var steps []string
+		for _, st := range tasks[n] {
+			first, _, _ := strings.Cut(strings.TrimSpace(st), "\n")
+			if !strings.HasPrefix(first, `[ -n "${RIG_YES`) {
+				steps = append(steps, first)
+			}
+		}
+		desc = append(desc, strings.Join(steps, " && "))
+	}
+	m.pick("task", names, desc, 0, false, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		name := chosen[0]
+		run := func() tea.Msg {
+			self, err := os.Executable()
+			if err != nil {
+				return statusMsg{text: err.Error(), err: true}
+			}
+			script := `"$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
+			cmd := exec.Command("sh", "-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name)
+			return tea.ExecProcess(cmd, func(err error) tea.Msg {
+				if err != nil {
+					return statusMsg{text: "task " + name + ": " + err.Error(), err: true}
+				}
+				return statusMsg{text: "task " + name + " ✓"}
+			})()
+		}
+		m.confirm = &confirm{text: "run task " + name + " on " + m.app.Env.Name + "?", run: run}
+		return nil
+	})
 }
 
 func (m *model) pickEnv() {
@@ -657,7 +711,7 @@ func (m *model) footer() string {
 		for _, h := range m.tabs[m.active].hints() {
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
-		hs = append(hs, sKey.Render("?")+" "+sDim.Render("help"), sKey.Render("E")+" "+sDim.Render("env"), sKey.Render("q")+" "+sDim.Render("quit"))
+		hs = append(hs, sKey.Render("?")+" "+sDim.Render("help"), sKey.Render("E")+" "+sDim.Render("env"), sKey.Render("T")+" "+sDim.Render("tasks"), sKey.Render("q")+" "+sDim.Render("quit"))
 		line = " " + strings.Join(hs, "  ")
 	}
 	status := ""
@@ -673,7 +727,7 @@ func (m *model) footer() string {
 
 func (m *model) helpView() string {
 	rows := [][2]string{
-		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"},
+		{"1-9 0  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"T", "run a task (clear-db, clear-queues, ship, ...)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
 		{"esc", "back"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}

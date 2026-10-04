@@ -402,6 +402,27 @@ func Gauge(frac float64, w int) string {
 	return lipgloss.NewStyle().Foreground(c).Render(strings.Repeat("█", full)) + axis.Render(strings.Repeat("░", w-full))
 }
 
+// Meter is an htop bar, w cells wide: [||||      label], the label right-aligned inside it.
+func Meter(frac float64, w int, label string) string {
+	frac = math.Max(0, math.Min(1, frac))
+	inner := max(1, w-2)
+	full := int(math.Round(frac * float64(inner)))
+	c := lipgloss.Color("#73BF69")
+	switch {
+	case frac >= 0.9:
+		c = "#F2495C"
+	case frac >= 0.7:
+		c = "#FF9830"
+	}
+	if len(label) > inner {
+		label = ""
+	}
+	cells := []rune(strings.Repeat("|", full) + strings.Repeat(" ", inner-full))
+	copy(cells[inner-len(label):], []rune(label))
+	bar := lipgloss.NewStyle().Foreground(c).Render(string(cells[:full])) + string(cells[full:])
+	return axis.Render("[") + bar + axis.Render("]")
+}
+
 // Waterfall draws a trace: one row per span, indented by depth, with a bar placed in time.
 func Waterfall(spans []core.Span, w int) string {
 	if len(spans) == 0 {

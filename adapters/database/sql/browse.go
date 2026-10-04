@@ -114,3 +114,27 @@ func (d *DB) Browse(ctx context.Context, path []string) (core.Table, bool, error
 	}
 	return core.Table{}, true, fmt.Errorf("%s has nothing below it", strings.Join(path, "/"))
 }
+
+// QueryAt runs q in the database the path starts at.
+func (d *DB) QueryAt(ctx context.Context, path []string, q string) (core.Table, error) {
+	if len(path) == 0 {
+		return core.Table{}, fmt.Errorf("pick a database first")
+	}
+	return d.Query(ctx, path[0], q)
+}
+
+// SuggestQuery reads a table or view's first rows; elsewhere it leaves a SELECT to finish.
+func (d *DB) SuggestQuery(path []string) string {
+	b, ok := browsers[d.opt.Driver]
+	if !ok || len(path) == 0 {
+		return ""
+	}
+	if len(path) >= 3 && (path[1] == "tables" || path[1] == "views") {
+		var parts []string
+		for _, p := range strings.Split(path[2], ".") {
+			parts = append(parts, b.quote(p))
+		}
+		return b.top(strings.Join(parts, "."))
+	}
+	return "SELECT "
+}

@@ -58,18 +58,19 @@ and kind never ask. `?` shows the keys of the current screen.
 
 | screen | |
 |---|---|
-| Services | mark several with `space`, then start/stop/restart/scale/deploy them together; `enter` opens one: instances and its live log |
+| Services | your services, `i` switches to infrastructure or both; mark several with `space` (`a` all shown), then start/stop/restart/scale/deploy them together; `enter` opens one: instances and its live log |
 | Logs | the services you pick, merged, or one instance |
 | Metrics | dashboards from rig.yaml, on demand |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session |
-| KV | browse and edit keys; `R` restarts the services that read the edited key |
-| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `/` filters with globs |
+| KV | browse and edit keys; `R` restarts the services that read the edited key; `I` fills the store (`kv-*` tasks) |
+| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `Q` queries where you stand; `/` filters with globs |
 | Load | generators: rate, instances, `c` their KV config, `v` their env |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`) |
-| Hosts | nodes and a shell |
+| Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell |
 
-`S` saves the session (screens, query results and history) for `rig resume`; `M` frees the mouse so
+`T` runs a task from rig.yaml. `S` saves the session (screens, query results and history) for `rig resume`,
+under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
 the terminal can select text; the header shows alerts (`A`).
 
 ## Agents

@@ -196,7 +196,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing rig.yaml")
 
 	task := &cobra.Command{
-		Use: "task [name]", Short: "run a task from rig.yaml (its shell steps, in order), or list them",
+		Use: "task [name [args...]]", Short: "run a task from rig.yaml (its shell steps, in order, args as $1... and $RIG_ARGS), or list them",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				tasks := a.Tasks()
@@ -207,12 +207,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				printTable(os.Stdout, []string{"TASK", "STEPS"}, rows)
 				return nil
 			}
-			for _, n := range args {
-				if err := a.RunTask(ctx, n, os.Stdout); err != nil {
-					return err
-				}
-			}
-			return nil
+			return a.RunTask(ctx, args[0], args[1:], os.Stdout)
 		}),
 	}
 

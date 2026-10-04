@@ -22,6 +22,8 @@ type servicesTab struct {
 	list   *grid
 	marked map[string]bool
 	filter string
+	// role shows one kind of service: "" the project's own (apps and load generators), or infra, or all
+	role string
 
 	open_  string // the service being shown, "" for the list
 	pods   *grid
@@ -81,7 +83,7 @@ func (t *servicesTab) hints() [][2]string {
 		return [][2]string{{"esc", "back"}, {"enter", "logs of instance"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile"}, {"D", "debug"}, {"l", "logs screen"}}
 	}
-	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark all"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
+	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark all shown"}, {"i", "apps/infra/all"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
 		{"d", "deploy"}, {"b", "build+deploy"}, {"/", "filter"}, {"< >", "sort"}}
 }
 
@@ -188,6 +190,10 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 		for _, r := range t.list.rows {
 			t.marked[r.id] = !all
 		}
+	case "i":
+		t.role = map[string]string{"": "infra", "infra": "all", "all": ""}[t.role]
+		t.marked = map[string]bool{}
+		t.list.sel = 0
 	case "/":
 		m.ask("filter services (name or group)", t.filter, func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)
@@ -516,6 +522,9 @@ func (t *servicesTab) rows(m *model) []grow {
 		if s == nil {
 			continue
 		}
+		if infra := s.Role == "infra"; t.role == "" && infra || t.role == "infra" && !infra {
+			continue
+		}
 		groups := strings.Join(s.Groups, ",")
 		if f != "" && !strings.Contains(strings.ToLower(st.Service+" "+groups+" "+s.Role), f) {
 			continue
@@ -568,7 +577,8 @@ func (t *servicesTab) view(m *model, w, h int) string {
 			marked++
 		}
 	}
-	title := fmt.Sprintf("services · %d", len(t.list.rows))
+	title := fmt.Sprintf("%s · %d  (i: %s)", map[string]string{"": "services", "infra": "infrastructure", "all": "services and infrastructure"}[t.role], len(t.list.rows),
+		map[string]string{"": "infrastructure", "infra": "all", "all": "services"}[t.role])
 	if t.filter != "" {
 		title += " · filter " + t.filter
 	}

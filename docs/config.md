@@ -143,7 +143,11 @@ with no targets leaves it running: `rig infra up|down|restart|status` changes it
 Each step runs with `sh -c` from the project directory and the task stops at the first failure.
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
 `rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
-Write `$$` for a shell `$`, since `${...}` is rig's own expansion.
+Write `$$` for a shell `$`, since `${...}` is rig's own expansion. `rig task ship parser load` passes
+the words after the name as `$1...` and `$RIG_ARGS`.
+
+In the TUI, `T` runs any task; the KV screen's `I` lists the tasks named `kv-*` (filling the store from
+the project's config files, say).
 
 ## secrets
 
@@ -168,7 +172,7 @@ alerts:
 
 `source: hosts` checks every node's `cpu`, `memory` or `disk` (percent). Any other source is a component
 whose query returns rows: each row's first number is checked, its other cells name it. `below: true`
-fires under the thresholds. With no `alerts:`, nodes are watched for cpu, memory and disk at 90% and 98%.
+fires under the thresholds. With no `alerts:`, nodes are watched for cpu and memory at 90% and 98%, disk at 97% and 98%.
 The TUI checks every 15s and shows the worst in its header (`A` lists all); `rig alerts` checks once and
 exits 2 when one is critical. Environments add their own `alerts:`.
 

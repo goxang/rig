@@ -77,7 +77,8 @@ func Load(file, env string) (*Project, *Environment, error) {
 
 	builtin := map[string]string{"env": env, "project": head.Name}
 	stored, _ := LoadSecrets(head.Name)
-	lookup := func(name string) (string, bool) {
+	// secrets and built-ins: what a var's own value may refer to
+	base := func(name string) (string, bool) {
 		if v, ok := os.LookupEnv(name); ok {
 			return v, true
 		}
@@ -87,14 +88,18 @@ func Load(file, env string) (*Project, *Environment, error) {
 		if s, ok := head.Secrets[name]; ok && s.Default != "" {
 			return s.Default, true
 		}
-		if v, ok := builtin[name]; ok {
+		v, ok := builtin[name]
+		return v, ok
+	}
+	lookup := func(name string) (string, bool) {
+		if v, ok := base(name); ok {
 			return v, true
 		}
 		if v, ok := head.Environments[env].Vars[name]; ok {
-			return Expand(v, osLookup), true
+			return Expand(v, base), true
 		}
 		if v, ok := head.Vars[name]; ok {
-			return Expand(v, osLookup), true
+			return Expand(v, base), true
 		}
 		return "", false
 	}
@@ -238,8 +243,6 @@ func pickEnv(env, def string, have []string) string {
 }
 
 var varRe = regexp.MustCompile(`\$\$|\$\{([A-Za-z_][A-Za-z0-9_.]*)(:-([^}]*))?\}`)
-
-func osLookup(n string) (string, bool) { return os.LookupEnv(n) }
 
 // Expand replaces ${NAME} and ${NAME:-default}; $$ is a literal $. Unknown names stay as written.
 func Expand(s string, lookup func(string) (string, bool)) string {
