@@ -14,6 +14,9 @@ func main() {
 	cli.Version = version
 	cli.UI = tui.Run
 	cli.Resume = tui.Resume
+	cli.AIChat = tui.Chat
+	cli.PickSession = tui.PickSession
+	cli.CloseUISession = tui.CloseSession
 	cli.Sessions = func(dir string) ([][]string, error) {
 		ss, err := tui.ListSessions(dir)
 		var rows [][]string

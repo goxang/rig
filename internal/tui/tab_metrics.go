@@ -122,6 +122,22 @@ func (t *metricsTab) dashNames(m *model) []string {
 	return names
 }
 
+// promHint tells the AI completing a query which metrics this dashboard already reads.
+func (t *metricsTab) promHint(m *model) string {
+	h := "a PromQL expression for this environment's Prometheus"
+	var qs []string
+	for i, d := range t.data {
+		if i == 10 {
+			break
+		}
+		qs = append(qs, d.query)
+	}
+	if len(qs) > 0 {
+		h += "; the dashboard's queries: " + strings.Join(qs, " ; ")
+	}
+	return h
+}
+
 func (t *metricsTab) dashIndex(m *model) int {
 	n := len(t.dashNames(m))
 	return (t.dash%n + n) % n
@@ -442,7 +458,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case "y":
 		t.copyQuery(m)
 	case "a":
-		m.ask("query", "", func(q string) tea.Cmd {
+		m.askAI("query", "", t.promHint(m), func(q string) tea.Cmd {
 			if q == "" {
 				return nil
 			}
@@ -455,7 +471,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 		if t.focus < len(ps) {
 			p := ps[t.focus]
 			idx := t.focus - (len(ps) - len(t.adhoc))
-			m.ask("query", p.Query, func(q string) tea.Cmd {
+			m.askAI("query", p.Query, t.promHint(m), func(q string) tea.Cmd {
 				np := p
 				np.Query, np.Title, np.Row = q, q, ""
 				if idx >= 0 {

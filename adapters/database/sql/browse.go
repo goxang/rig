@@ -123,18 +123,88 @@ func (d *DB) QueryAt(ctx context.Context, path []string, q string) (core.Table, 
 	return d.Query(ctx, path[0], q)
 }
 
-// SuggestQuery reads a table or view's first rows; elsewhere it leaves a SELECT to finish.
-func (d *DB) SuggestQuery(path []string) string {
+// SuggestQuery reads a table or view's first rows, and calls a procedure or function with each
+// parameter as NULL /* its type */ to fill in; elsewhere it leaves a SELECT to finish.
+func (d *DB) SuggestQuery(ctx context.Context, path []string) string {
 	b, ok := browsers[d.opt.Driver]
 	if !ok || len(path) == 0 {
 		return ""
 	}
-	if len(path) >= 3 && (path[1] == "tables" || path[1] == "views") {
+	if len(path) < 3 {
+		return "SELECT "
+	}
+	switch path[1] {
+	case "tables", "views":
 		var parts []string
 		for _, p := range strings.Split(path[2], ".") {
 			parts = append(parts, b.quote(p))
 		}
 		return b.top(strings.Join(parts, "."))
+	case "procedures", "functions":
+		return d.callTemplate(ctx, path[0], path[1] == "functions", path[2])
 	}
 	return "SELECT "
+}
+
+// callTemplate is a runnable call of a routine: every argument NULL, its name and type beside it.
+func (d *DB) callTemplate(ctx context.Context, db string, function bool, object string) string {
+	lit := "'" + strings.ReplaceAll(object, "'", "''") + "'"
+	name := object
+	if d.opt.Driver == "mysql" {
+		name = object[strings.LastIndex(object, ".")+1:]
+		lit = "'" + strings.ReplaceAll(name, "'", "''") + "'"
+	}
+	var q string
+	switch d.opt.Driver {
+	case "mssql":
+		q = `SELECT p.name, TYPE_NAME(p.user_type_id) + CASE WHEN TYPE_NAME(p.user_type_id) IN ('varchar','nvarchar','char','nchar','varbinary')
+			THEN '(' + CASE WHEN p.max_length = -1 THEN 'max' ELSE CAST(CASE WHEN TYPE_NAME(p.user_type_id) LIKE 'n%' THEN p.max_length/2 ELSE p.max_length END AS varchar) END + ')' ELSE '' END,
+			CASE WHEN p.is_output = 1 THEN 'OUTPUT' ELSE '' END, (SELECT type FROM sys.objects WHERE object_id = OBJECT_ID(` + lit + `))
+			FROM sys.parameters p WHERE p.object_id = OBJECT_ID(` + lit + `) AND p.name <> '' ORDER BY p.parameter_id`
+	case "postgres":
+		q = `SELECT a.name, a.type, '', '' FROM (SELECT unnest(coalesce(p.proargnames, array_fill(''::text, array[p.pronargs]))) AS name,
+			unnest(string_to_array(oidvectortypes(p.proargtypes), ', ')) AS type FROM pg_proc p WHERE p.oid = ` + lit + `::regproc) a`
+	case "mysql":
+		q = `SELECT parameter_name, dtd_identifier, parameter_mode, '' FROM information_schema.parameters
+			WHERE specific_schema = DATABASE() AND specific_name = ` + lit + ` AND parameter_name IS NOT NULL ORDER BY ordinal_position`
+	}
+	t, err := d.Query(ctx, db, q)
+	var args []string
+	kind := ""
+	for _, r := range t.Rows {
+		if len(r) < 4 {
+			continue
+		}
+		kind = r[3]
+		hint := strings.TrimSpace(r[1] + " " + r[2])
+		switch {
+		case d.opt.Driver == "mssql":
+			out := ""
+			if r[2] == "OUTPUT" {
+				out = " OUTPUT"
+			}
+			args = append(args, r[0]+" = NULL"+out+" /* "+r[1]+" */")
+		case r[0] != "":
+			args = append(args, "NULL /* "+r[0]+" "+hint+" */")
+		default:
+			args = append(args, "NULL /* "+hint+" */")
+		}
+	}
+	if err != nil {
+		args = []string{"/* parameters unknown: " + err.Error() + " */"}
+	}
+	list := strings.Join(args, ", ")
+	switch {
+	case d.opt.Driver == "mssql" && !function:
+		return strings.TrimSpace("EXEC " + object + " " + list)
+	case d.opt.Driver == "mssql" && kind == "FN":
+		return "SELECT " + object + "(" + list + ")"
+	case function && d.opt.Driver == "mysql":
+		return "SELECT " + name + "(" + list + ")"
+	case function:
+		return "SELECT * FROM " + object + "(" + list + ")"
+	case d.opt.Driver == "mysql":
+		return "CALL " + name + "(" + list + ")"
+	}
+	return "CALL " + object + "(" + list + ")"
 }

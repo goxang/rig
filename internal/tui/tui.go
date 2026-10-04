@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 )
@@ -83,6 +84,12 @@ type model struct {
 	session *Session
 	// mouseOff hands the mouse to the terminal, so text can be selected and copied
 	mouseOff bool
+	// chat is the assistant's drawer (@); sock is where its tools reach this UI
+	chat *chat
+	sock string
+	ai   *ai.Runner
+	// completeCancel stops the AI completion in flight
+	completeCancel context.CancelFunc
 
 	services []core.Status
 	svcAt    time.Time
@@ -109,14 +116,19 @@ type model struct {
 }
 
 type confirm struct {
-	text string
-	run  tea.Cmd
+	text   string
+	run    tea.Cmd
+	cancel func()
 }
 
 type prompt struct {
 	label  string
 	input  textinput.Model
 	submit func(string) tea.Cmd
+	// hint, when set, is what the AI completes the input with: the language and where it runs
+	hint    string
+	seq     int
+	waiting bool
 }
 
 type (
@@ -144,9 +156,31 @@ func newTabs() []tab {
 	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}, &testsTab{}}
 }
 
-func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil) }
+func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil, nil) }
 
-func run(ctx context.Context, a *engine.App, s *Session) error {
+// Chat opens the UI with the assistant's chat open, on conversation id ("" a new one, "last" the newest).
+func Chat(ctx context.Context, a *engine.App, id string) error {
+	return run(ctx, a, nil, func(m *model) {
+		c := m.chatOpen()
+		if id == "" {
+			return
+		}
+		if id == "last" {
+			ss, _ := ai.ListSessions(a.AIDir())
+			for _, s := range ss {
+				if s.Env == a.Env.Name {
+					id = s.ID
+					break
+				}
+			}
+		}
+		if err := c.load(m, id); err != nil && id != "last" {
+			c.err = err.Error()
+		}
+	})
+}
+
+func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) error {
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
@@ -155,8 +189,27 @@ func run(ctx context.Context, a *engine.App, s *Session) error {
 	if s != nil {
 		m.restore(s)
 	}
+	m.sock = ai.SocketPath()
+	stop, err := ai.Serve(m.sock, func(r ai.Request) ai.Reply {
+		reply := make(chan ai.Reply, 1)
+		program.Send(bridgeMsg{req: r, reply: reply})
+		select {
+		case rep := <-reply:
+			return rep
+		case <-time.After(10 * time.Minute):
+			return ai.Reply{Text: "no answer in rig"}
+		}
+	})
+	if err != nil {
+		m.sock = ""
+	} else {
+		defer stop()
+	}
+	if init != nil {
+		init(m)
+	}
 	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
-	_, err := program.Run()
+	_, err = program.Run()
 	if err == tea.ErrProgramKilled {
 		return nil
 	}
@@ -407,6 +460,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case schedMsg:
 		m.sched.done(msg)
 		return m, nil
+	case completeTickMsg:
+		return m, m.completeDue(msg)
+	case completeMsg:
+		m.completed(msg)
+		return m, nil
 	case namespacesMsg:
 		return m, m.showNamespaces(msg)
 	case manifestEditedMsg:
@@ -428,11 +486,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tabs = newTabs()
 		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
+		m.ai = nil
+		if m.chat != nil {
+			m.chat.reset()
+			if m.chat.open {
+				focus := m.chat.focus
+				m.chatOpen().focus = focus
+			}
+		}
 		return m, batch(m.openTab(m.active), m.fetchServices())
 	case tea.KeyMsg:
 		return m, m.key(msg)
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
+	}
+	if cmd, ok := m.chatUpdate(msg); ok {
+		return m, cmd
 	}
 	// data arriving for a tab must reach it even when another tab is showing
 	var cmds []tea.Cmd
@@ -461,6 +530,24 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	}
 	if m.confirm != nil || m.prompt != nil {
 		return nil
+	}
+	if c := m.chat; c != nil && c.open && m.picker == nil && !m.help && !m.showAlerts && e.Action == tea.MouseActionPress {
+		z, ok := m.zoneAt(e.X, e.Y)
+		inChat := ok && z.id == "chat"
+		switch {
+		case inChat && e.Button == tea.MouseButtonWheelUp:
+			c.scroll += 3
+			return nil
+		case inChat && e.Button == tea.MouseButtonWheelDown:
+			c.scroll = max(0, c.scroll-3)
+			return nil
+		case inChat && e.Button == tea.MouseButtonLeft:
+			c.focus = true
+			c.input.Focus()
+			return nil
+		case e.Button == tea.MouseButtonLeft:
+			c.focus = false
+		}
 	}
 	switch e.Button {
 	case tea.MouseButtonWheelLeft, tea.MouseButtonWheelRight:
@@ -632,6 +719,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
 			return c.run
 		}
+		if c.cancel != nil {
+			c.cancel()
+		}
 		m.setStatus("cancelled", false)
 		return nil
 	}
@@ -645,8 +735,12 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.prompt = nil
 			return p.submit(p.input.Value())
 		}
+		before := m.prompt.input.Value()
 		var cmd tea.Cmd
 		m.prompt.input, cmd = m.prompt.input.Update(k)
+		if m.prompt.input.Value() != before {
+			return batch(cmd, m.completeLater())
+		}
 		return cmd
 	}
 	if m.picker != nil {
@@ -661,9 +755,15 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		m.help, m.showAlerts = false, false
 		return nil
 	}
+	if c := m.chat; c != nil && c.open && c.focus {
+		return m.chatKey(k)
+	}
 	t := m.tabs[m.active]
 	if !t.typing() {
 		switch s := k.String(); s {
+		case "@":
+			m.chatOpen()
+			return nil
 		case "q":
 			return m.quit()
 		case "S":
@@ -738,6 +838,9 @@ func (m *model) quit() tea.Cmd {
 	}
 	if m.busy > 0 {
 		stops = append(stops, fmt.Sprintf("%d operations still working", m.busy))
+	}
+	if m.chat != nil && m.chat.busy {
+		stops = append(stops, "the assistant's turn")
 	}
 	leave := func() tea.Msg {
 		if m.session != nil {
@@ -959,6 +1062,13 @@ func (m *model) View() string {
 		body = m.overlay(m.alertsView(), bodyH)
 	case m.picker != nil:
 		body = m.picker.view(m, bodyH)
+	case m.chat != nil && m.chat.open:
+		cw := m.chatWidth()
+		if cw >= m.w {
+			body = m.chat.view(m, 0, m.w, bodyH)
+			break
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(m.w-cw).MaxWidth(m.w-cw).Render(m.tabs[m.active].view(m, m.w-cw, bodyH)), m.chat.view(m, m.w-cw, cw, bodyH))
 	default:
 		body = m.tabs[m.active].view(m, m.w, bodyH)
 	}
@@ -1057,10 +1167,23 @@ func (m *model) footer() string {
 	case m.confirm != nil:
 		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3)
 	case m.prompt != nil:
-		head := sAccent.Render(" "+m.prompt.label+": ") + m.prompt.input.View()
+		label := m.prompt.label
+		switch {
+		case m.prompt.waiting:
+			label += sDim.Render(" ⋯ai")
+		case m.prompt.hint != "" && m.prompt.input.ShowSuggestions && len(m.prompt.input.MatchedSuggestions()) > 0:
+			label += sDim.Render(" (tab accepts)")
+		}
+		head := sAccent.Render(" "+label+": ") + m.prompt.input.View()
 		line = head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3)
 	case m.picker != nil:
 		line = " " + m.picker.hints()
+	case m.chat != nil && m.chat.open && m.chat.focus:
+		var hs []string
+		for _, h := range [][2]string{{"enter", "send"}, {"tab", "ideas"}, {"↑↓ wheel", "scroll"}, {"ctrl+x", "stop"}, {"/sessions /new /close", ""}, {"esc", "hide"}, {"click left", "back to the screen"}} {
+			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
+		}
+		line = " " + strings.Join(hs, "  ")
 	default:
 		// the first few keys of the screen only: ? lists them all, so the footer stays readable
 		var hs []string
@@ -1070,7 +1193,7 @@ func (m *model) footer() string {
 			}
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
-		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("E")+" "+sDim.Render("env"))
+		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("@")+" "+sDim.Render("AI"), sKey.Render("E")+" "+sDim.Render("env"))
 		if m.app.Namespace() != "" && !m.app.Env.Protected {
 			hs = append(hs, sKey.Render("N")+" "+sDim.Render("namespace"))
 		}
@@ -1109,7 +1232,7 @@ func (m *model) helpView() string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

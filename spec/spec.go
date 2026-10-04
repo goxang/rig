@@ -42,6 +42,8 @@ type Project struct {
 	Reports map[string]*Report `yaml:"reports"`
 	// Sections split the Services screen by business area; services in none fall under "other".
 	Sections map[string]*Section `yaml:"sections"`
+	// AI tells the assistant (`rig ai`, @ in the UI) about the project: paths it must not read, notes.
+	AI *AI `yaml:"ai"`
 
 	// DashboardOrder, TestOrder and SectionOrder are the names as rig.yaml lists them.
 	DashboardOrder []string `yaml:"-"`
@@ -51,6 +53,12 @@ type Project struct {
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
 	File string `yaml:"-"`
+}
+
+type AI struct {
+	// Deny are project paths (globs) the assistant never reads, e.g. configs/** holding credentials.
+	Deny         []string `yaml:"deny"`
+	Instructions string   `yaml:"instructions"`
 }
 
 // Import pulls services from another tool's file, e.g. {godev: .godev.yaml}.

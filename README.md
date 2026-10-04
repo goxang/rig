@@ -86,6 +86,37 @@ the terminal can select text; the header shows alerts (`A`). `q` quits at once u
 operation is still going, or load generators are sending: those stop with rig (tests, queries, port
 forwards) or keep going without it (generators, services), and it asks.
 
+## AI
+
+`@` on any screen opens a chat about what the screen shows: the selected service, key, table, the log
+lines in view. It runs your own **opencode** or **Claude Code** (whichever is installed) with rig as its
+only tools, so it can do anything you can: change a KV key, restart services, run and schedule queries,
+open screens, explain logs against the code, suggest `rig profile` / `go tool pprof` commands.
+Query prompts (Data `Q`, Queries, Metrics, Logs grep, KV values) get inline completions: `tab` takes them.
+Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
+AI or not.
+
+```
+rig ai                                 the UI with the chat open
+rig ai why is parser failing?          one turn in the terminal; rig ai -c "…" continues it
+rig resume                             pick a conversation or saved UI session: enter continues, d closes
+rig ai config                          the setup; rig ai check tests it
+rig ai config provider=deepseek api_key=sk-…
+rig ai config provider=openai url=https://…/v1 api_key=… model=…
+rig ai config proxy=localhost:10808    every AI request goes through it
+```
+
+No setup is needed: an opencode or Claude Code login is used as it is, and without one opencode's free
+models are. Providers: `own`, `opencode`, `openai` (any compatible endpoint), `9router`, `deepseek`,
+`anthropic` (for Claude Code). The key lives in `~/.config/rig/ai.json` (0600).
+
+Guard rails, enforced by rig's MCP server rather than the prompt: a conversation is bound to the
+environment it started on (other `env`s are refused); the project directory is the only workspace, with
+credentials and `ai.deny` paths unreadable; no file edits or shell. On a protected or Kubernetes
+environment a dangerous step (stop, scale down, deploy, delete, DROP/DELETE without WHERE, tasks,
+infrastructure) runs only when your message asked for it in so many words, else rig asks you first;
+on a protected one every change needs that. Secrets and `rig mcp`/`debug` are out of reach.
+
 ## Agents
 
 ```json
@@ -97,7 +128,8 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 `rig load`, `rig data`, `rig alerts`.
 
 Tools: `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
-`rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, and `rig` for any other command.
+`rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, `rig_ui` (acts in a rig UI that
+started the agent), and `rig` for any other command.
 Each runs the CLI, so protections apply: changes to a protected environment need `"confirm": true`.
 
 ## rig.yaml

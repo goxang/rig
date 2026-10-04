@@ -84,7 +84,7 @@ func (t *hostsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "enter", "s":
 			return t.shell(m, host, nil)
 		case "c":
-			m.ask("command on "+host, "uptime", func(v string) tea.Cmd {
+			m.askAI("command on "+host, "uptime", "a Linux shell command to run on host "+host, func(v string) tea.Cmd {
 				return t.shell(m, host, []string{"sh", "-c", v + "; echo; printf 'press enter '; read _"})
 			})
 		}
