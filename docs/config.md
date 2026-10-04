@@ -146,7 +146,7 @@ Each step runs with `sh -c` from the project directory and the task stops at the
 Write `$$` for a shell `$`, since `${...}` is rig's own expansion. `rig task ship parser load` passes
 the words after the name as `$1...` and `$RIG_ARGS`.
 
-In the TUI, `T` runs any task; the KV screen's `I` lists the tasks named `kv-*` (filling the store from
+In the TUI, `T` runs any task; the KV screen's `F` lists the tasks named `kv-*` (filling the store from
 the project's config files, say).
 
 ## secrets
