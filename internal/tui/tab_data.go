@@ -38,6 +38,9 @@ type dataTab struct {
 
 	filter   string
 	restored map[string][]string
+	// query is what Q ran at queryAt, shown instead of the walk until esc
+	query   string
+	queryAt []string
 }
 
 type dataComp struct {
@@ -73,7 +76,7 @@ func (t *dataTab) hints() [][2]string {
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"/", "filter (*word*)"}, {"P", "purge queue"}, {"< >", "sort"}, {"esc ←", "components"}}
 	}
-	return [][2]string{{"enter →", "open"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
+	return [][2]string{{"enter →", "open"}, {"Q", "query here"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
 }
 func (t *dataTab) interval() time.Duration { return 5 * time.Second }
 
@@ -153,12 +156,21 @@ func (t *dataTab) load(m *model) tea.Cmd {
 	t.seq++
 	t.loading, t.err = true, nil
 	a, gen, seq, ctx, path := m.app, m.gen, t.seq, m.ctx, append([]string{}, t.paths[c.name]...)
+	query, queryAt := t.query, t.queryAt
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		v, err := a.Component(c.name)
 		if err != nil {
 			return browseMsg{gen: gen, seq: seq, err: err}
+		}
+		if query != "" {
+			pq, ok := v.(core.PathQuerier)
+			if !ok {
+				return browseMsg{gen: gen, seq: seq, leaf: true, err: fmt.Errorf("%s cannot run queries", c.name)}
+			}
+			tb, err := pq.QueryAt(ctx, queryAt, query)
+			return browseMsg{gen: gen, seq: seq, t: tb, leaf: true, err: err}
 		}
 		tb, leaf, err := v.(core.Browser).Browse(ctx, path)
 		return browseMsg{gen: gen, seq: seq, t: tb, leaf: leaf, err: err}
@@ -206,7 +218,7 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 
 // show switches the right side to the selected component.
 func (t *dataTab) show(m *model) tea.Cmd {
-	t.table, t.err, t.leaf, t.loading = core.Table{}, nil, false, false
+	t.table, t.err, t.leaf, t.loading, t.query = core.Table{}, nil, false, false, ""
 	t.right = newGrid("dright")
 	if t.current().kind == string(core.KindMessaging) {
 		t.right = newGrid("dright", col("QUEUE", 0), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
@@ -307,6 +319,10 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		return t.load(m)
 	case "esc", "left", "h", "backspace":
 		switch {
+		case t.query != "":
+			t.query = ""
+			t.right = newGrid("dright")
+			return t.load(m)
 		case t.filter != "":
 			t.filter = ""
 			t.fill()
@@ -318,6 +334,34 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		default:
 			t.focus = 0
 		}
+	case "Q":
+		if !c.browse || t.loading {
+			return nil
+		}
+		at := append([]string{}, t.paths[c.name]...)
+		if r, ok := t.right.current(); ok && !t.leaf {
+			_, child, _ := strings.Cut(r.id, "\x00")
+			at = append(at, child)
+		}
+		if t.query != "" {
+			at = t.queryAt
+		}
+		suggest := t.query
+		if suggest == "" {
+			if v, err := m.app.Component(c.name); err == nil {
+				if pq, ok := v.(core.PathQuerier); ok {
+					suggest = pq.SuggestQuery(at)
+				}
+			}
+		}
+		m.ask("query "+c.name+" › "+strings.Join(at, " › "), suggest, func(v string) tea.Cmd {
+			if v = strings.TrimSpace(v); v == "" {
+				return nil
+			}
+			t.query, t.queryAt, t.filter = v, at, ""
+			t.right = newGrid("dright")
+			return t.load(m)
+		})
 	case "P":
 		r, ok := t.right.current()
 		if !ok || c.kind != string(core.KindMessaging) {
@@ -364,6 +408,9 @@ func (t *dataTab) view(m *model, w, h int) string {
 	title := c.name
 	if p := t.paths[c.name]; len(p) > 0 {
 		title += " › " + strings.Join(p, " › ")
+	}
+	if t.query != "" {
+		title = c.name + " › " + strings.Join(t.queryAt, " › ") + " › " + sAccent.Render(truncate(t.query, 60))
 	}
 	title += fmt.Sprintf(" · %d", len(t.right.rows))
 	if t.filter != "" {

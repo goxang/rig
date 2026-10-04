@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -389,6 +390,10 @@ func (r *Runtime) run(ctx context.Context, s *spec.Service, img string, i int, e
 		}
 	}
 	for _, v := range sec.Volumes {
+		// ./x:/y binds a file of the project
+		if strings.HasPrefix(v, "./") || strings.HasPrefix(v, "../") {
+			v = filepath.Join(r.env.Project().Dir, v)
+		}
 		args = append(args, "-v", v)
 	}
 	args = append(args, sec.ExtraArgs...)

@@ -74,6 +74,59 @@ func (r *Cache) Browse(ctx context.Context, path []string) (core.Table, bool, er
 	return keyValue(ctx, c, path[1])
 }
 
+// QueryAt runs a command against the database the path starts at (db0 when none).
+func (r *Cache) QueryAt(ctx context.Context, path []string, q string) (core.Table, error) {
+	args, err := splitArgs(q)
+	if err != nil || len(args) == 0 {
+		return core.Table{}, fmt.Errorf("empty command")
+	}
+	if unsafe[strings.ToUpper(args[0])] && !r.opt.Unsafe {
+		return core.Table{}, fmt.Errorf("%s is blocked; set unsafe: true on the component to allow it", strings.ToUpper(args[0]))
+	}
+	n := 0
+	if len(path) > 0 {
+		n = max(0, dbNum(path[0]))
+	}
+	addr, err := r.env.Resolve(ctx, r.opt.Addr)
+	if err != nil {
+		return core.Table{}, err
+	}
+	c := goredis.NewClient(&goredis.Options{Addr: strings.TrimPrefix(addr, "redis://"), Password: r.opt.Password, DB: n})
+	defer c.Close()
+	in := make([]any, len(args))
+	for i, a := range args {
+		in[i] = a
+	}
+	out := "(nil)"
+	v, err := c.Do(ctx, in...).Result()
+	switch {
+	case err == goredis.Nil:
+	case err != nil:
+		return core.Table{}, err
+	default:
+		out = render(v, "")
+	}
+	t := core.Table{Columns: []string{"result"}}
+	for _, l := range strings.Split(out, "\n") {
+		t.Rows = append(t.Rows, []string{l})
+	}
+	return t, nil
+}
+
+func (r *Cache) SuggestQuery(path []string) string {
+	if len(path) >= 2 {
+		return "TYPE " + quoteArg(path[1])
+	}
+	return "SCAN 0 MATCH * COUNT 100"
+}
+
+func quoteArg(s string) string {
+	if strings.ContainsAny(s, " \"'") {
+		return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	}
+	return s
+}
+
 func keyValue(ctx context.Context, c *goredis.Client, key string) (core.Table, bool, error) {
 	typ, err := c.Type(ctx, key).Result()
 	if err != nil {

@@ -110,7 +110,8 @@ func substitute(n *yaml.Node, vars func(string) (string, bool), key string, miss
 			if val, ok := vars(name); ok {
 				return val
 			}
-			if key == "image" || key == "value" {
+			// lower case is literal text more often than a variable: a password like 'x9$d'
+			if (key == "image" || key == "value") && name == strings.ToUpper(name) {
 				missing[name] = true
 			}
 			return m

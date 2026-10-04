@@ -36,11 +36,11 @@ func (f Firing) String() string {
 	return fmt.Sprintf("%s %s%s", s, strconv.FormatFloat(f.Value, 'f', -1, 64), f.Unit)
 }
 
-// DefaultAlerts watch the nodes when rig.yaml names no alerts: memory, CPU and disk at 90% and 98%.
+// DefaultAlerts watch the nodes when rig.yaml names no alerts: memory and CPU at 90% and 98%, disk at 97% and 98%.
 var DefaultAlerts = []spec.Alert{
 	{Name: "memory", Source: "hosts", Metric: "memory", Warn: 90, Crit: 98, Unit: "%"},
 	{Name: "cpu", Source: "hosts", Metric: "cpu", Warn: 90, Crit: 98, Unit: "%"},
-	{Name: "disk", Source: "hosts", Metric: "disk", Warn: 90, Crit: 98, Unit: "%"},
+	{Name: "disk", Source: "hosts", Metric: "disk", Warn: 97, Crit: 98, Unit: "%"},
 }
 
 func (a *App) AlertRules() []spec.Alert {

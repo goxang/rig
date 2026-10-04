@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/internal/sh"
@@ -84,6 +85,9 @@ func (r *Runtime) Hosts(ctx context.Context) ([]core.Host, error) {
 
 // nodeUsage reads the kubelet summary through the API server, so it needs no metrics-server.
 func (r *Runtime) nodeUsage(ctx context.Context, h *core.Host) {
+	// one slow kubelet must not hold up the other nodes' numbers
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
 	out, err := sh.New("kubectl", "--context", r.Opt.Context, "get", "--raw", "/api/v1/nodes/"+h.Name+"/proxy/stats/summary").Output(ctx)
 	if err != nil {
 		return

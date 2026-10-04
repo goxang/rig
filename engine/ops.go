@@ -167,6 +167,10 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 					return nil
 				}
 			}
+			if s := a.Spec.Services[n]; s != nil && s.Replicas != nil && *s.Replicas == 0 {
+				fmt.Fprintf(out, "  ○ %-24s deployed at 0 replicas\n", n)
+				return nil
+			}
 			st, err := a.Wait(ctx, n, o.Wait)
 			if err != nil {
 				return err

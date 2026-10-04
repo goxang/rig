@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SecretsFile is where `rig secret set` keeps a project's secrets: the user's config directory,
@@ -15,6 +16,20 @@ func SecretsFile(project string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "rig", "secrets", project+".json"), nil
+}
+
+// DataDir is where rig keeps what it writes for a project checkout outside the repository (saved
+// sessions): the user's config directory, one folder per project path.
+func DataDir(projectDir string) (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "rig", "projects", strings.NewReplacer("/", "-", `\`, "-", ":", "").Replace(abs)), nil
 }
 
 func LoadSecrets(project string) (map[string]string, error) {

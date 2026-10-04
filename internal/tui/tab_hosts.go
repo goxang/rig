@@ -32,7 +32,7 @@ type hostsMsg struct {
 }
 
 func (t *hostsTab) name() string            { return "Hosts" }
-func (t *hostsTab) interval() time.Duration { return 10 * time.Second }
+func (t *hostsTab) interval() time.Duration { return 3 * time.Second }
 func (t *hostsTab) typing() bool            { return false }
 func (t *hostsTab) hints() [][2]string {
 	return [][2]string{{"enter", "shell"}, {"c", "run command"}}
@@ -125,42 +125,66 @@ func (t *hostsTab) view(m *model, w, h int) string {
 	if len(t.hosts) == 0 {
 		return panel("hosts", sDim.Render("loading…"), w, h, true)
 	}
-	cardW := 54
-	cols := max(1, w/cardW)
-	cardW = w / cols
-	cardH := 9
-	var rows []string
-	var row []string
+	inner := w - 2
+	nameW := 18
+	for _, x := range t.hosts {
+		nameW = max(nameW, lipgloss.Width(x.Name)+3)
+	}
+	meterW := max(14, (inner-nameW-13-12)/3)
+
+	var cpu, memU, memT, diskU, diskT float64
+	var cores int
+	for _, x := range t.hosts {
+		cpu += x.CPUUsed * float64(x.CPUs)
+		cores += x.CPUs
+		memU, memT = memU+float64(x.MemUsed), memT+float64(x.MemTotal)
+		diskU, diskT = diskU+float64(x.DiskUsed), diskT+float64(x.DiskTotal)
+	}
+	var b strings.Builder
+	b.WriteString(padRight(sTitle.Render(fmt.Sprintf("all %d", len(t.hosts))), nameW) + t.meters(cpu/fdiv(float64(cores)), cores, memU, memT, diskU, diskT, meterW) + "\n")
+	b.WriteString(sDim.Render(strings.Repeat("─", inner)) + "\n")
 	for i, x := range t.hosts {
-		row = append(row, t.card(x, cardW, cardH, i == t.sel))
-		if len(row) == cols || i == len(t.hosts)-1 {
-			rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, row...))
-			row = nil
+		dot := sGreen.Render("●")
+		if !x.Ready {
+			dot = sRed.Render("✖")
+		}
+		line := dot + " " + padRight(truncate(x.Name, nameW-3), nameW-2) +
+			t.meters(x.CPUUsed, x.CPUs, float64(x.MemUsed), float64(x.MemTotal), float64(x.DiskUsed), float64(x.DiskTotal), meterW)
+		if x.Load1 > 0 {
+			line += sDim.Render(fmt.Sprintf(" load %5.2f", x.Load1))
+		} else {
+			line += strings.Repeat(" ", 11)
+		}
+		if i == t.sel {
+			line = sSelected.Render(padRight(line, inner))
+		}
+		b.WriteString(line + "\n")
+	}
+	if t.sel < len(t.hosts) {
+		x := t.hosts[t.sel]
+		b.WriteString("\n" + sDim.Render(truncate(fmt.Sprintf("%s  %s  %s · %s  %d cores  %s memory", x.Addr, strings.Join(x.Roles, ","), x.OS, x.Kernel, x.CPUs, bytesText(x.MemTotal)), inner)) + "\n")
+		if hist := t.cpu[x.Name]; len(hist) > 1 && h-len(t.hosts)-8 > 4 {
+			pts := make([]core.Point, len(hist))
+			now := time.Now()
+			for i, v := range hist {
+				pts[i] = core.Point{T: now.Add(time.Duration(i-len(hist)) * t.interval()), V: v * 100}
+			}
+			b.WriteString(viz.LineChart([]viz.Line{{Name: "cpu % " + x.Name, Points: pts, Color: viz.Palette[2]}}, inner, h-len(t.hosts)-8, "%"))
 		}
 	}
-	perScreen := max(1, h/cardH)
-	first := max(0, t.sel/cols-perScreen+1)
-	return strings.Join(rows[first:], "\n")
+	return panel("hosts · "+t.source, b.String(), w, h, true)
 }
 
-func (t *hostsTab) card(x core.Host, w, h int, focused bool) string {
-	state := sGreen.Render("● ready")
-	if !x.Ready {
-		state = sRed.Render("✖ unreachable")
+// meters is a host's CPU, memory and disk as htop bars; zero totals leave a blank bar.
+func (t *hostsTab) meters(cpu float64, cores int, memU, memT, diskU, diskT float64, w int) string {
+	return sDim.Render("CPU") + viz.Meter(cpu, w, fmt.Sprintf("%.1f%% %dc", cpu*100, cores)) +
+		sDim.Render("  MEM") + viz.Meter(memU/fdiv(memT), w, bytesText(int64(memU))+"/"+bytesText(int64(memT))) +
+		sDim.Render("  DSK") + viz.Meter(diskU/fdiv(diskT), w, fmt.Sprintf("%.1f%%", 100*diskU/fdiv(diskT)))
+}
+
+func fdiv(v float64) float64 {
+	if v == 0 {
+		return 1
 	}
-	mem := 0.0
-	if x.MemTotal > 0 {
-		mem = float64(x.MemUsed) / float64(x.MemTotal)
-	}
-	gw := w - 24
-	var b strings.Builder
-	b.WriteString(state + sDim.Render("  "+x.Addr+"  "+strings.Join(x.Roles, ",")) + "\n")
-	b.WriteString(sDim.Render(truncate(x.OS+" · "+x.Kernel, w-4)) + "\n\n")
-	b.WriteString(padRight("cpu", 5) + viz.Gauge(x.CPUUsed, gw) + fmt.Sprintf(" %3.0f%% %2dc", x.CPUUsed*100, x.CPUs) + "\n")
-	b.WriteString(padRight("mem", 5) + viz.Gauge(mem, gw) + fmt.Sprintf(" %3.0f%% %s", mem*100, bytesText(x.MemTotal)) + "\n")
-	b.WriteString(sDim.Render("cpu  ") + viz.Sparkline(t.cpu[x.Name], gw, viz.Palette[2]))
-	if x.Load1 > 0 {
-		b.WriteString(sDim.Render(fmt.Sprintf(" load %.2f", x.Load1)))
-	}
-	return panel(x.Name, b.String(), w, h, focused)
+	return v
 }
