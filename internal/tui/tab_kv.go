@@ -394,7 +394,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 					return nil
 				}
 				key := r.id
-				m.ask(key, string(t.value), func(v string) tea.Cmd { return t.save(m, key, []byte(v)) })
+				m.askAI(key, string(t.value), "the new value of configuration key "+key+" in "+t.comp+", same format as now", func(v string) tea.Cmd { return t.save(m, key, []byte(v)) })
 			}
 		case "n":
 			m.ask("new key", t.prefix, func(k string) tea.Cmd {

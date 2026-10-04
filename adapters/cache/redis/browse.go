@@ -113,7 +113,7 @@ func (r *Cache) QueryAt(ctx context.Context, path []string, q string) (core.Tabl
 	return t, nil
 }
 
-func (r *Cache) SuggestQuery(path []string) string {
+func (r *Cache) SuggestQuery(_ context.Context, path []string) string {
 	if len(path) >= 2 {
 		return "TYPE " + quoteArg(path[1])
 	}

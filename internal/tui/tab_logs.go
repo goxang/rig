@@ -200,7 +200,8 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "i":
 			t.pickInstance(m)
 		case "/":
-			m.ask("grep (text or regex, (?i) ignores case)", t.grep, func(v string) tea.Cmd {
+			hint := "text or an RE2 regex ((?i) ignores case) that keeps the log lines of " + strings.Join(t.services, ", ") + " that matter; recent lines:\n" + logSample(t.log.lines, 8)
+			m.askAI("grep (text or regex, (?i) ignores case)", t.grep, hint, func(v string) tea.Cmd {
 				t.grep = v
 				return t.start(m)
 			})

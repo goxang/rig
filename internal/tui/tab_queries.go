@@ -333,7 +333,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 
 func (t *queriesTab) newQuery(m *model, comp string) {
 	lang := t.langs[comp]
-	m.ask(comp+" ("+lang+") query", examples[lang], func(v string) tea.Cmd {
+	m.askAI(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, func(v string) tea.Cmd {
 		if strings.TrimSpace(v) == "" {
 			return nil
 		}
@@ -398,7 +398,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 		case "e":
 			if q != nil {
-				m.ask("edit "+name+" ("+q.Source+")", q.Query, func(v string) tea.Cmd {
+				m.askAI("edit "+name+" ("+q.Source+")", q.Query, "a "+t.langs[q.Source]+" query on component "+q.Source, func(v string) tea.Cmd {
 					nq := *q
 					nq.Query = v
 					t.adhocSeq++

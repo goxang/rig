@@ -25,6 +25,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
 | `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
 | `reports` | metrics a run is measured by, saved as markdown: `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
+| `ai` | `{deny: [globs], instructions: text}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), and notes it gets with every turn |
 
 ## services.<name>
 

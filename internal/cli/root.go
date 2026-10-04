@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -34,6 +33,8 @@ var UI func(ctx context.Context, a *engine.App) error
 var (
 	Resume   func(ctx context.Context, open func(env string) (*engine.App, error), projectDir, id string) error
 	Sessions func(projectDir string) ([][]string, error)
+	// CloseUISession forgets a saved UI session.
+	CloseUISession func(projectDir, id string) error
 )
 
 func Execute() int {
@@ -100,41 +101,10 @@ Run rig with no arguments for the terminal UI.`,
 	r := reportCommand()
 	r.GroupID = "obs"
 	root.AddCommand(t, r)
-	root.AddCommand(&cobra.Command{
-		Use:     "resume [session|last]",
-		Short:   "reopen the terminal UI as a saved session left it (S saves one); without an id, list them",
-		GroupID: "obs",
-		Args:    cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			file := g.file
-			if file == "" {
-				f, err := spec.Find(".")
-				if err != nil {
-					return err
-				}
-				file = f
-			}
-			dir := filepath.Dir(file)
-			if len(args) == 0 {
-				rows, err := Sessions(dir)
-				if err != nil {
-					return err
-				}
-				printTable(os.Stdout, []string{"SESSION", "SAVED", "WHAT"}, rows)
-				return nil
-			}
-			return Resume(cmd.Context(), func(env string) (*engine.App, error) {
-				if g.env != "" {
-					env = g.env
-				}
-				a, err := engine.Open(file, env)
-				if err == nil {
-					a.Confirmed = g.yes
-				}
-				return a, err
-			}, dir, args[0])
-		},
-	})
+	root.AddCommand(resumeCommand())
+	ac := aiCommand()
+	ac.GroupID = "obs"
+	root.AddCommand(ac)
 	for _, c := range projectCommands() {
 		c.GroupID = "infra"
 		root.AddCommand(c)

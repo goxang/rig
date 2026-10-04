@@ -11,8 +11,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/goxang/rig/ai"
 )
 
 // mcpCommand serves rig to AI agents over the Model Context Protocol (JSON-RPC on stdio). Every tool
@@ -90,8 +93,7 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 				"protocolVersion": p.ProtocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{}},
 				"serverInfo":      map[string]any{"name": "rig", "version": Version},
-				"instructions": "rig controls this project's services and infrastructure in any environment (local, docker, kind, kubernetes). " +
-					"Start with rig_envs and rig_status. Every tool takes an optional env. Changes to protected environments need confirm: true.",
+				"instructions":    instructions(),
 			}
 		case "ping":
 			resp.Result = map[string]any{}
@@ -111,7 +113,7 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 				resp.Error = &rpcErr{Code: -32602, Message: "unknown tool " + p.Name}
 				break
 			}
-			text, failed := runTool(ctx, t, p.Arguments)
+			text, failed := callTool(ctx, t, p.Arguments)
 			resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "isError": failed}
 		default:
 			resp.Error = &rpcErr{Code: -32601, Message: "method not found: " + req.Method}
@@ -123,22 +125,129 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 	return sc.Err()
 }
 
-func runTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool) {
+func instructions() string {
+	if lock := os.Getenv(ai.EnvLock); lock != "" {
+		return "rig controls this project's services and infrastructure. This session is bound to environment " + lock +
+			": every tool acts on it. Start with rig_status. Mutating tools take user_request: the user's own words asking for the change, verbatim."
+	}
+	return "rig controls this project's services and infrastructure in any environment (local, docker, kind, kubernetes). " +
+		"Start with rig_envs and rig_status. Every tool takes an optional env. Changes to protected environments need confirm: true."
+}
+
+// callTool runs a tool; serving an assistant started by rig (RIG_AI_ENV set), it first holds the
+// call to the session's environment and to what the user asked for.
+func callTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool) {
 	if args == nil {
 		args = map[string]any{}
+	}
+	if t.Name == "rig_ui" {
+		return uiTool(args)
 	}
 	argv, err := t.argv(args)
 	if err != nil {
 		return err.Error(), true
 	}
+	yes := false
+	if b, _ := args["confirm"].(bool); b {
+		yes = true
+	}
+	if lock := os.Getenv(ai.EnvLock); lock != "" {
+		if yes, err = guard(lock, args, argv, yes); err != nil {
+			return err.Error(), true
+		}
+		args["env"] = lock
+	}
+	return runTool(ctx, argv, str(args, "env"), yes)
+}
+
+// guard decides whether an assistant's call may run: refused outright, run, or run once the user
+// asked for it (their words quoted in user_request) or approved it in rig. yes is whether to pass --yes.
+func guard(lock string, args map[string]any, argv []string, confirm bool) (bool, error) {
+	if env := str(args, "env"); env != "" && env != lock {
+		return false, fmt.Errorf("refused: this session is bound to environment %s; to work on %s the user switches rig to it (E) and asks there", lock, env)
+	}
+	for _, a := range argv {
+		f, _, _ := strings.Cut(a, "=")
+		switch f {
+		case "-e", "--env", "-f", "--file", "--namespace", "-y", "--yes":
+			return false, fmt.Errorf("refused: %s is not allowed here; the session's environment and confirmations are set by rig", f)
+		}
+	}
+	risk := ai.Classify(argv)
+	if risk == ai.Refused {
+		return false, fmt.Errorf("refused: rig %s is not available to the assistant", argv[0])
+	}
+	protected, kube := os.Getenv(ai.EnvProtected) != "", os.Getenv(ai.EnvKube) != ""
+	need := confirm || risk == ai.Danger && (protected || kube) || risk == ai.Change && protected
+	if !need {
+		return false, nil
+	}
+	what := "rig " + strings.Join(argv, " ")
+	if ai.Quoted(ai.LastPrompt(os.Getenv(ai.EnvDir)), str(args, "user_request")) {
+		return true, nil
+	}
+	sock := os.Getenv(ai.EnvSock)
+	if sock == "" {
+		return false, fmt.Errorf("not run: %s is a %s on %s and needs the user's go-ahead. Ask them; when they agree, call again with user_request set to their words, verbatim", what, risk, aiEnvLabel(lock, protected))
+	}
+	r, err := ai.Call(sock, ai.Request{Op: "approve", Text: fmt.Sprintf("AI: %s  (%s on %s)", what, risk, aiEnvLabel(lock, protected))}, 10*time.Minute)
+	if err != nil {
+		return false, fmt.Errorf("not run: could not ask the user (%v); ask them in the chat, then call again with user_request set to their words", err)
+	}
+	if !r.OK {
+		return false, fmt.Errorf("not run: the user declined %s%s", what, note(r.Text))
+	}
+	return true, nil
+}
+
+func aiEnvLabel(env string, protected bool) string {
+	if protected {
+		return "PROTECTED " + env
+	}
+	return env
+}
+
+func note(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " (" + s + ")"
+}
+
+// uiTool asks the rig UI that started the assistant to show or schedule something.
+func uiTool(args map[string]any) (string, bool) {
+	sock := os.Getenv(ai.EnvSock)
+	if sock == "" {
+		return "no rig UI is attached to this session: use rig_query instead", true
+	}
+	req := ai.Request{Op: "ui", Action: str(args, "action"), Args: map[string]string{}}
+	for _, k := range []string{"name", "component", "query", "every", "screen", "services", "grep"} {
+		if v := str(args, k); v != "" {
+			req.Args[k] = v
+		}
+	}
+	if v := list(args, "services"); len(v) > 0 {
+		req.Args["services"] = strings.Join(v, " ")
+	}
+	if q := req.Args["query"]; q != "" && ai.ClassifyQuery(q) != ai.Read {
+		return "refused: only reading queries go on the Queries screen; run a change once with rig_query", true
+	}
+	r, err := ai.Call(sock, req, 30*time.Second)
+	if err != nil {
+		return err.Error(), true
+	}
+	return r.Text, !r.OK
+}
+
+func runTool(ctx context.Context, argv []string, env string, yes bool) (string, bool) {
 	var global []string
 	if g.file != "" {
 		global = append(global, "-f", g.file)
 	}
-	if env := str(args, "env"); env != "" {
+	if env != "" {
 		global = append(global, "-e", env)
 	}
-	if b, _ := args["confirm"].(bool); b {
+	if yes {
 		global = append(global, "--yes")
 	}
 	self, err := os.Executable()
@@ -207,6 +316,7 @@ func need(a map[string]any, keys ...string) error {
 func schema(props map[string]any, required ...string) map[string]any {
 	props["env"] = map[string]any{"type": "string", "description": "environment (default: the project's default)"}
 	props["confirm"] = map[string]any{"type": "boolean", "description": "the user agreed to change a protected environment or overwrite an image tag"}
+	props["user_request"] = map[string]any{"type": "string", "description": "for a change: the user's own words asking for it, copied verbatim from their message"}
 	s := map[string]any{"type": "object", "properties": props}
 	if len(required) > 0 {
 		s["required"] = required
@@ -373,6 +483,10 @@ func mcpTools() []mcpTool {
 				}
 				return argv, nil
 			}},
+		{Name: "rig_ui", Description: "act in the rig UI the user has open: add_query (component, query, optional name and every like \"30s\" to schedule it), schedule (name, every), unschedule (name), open (screen: services, logs, metrics, traces, queries, kv, data, load, manifests, hosts, tests), logs (services, optional grep)",
+			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"add_query", "schedule", "unschedule", "open", "logs"}},
+				"name": pString("query name"), "component": pString("component to query"), "query": pString("query text"), "every": pString("schedule interval, e.g. 30s"),
+				"screen": pString("screen to open"), "services": pTargets, "grep": pString("log filter")}, "action")},
 		{Name: "rig", Description: "any rig command line, for what the other tools do not cover (e.g. [\"do\", \"runtime\", \"events\"], [\"traces\", \"--min\", \"500ms\"])",
 			InputSchema: schema(map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "args"),
 			argv: func(a map[string]any) ([]string, error) {

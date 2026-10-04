@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/spec"
@@ -214,7 +216,7 @@ func Resume(ctx context.Context, open func(env string) (*engine.App, error), pro
 		return err
 	}
 	defer a.Close()
-	return run(ctx, a, s)
+	return run(ctx, a, s, nil)
 }
 
 // Summary is one line about a saved session for listings.
@@ -227,4 +229,89 @@ func (s Session) Summary() string {
 		parts = append(parts, fmt.Sprintf("%d scheduled", n))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// CloseSession forgets a saved session.
+func CloseSession(projectDir, id string) error {
+	return os.Remove(filepath.Join(sessionDir(projectDir), id+".json"))
+}
+
+// PickSession is `rig resume`'s chooser: rows are id, kind, saved, what; enter picks one, d closes
+// the selected one (through close), q leaves. It returns the picked row, -1 for none.
+func PickSession(rows [][]string, close func(i int) error) (int, error) {
+	p := &sessionPicker{rows: rows, close: close, pick: -1}
+	idx := make([]int, len(rows))
+	for i := range idx {
+		idx[i] = i
+	}
+	p.idx = idx
+	if _, err := tea.NewProgram(p).Run(); err != nil {
+		return -1, err
+	}
+	return p.pick, nil
+}
+
+type sessionPicker struct {
+	rows  [][]string
+	idx   []int // rows still listed
+	sel   int
+	pick  int
+	close func(i int) error
+	note  string
+}
+
+func (p *sessionPicker) Init() tea.Cmd { return nil }
+
+func (p *sessionPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return p, nil
+	}
+	switch k.String() {
+	case "q", "esc", "ctrl+c":
+		return p, tea.Quit
+	case "enter":
+		if len(p.idx) > 0 {
+			p.pick = p.idx[p.sel]
+		}
+		return p, tea.Quit
+	case "d", "delete":
+		if len(p.idx) == 0 {
+			return p, nil
+		}
+		i := p.idx[p.sel]
+		if err := p.close(i); err != nil {
+			p.note = sRed.Render(err.Error())
+			return p, nil
+		}
+		p.note = sDim.Render("closed " + p.rows[i][0])
+		p.idx = append(p.idx[:p.sel:p.sel], p.idx[p.sel+1:]...)
+		p.sel = max(0, min(p.sel, len(p.idx)-1))
+	default:
+		listKeys(k, &p.sel, len(p.idx))
+	}
+	return p, nil
+}
+
+func (p *sessionPicker) View() string {
+	var b strings.Builder
+	b.WriteString(sTitle.Render("continue a session") + sDim.Render("  ↑↓ move · enter continue · d close · q quit") + "\n\n")
+	if len(p.idx) == 0 {
+		b.WriteString(sDim.Render("no sessions left") + "\n")
+	}
+	for n, i := range p.idx {
+		r := p.rows[i]
+		kind := sAccent.Render(padRight(r[1], 3))
+		line := fmt.Sprintf("%s %s  %s  %s", kind, padRight(r[0], 22), sDim.Render(r[2]), truncate(r[3], 70))
+		if n == p.sel {
+			line = sAccent.Render("› ") + line
+		} else {
+			line = "  " + line
+		}
+		b.WriteString(line + "\n")
+	}
+	if p.note != "" {
+		b.WriteString("\n" + p.note + "\n")
+	}
+	return b.String()
 }

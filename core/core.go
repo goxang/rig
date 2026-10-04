@@ -438,10 +438,10 @@ type Browser interface {
 }
 
 // PathQuerier runs a query where a Browser walk stands (the database of path[0], say) and suggests one
-// for a path: the Data screen's "query this".
+// for a path: the Data screen's "query this" (a procedure's call with its parameters to fill, say).
 type PathQuerier interface {
 	QueryAt(ctx context.Context, path []string, q string) (Table, error)
-	SuggestQuery(path []string) string
+	SuggestQuery(ctx context.Context, path []string) string
 }
 
 // Editor changes what a Browse of path returned in t: Delete removes rows (indexes into t.Rows), Set

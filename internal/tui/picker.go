@@ -18,6 +18,8 @@ type picker struct {
 	filter string
 	off    int
 	done   func(chosen []string) tea.Cmd
+	// del, when set, removes the selected item for good (ctrl+d)
+	del func(item string) error
 	// zx, zy is where the last frame drew the rows, for hover
 	zx, zy int
 }
@@ -88,6 +90,24 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 			p.marked[it] = !p.marked[it]
 			p.sel = min(max(len(vis)-1, 0), p.sel+1)
 		}
+	case "ctrl+d":
+		if p.del != nil && p.sel < len(vis) {
+			i := vis[p.sel]
+			if err := p.del(p.items[i]); err != nil {
+				m.setStatus(err.Error(), true)
+				return nil
+			}
+			m.setStatus("closed "+p.items[i], false)
+			p.items = append(p.items[:i:i], p.items[i+1:]...)
+			if i < len(p.desc) {
+				p.desc = append(p.desc[:i:i], p.desc[i+1:]...)
+			}
+			if len(p.items) == 0 {
+				m.picker = nil
+				return nil
+			}
+			p.sel = min(p.sel, len(p.visible())-1)
+		}
 	case "ctrl+a":
 		if p.multi {
 			all := len(vis) > 0
@@ -134,6 +154,9 @@ func (p *picker) hints() string {
 	h := []string{sKey.Render("↑↓") + sDim.Render(" move"), sKey.Render("type") + sDim.Render(" filter")}
 	if p.multi {
 		h = append(h, sKey.Render("space")+sDim.Render(" mark"), sKey.Render("ctrl+a")+sDim.Render(" all"))
+	}
+	if p.del != nil {
+		h = append(h, sKey.Render("ctrl+d")+sDim.Render(" close"))
 	}
 	return strings.Join(append(h, sKey.Render("enter")+sDim.Render(" ok"), sKey.Render("esc")+sDim.Render(" cancel")), "  ")
 }
