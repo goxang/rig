@@ -63,7 +63,7 @@ and kind never ask. `?` shows the keys of the current screen.
 | Metrics | dashboards from rig.yaml, on demand |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session |
-| KV | browse and edit keys; `R` restarts the services that read the edited key; `I` fills the store (`kv-*` tasks) |
+| KV | browse and edit keys; `R` restarts the services that read the edited key; `F` fills the store (`kv-*` tasks) |
 | Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `Q` queries where you stand; `/` filters with globs |
 | Load | generators: rate, instances, `c` their KV config, `v` their env |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`) |

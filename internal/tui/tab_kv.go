@@ -61,7 +61,7 @@ func (t *kvTab) hints() [][2]string {
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
-	return append(h, [2]string{"c", "store"}, [2]string{"I", "init from configs (kv-* tasks)"})
+	return append(h, [2]string{"c", "store"}, [2]string{"F", "fill from configs (kv-* tasks)"})
 }
 func (t *kvTab) interval() time.Duration { return 0 }
 
@@ -350,7 +350,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 					return kv.Delete(ctx, key)
 				})
 			}
-		case "I":
+		case "F":
 			m.pickTask("kv-")
 			return nil
 		case "R":
