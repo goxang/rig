@@ -128,6 +128,12 @@ func Load(file, env string) (*Project, *Environment, error) {
 			s.Role = RoleApp
 		}
 	}
+	// before an environment's only: drops services a section may list
+	for n, sec := range p.Sections {
+		if u := p.Unknown(sec.Services); len(u) > 0 {
+			return nil, nil, fmt.Errorf("%s: section %s lists unknown %s", file, n, strings.Join(u, ", "))
+		}
+	}
 	var e *Environment
 	if env != "" {
 		e = p.Environments[env]
@@ -147,6 +153,13 @@ func Load(file, env string) (*Project, *Environment, error) {
 	}
 	for n, q := range p.Queries {
 		q.Name = n
+	}
+	for n, t := range p.Tests {
+		t.Name = n
+	}
+	p.DashboardOrder, p.TestOrder, p.SectionOrder = mappingKeys(&root, "dashboards"), mappingKeys(&root, "tests"), mappingKeys(&root, "sections")
+	for n, sec := range p.Sections {
+		sec.Name = n
 	}
 	if e != nil {
 		for n, q := range e.Queries {

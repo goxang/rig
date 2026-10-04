@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,8 +23,19 @@ type loadTab struct {
 	stats map[string]core.LoadStatus
 	errs  map[string]error
 	hist  map[string]*loadHist
+	// inst is the instance each generator shows ("" all of them); pods keeps each instance's history
+	inst map[string]string
+	pods map[string]*podHist
 
 	restored map[string]savedLoadHist
+	// started is when this session started each generator: the default window of W's report
+	started map[string]time.Time
+}
+
+// podHist is one generator instance while the TUI watched it, keyed "<generator>/<instance>".
+type podHist struct {
+	cpu, mem, sent []core.Point
+	last           loadSample
 }
 
 // loadHist keeps what a generator did while the TUI watched it; Sent deltas give the actual rate.
@@ -61,12 +73,13 @@ func (t *loadTab) name() string { return "Load" }
 func (t *loadTab) typing() bool { return false }
 func (t *loadTab) hints() [][2]string {
 	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"},
-		{"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}}
+		{"i", "instance shown"}, {"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}, {"W", "save a metrics report"}}
 }
 
 func (t *loadTab) open(m *model) tea.Cmd {
 	t.names = m.app.Names(core.KindLoad)
 	t.hist = map[string]*loadHist{}
+	t.inst, t.pods = map[string]string{}, map[string]*podHist{}
 	for n, h := range t.restored {
 		t.hist[n] = &loadHist{target: h.Target, actual: h.Actual, failed: h.Failed}
 	}
@@ -115,6 +128,7 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 				target = 0
 			}
 			h.target = keep(append(h.target, core.Point{T: now, V: target}))
+			t.trackPods(m, n, st, now)
 		}
 	case loadConfigMsg:
 		if msg.err != nil {
@@ -135,11 +149,26 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
+		case "i":
+			ids := t.instanceIDs(m, n)
+			t.inst[n] = ids[(slices.Index(ids, t.inst[n])+1)%len(ids)]
+			return nil
 		case " ", "enter":
 			if t.stats[n].Running {
 				return m.act("stop "+n, false, g.Stop)
 			}
+			if t.started == nil {
+				t.started = map[string]time.Time{}
+			}
+			t.started[n] = time.Now()
 			return m.act("start "+n, false, g.Start)
+		case "W":
+			window := 15 * time.Minute
+			if at, ok := t.started[n]; ok {
+				window = time.Since(at).Round(time.Minute) + time.Minute
+			}
+			saveReport(m, window)
+			return nil
 		case "[", "]":
 			ls, ok := g.(core.LoadScaler)
 			if !ok {
@@ -179,9 +208,9 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 			return t.configure(m, msg.String(), n, lc)
 		case "+", "=":
-			return m.do("raise "+n, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, 1); return err })
+			return m.act("raise "+n, false, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, 1); return err })
 		case "-":
-			return m.do("lower "+n, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, -1); return err })
+			return m.act("lower "+n, false, func(ctx context.Context) error { _, err := a.Nudge(ctx, n, -1); return err })
 		case "r":
 			m.ask("rate for "+n+" (req/s)", strconv.FormatFloat(t.stats[n].Rate, 'f', -1, 64), func(v string) tea.Cmd {
 				r, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
@@ -189,7 +218,7 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 					m.setStatus("rate: "+err.Error(), true)
 					return nil
 				}
-				return m.act(fmt.Sprintf("set %s to %s/s", n, v), false, func(ctx context.Context) error { return a.SetRate(ctx, n, r, false) })
+				return m.act(fmt.Sprintf("set %s to %s/s on every instance", n, v), false, func(ctx context.Context) error { return a.SetRate(ctx, n, r, false) })
 			})
 		}
 	}
@@ -237,6 +266,29 @@ components:
 	if err := t.errs[n]; err != nil {
 		return lipgloss.JoinHorizontal(lipgloss.Top, list, panel(n, sRed.Render(wrap(err.Error(), rw-4)), rw, h, false))
 	}
+	m.zone("load:list", 1, 2, lw-2, len(rows))
+	ids := t.instanceIDs(m, n)
+	if !slices.Contains(ids, t.inst[n]) {
+		t.inst[n] = ""
+	}
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = shortInstance(id)
+		if id == "" {
+			labels[i] = fmt.Sprintf("all instances (%d)", len(ids)-1)
+		}
+	}
+	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (i) · rate and config are shared by every instance"), rw)
+	var right string
+	if id := t.inst[n]; id != "" {
+		right = t.instanceView(m, n, id, rw, h-1)
+	} else {
+		right = t.allView(m, n, st, rw, h-1)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, lipgloss.JoinVertical(lipgloss.Left, strip, right))
+}
+
+func (t *loadTab) allView(m *model, n string, st core.LoadStatus, rw, h int) string {
 	lim := m.app.LoadLimits(n)
 	hist := t.hist[n]
 	if hist == nil {
@@ -256,7 +308,7 @@ components:
 	}
 	tw := rw / 4
 	tiles := lipgloss.JoinHorizontal(lipgloss.Top,
-		tile("target", viz.Human(st.Rate, ""), "req/s · "+lipgloss.NewStyle().Foreground(stateColor).Bold(true).Render(state), cAccent, tw),
+		tile("target", viz.Human(st.Rate, ""), "req/s each · "+lipgloss.NewStyle().Foreground(stateColor).Bold(true).Render(state), cAccent, tw),
 		tile("actual", viz.Human(actual, ""), "req/s sent", cGreen, tw),
 		tile("errors", fmt.Sprintf("%.1f%%", failPct), fmt.Sprintf("%d of %d", st.Failed, st.Sent), failColor(failPct), tw),
 		tile("p99", latency(st.Latency.P99), "p50 "+latency(st.Latency.P50)+" · p95 "+latency(st.Latency.P95), cPurple, rw-3*tw),
@@ -267,13 +319,6 @@ components:
 	} else {
 		gauge = sDim.Render(fmt.Sprintf(" step %s/s · no max set", viz.Human(lim.Step, "")))
 	}
-	chartH := h - lipgloss.Height(tiles) - 1
-	lines := []viz.Line{
-		{Name: "target", Points: hist.target, Color: "#5794F2"},
-		{Name: "actual", Points: hist.actual, Color: "#73BF69"},
-		{Name: "failed", Points: hist.failed, Color: "#F2495C"},
-	}
-	chart := panel(n+" · req/s while watching", viz.LineChart(lines, rw-2, chartH-2, "/s"), rw, chartH, false)
 	if len(st.Extra) > 0 {
 		var ex []string
 		for _, k := range engine.SortedKeys(st.Extra) {
@@ -281,8 +326,144 @@ components:
 		}
 		gauge += sDim.Render("   " + strings.Join(ex, " · "))
 	}
-	right := lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw), chart)
-	return lipgloss.JoinHorizontal(lipgloss.Top, list, right)
+	chartH := h - lipgloss.Height(tiles) - 1
+	lines := []viz.Line{
+		{Name: "target", Points: hist.target, Color: "#5794F2"},
+		{Name: "actual", Points: hist.actual, Color: "#73BF69"},
+		{Name: "failed", Points: hist.failed, Color: "#F2495C"},
+	}
+	ids := t.instanceIDs(m, n)[1:]
+	if len(ids) < 2 {
+		chart := panel(n+" · req/s while watching", viz.LineChart(lines, rw-2, chartH-2, "/s"), rw, chartH, false)
+		return lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw), chart)
+	}
+	// one line per instance: sent/s when the generator reports it, else CPU
+	var per []viz.Line
+	unit, what := "/s", "req/s"
+	for _, id := range ids {
+		p := t.pods[n+"/"+id]
+		if p == nil {
+			continue
+		}
+		pts := p.sent
+		if len(pts) == 0 {
+			pts, unit, what = p.cpu, "", "CPU cores"
+		}
+		per = append(per, viz.Line{Name: shortInstance(id), Points: pts, Color: colorFor(id)})
+	}
+	topH := chartH / 2
+	top := panel(n+" · req/s while watching", viz.LineChart(lines, rw-2, topH-2, "/s"), rw, topH, false)
+	bottom := panel(n+" · "+what+" per instance", viz.LineChart(per, rw-2, chartH-topH-2, unit), rw, chartH-topH, false)
+	return lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw), top, bottom)
+}
+
+func (t *loadTab) instanceView(m *model, n, id string, rw, h int) string {
+	var in core.Instance
+	for _, svc := range t.services(m, n) {
+		for _, i := range svc.Instances {
+			if i.ID == id {
+				in = i
+			}
+		}
+	}
+	p := t.pods[n+"/"+id]
+	if p == nil {
+		p = &podHist{}
+	}
+	sent := "-"
+	if len(p.sent) > 0 {
+		sent = viz.Human(p.sent[len(p.sent)-1].V, "")
+	}
+	age := "-"
+	if !in.Started.IsZero() {
+		age = shortAge(time.Since(in.Started))
+	}
+	tw := rw / 4
+	tiles := lipgloss.JoinHorizontal(lipgloss.Top,
+		tile("state", string(in.State), fmt.Sprintf("up %s · %d restarts", age, in.Restarts), cAccent, tw),
+		tile("sent", sent, "req/s · target "+viz.Human(t.stats[n].Rate, "/s"), cGreen, tw),
+		tile("cpu", cpuText(in.CPU), "cores", cPurple, tw),
+		tile("memory", bytesText(in.Memory), in.Host, cAmber, rw-3*tw),
+	)
+	chartH := h - lipgloss.Height(tiles)
+	topH := chartH / 2
+	var top string
+	if len(p.sent) > 0 {
+		top = panel(shortInstance(id)+" · req/s", viz.LineChart([]viz.Line{{Name: "sent", Points: p.sent, Color: "#73BF69"}}, rw-2, topH-2, "/s"), rw, topH, false)
+	} else {
+		top = panel(shortInstance(id)+" · req/s", sDim.Render(wrap("no per-instance counter: give the generator's kv load component metrics.per_instance, a PromQL sent counter labelled pod", rw-4)), rw, topH, false)
+	}
+	cpu := []viz.Line{{Name: "cpu (cores)", Points: p.cpu, Color: "#B877D9"}}
+	bottom := panel(shortInstance(id)+" · CPU while watching", viz.LineChart(cpu, rw-2, chartH-topH-2, ""), rw, chartH-topH, false)
+	return lipgloss.JoinVertical(lipgloss.Left, tiles, top, bottom)
+}
+
+// services are the statuses of the services a generator runs as.
+func (t *loadTab) services(m *model, n string) []core.Status {
+	g, _, err := engine.Get[core.LoadGenerator](m.app, core.KindLoad, n)
+	if err != nil {
+		return nil
+	}
+	lc, ok := g.(core.LoadConfigured)
+	if !ok {
+		return nil
+	}
+	var out []core.Status
+	for _, st := range m.services {
+		if slices.Contains(lc.Services(), st.Service) {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
+// instanceIDs is "" (all) followed by each instance of the generator.
+func (t *loadTab) instanceIDs(m *model, n string) []string {
+	ids := []string{""}
+	for _, st := range t.services(m, n) {
+		for _, in := range st.Instances {
+			ids = append(ids, in.ID)
+		}
+	}
+	sort.Strings(ids[1:])
+	return ids
+}
+
+func (t *loadTab) trackPods(m *model, n string, st core.LoadStatus, now time.Time) {
+	for _, svc := range t.services(m, n) {
+		for _, in := range svc.Instances {
+			k := n + "/" + in.ID
+			p := t.pods[k]
+			if p == nil {
+				p = &podHist{}
+				t.pods[k] = p
+			}
+			p.cpu = keep(append(p.cpu, core.Point{T: now, V: in.CPU}))
+			p.mem = keep(append(p.mem, core.Point{T: now, V: float64(in.Memory)}))
+			sent, ok := st.PerInstance[in.ID]
+			if !ok {
+				continue
+			}
+			if secs := now.Sub(p.last.at).Seconds(); !p.last.at.IsZero() && secs >= 1 && sent >= p.last.sent {
+				p.sent = keep(append(p.sent, core.Point{T: now, V: float64(sent-p.last.sent) / secs}))
+			}
+			p.last = loadSample{at: now, sent: sent}
+		}
+	}
+}
+
+func (t *loadTab) click(m *model, h hit) tea.Cmd {
+	if h.id == "load:list" && h.y < len(t.names) {
+		t.sel = h.y
+		return nil
+	}
+	if i, ok := stripHit(h, "load:inst"); ok && len(t.names) > 0 {
+		n := t.names[t.sel]
+		if ids := t.instanceIDs(m, n); i < len(ids) {
+			t.inst[n] = ids[i]
+		}
+	}
+	return nil
 }
 
 func failColor(pct float64) lipgloss.TerminalColor {

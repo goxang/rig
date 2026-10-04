@@ -98,7 +98,8 @@ func (r *Runtime) dir(s *spec.Service) string {
 }
 
 // command is what to run: run.command, or the binary built from build.go plus run.args.
-func (r *Runtime) command(ctx context.Context, s *spec.Service) ([]string, error) {
+// A debug build keeps what a debugger needs: no inlining, no optimisation.
+func (r *Runtime) command(ctx context.Context, s *spec.Service, debug bool) ([]string, error) {
 	if s.Run != nil && len(s.Run.Command) > 0 {
 		return append(append([]string{}, s.Run.Command...), s.Run.Args...), nil
 	}
@@ -109,7 +110,11 @@ func (r *Runtime) command(ctx context.Context, s *spec.Service) ([]string, error
 	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 		return nil, err
 	}
-	b := sh.New("go", "build", "-o", bin, s.Build.Go)
+	build := []string{"build", "-o", bin}
+	if debug {
+		build = append(build, "-gcflags=all=-N -l")
+	}
+	b := sh.New("go", append(build, s.Build.Go)...)
 	b.Dir = r.env.Project().Dir
 	if err := b.Run(ctx); err != nil {
 		return nil, err
@@ -136,7 +141,7 @@ func (r *Runtime) start(ctx context.Context, s *spec.Service, wrap func([]string
 	if _, ok := r.read(s.Name); ok {
 		return nil
 	}
-	argv, err := r.command(ctx, s)
+	argv, err := r.command(ctx, s, wrap != nil)
 	if err != nil {
 		return err
 	}
@@ -346,8 +351,23 @@ func (r *Runtime) Exec(ctx context.Context, s *spec.Service, o core.ExecOptions)
 	return cmd.Attach(ctx, o.Stdin, o.Stdout, o.Stderr)
 }
 
-func (r *Runtime) Forward(_ context.Context, t core.Target) (string, error) {
-	return fmt.Sprintf("127.0.0.1:%d", t.Port), nil
+// Forward is the port itself, except a service's metrics port when its process does not listen
+// there: local configs often give every service its own metrics port while rig.yaml names one for
+// all, so the process's own port serving /metrics stands in.
+func (r *Runtime) Forward(ctx context.Context, t core.Target) (string, error) {
+	addr := fmt.Sprintf("127.0.0.1:%d", t.Port)
+	s := r.env.Project().Services[t.Service]
+	if s == nil || s.Metrics == nil || s.PortNumber(s.Metrics.Port) != t.Port {
+		return addr, nil
+	}
+	p, ok := r.read(t.Service)
+	if !ok {
+		return addr, nil
+	}
+	if port, ok := metricsPort(ctx, p.PID, t.Port, s.Metrics.Path); ok {
+		return fmt.Sprintf("127.0.0.1:%d", port), nil
+	}
+	return addr, nil
 }
 
 // PID is the process id of a running service, for adapters that attach to it (delve, perf).

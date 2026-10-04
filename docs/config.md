@@ -16,12 +16,15 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `services` | below |
 | `environments` | below |
 | `components` | below; shared by every environment |
-| `dashboards` | `name: [panel, ...]` |
+| `dashboards` | `name: [panel, ...]` or `name: {help, vars, panels}` (see below) |
+| `tests` | test suites for `rig test` and the Tests screen (see below) |
+| `sections` | `name: {help, services: [names, groups or roles]}`: the Services screen's parts, in this order; services in none show under `other` |
 | `manifests` | folders `rig manifests` and the TUI scan by default |
-| `tasks` | `name: [shell step, ...]`, run in order by `rig task <name>` (see below) |
+| `tasks` | `name: [shell step, ...]` or `name: {help, steps}`, run in order by `rig task <name>` (see below) |
 | `queries` | saved queries (see below) |
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
 | `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
+| `reports` | metrics a run is measured by, saved as markdown: `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
 
 ## services.<name>
 
@@ -38,6 +41,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `replicas` | left out: keep the running count (or the manifest's); set (0 included) it wins everywhere |
 | `shared` | infrastructure one environment runs for others: see `environments.<name>.infra` |
 | `delay` | wait this long (`10s`) after the dependencies are ready before starting the service |
+| `manual` | started only when named or through a group or section, never by `all` or its role, so `rig infra up` skips it too (e.g. frontends, an optional Prometheus) |
 | `health` | `{port, path}`: readiness for local and docker, a readiness probe in generated manifests |
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
@@ -89,7 +93,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `rabbitmq` | `addr` (management API), `user`, `password`, `vhost` |
 | `consul` | `addr`, `token` |
 | `http` (loadgen) | `target`, `method`, `body`, `headers`, `rate`, `max_in_flight`, `timeout` |
-| `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99}` |
+| `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99, per_instance}` (`per_instance`: a sent counter labelled `pod` or `instance`, charted per instance on the Load screen) |
 | `command` (loadgen) | `start`, `stop`, `rate` (with `{rate}`), `status` |
 | `ssh` | `defaults`, `hosts: [{name, addr, user, port, key, jump, roles, labels}]` |
 | `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure` |
@@ -118,13 +122,98 @@ queries:
 
 ```yaml
 dashboards:
-  main:
+  main:                                  # a plain list of panels
     - { title: requests/s, query: 'sum by (service) (rate(http_requests_total[1m]))', unit: /s, legend: "{{service}}" }
-    - { title: uptime, query: 'max(process_uptime_seconds)', unit: s, kind: stat, source: prom }
+  service:                               # or help, $variables and panels
+    help: one service in depth
+    vars:
+      service: { query: up, label: service, default: api }     # label_values(up, service)
+      node: { values: [a, b], all: true, multi: true }
+    panels:
+      - row: Traffic                     # a foldable row header
+      - { title: requests/s, kind: stat, unit: /s, width: 6, warn: 100, crit: 500, query: 'sum(rate(http_requests_total{service=~"$service"}[$__rate_interval]))' }
+      - title: latency
+        unit: s
+        queries:                         # several queries in one panel, each with its own legend
+          - { legend: p50, query: 'histogram_quantile(0.5, sum by (le) (rate(http_seconds_bucket{service=~"$service"}[5m])))' }
+          - { legend: p99, query: 'histogram_quantile(0.99, sum by (le) (rate(http_seconds_bucket{service=~"$service"}[5m])))' }
 ```
 
-`unit` formats values (`/s`, `ms`, `s`, `bytes`, `%`, `ratio`); `kind: stat` shows a big number with a
-sparkline; `source` picks the metrics component.
+| panel key | |
+|---|---|
+| `title`, `help` | shown on the panel and in its full view |
+| `query` / `queries` | one query, or `[{query, legend}]` drawn together |
+| `legend` | series name from labels: `"{{pod}} {{code}}"` |
+| `unit` | `/s`, `ms`, `s`, `bytes`, `%`, `ratio`, or any suffix |
+| `kind` | `line` (default), `stat` (big number and sparkline), `gauge`, `bar` (one bar per series), `table` |
+| `width`, `height` | out of 24 columns (default 12; stat and gauge 6), and lines |
+| `min`, `max` | a gauge's range (default 0..100 for `%`) |
+| `warn`, `crit` | thresholds that colour stat, gauge, bar and table values |
+| `stack` | stack the lines |
+| `row` | starts a row; a panel with only `row:` is the header |
+| `source` | the metrics component (default: the first) |
+
+Queries use `$name` (or `${name}`) for variables: one value as is, several as `(a|b)`, all as `.*`,
+so match with `=~`. `$__range`, `$__interval` and `$__rate_interval` follow the time range. A
+variable's `default` is its first choice; `all` adds "All", `multi` lets several be picked.
+
+In the TUI a click on a legend entry shows only that series (again: all), ctrl/alt/shift-click hides
+it; `v` (or a double click) opens a panel full screen with a sortable table legend (min, max, mean,
+last, value at the cursor), series filter `/`, stacking `s` and a cursor set by clicking the chart.
+The Services screen's `m` opens the first dashboard with a `$service` variable on that service.
+
+## tests
+
+```yaml
+tests:
+  unit:
+    packages: [./...]
+    race: true
+  integration:
+    help: against the running environment
+    packages: [./tests/integration/...]
+    env: { API_ADDR: "svc://api:8080" }   # svc:// resolves in the active environment
+    needs: [api]                         # the screen warns while these are not up
+    count: 1
+    timeout: 30m
+  bench:
+    packages: [./pkg/...]
+    bench: .
+    benchmem: true
+```
+
+`exclude` drops packages from `packages` (go list patterns), so `packages: [./...]` with the
+integration suites excluded is "every unit test", new packages included. `report: <name>` measures a
+`reports:` entry over each run and appends it to the run's report.
+
+A suite runs `go test -json` in `dir` (default the project directory) with `run`, `skip`, `tags`,
+`race`, `cover`, `short`, `count`, `parallel`, `timeout`, `bench`, `benchtime`, `benchmem`, more
+`flags`, and `args` for the test binary. `bench` alone runs only benchmarks (`-run ^$`) unless `run`
+is set. Runs are kept (the last 50) for `rig test report`, reruns of failures and benchmark deltas.
+
+`rig test <suite>` takes the same flags (`--race --cover --run X --bench . --count 1 ...`), `--failed`
+reruns the last run's failures, `--junit file` writes JUnit XML, `-o file` the full report;
+`rig test ./pkg/x/...` runs packages with no suite; `rig test report [run] [-o file]`, `rig test runs`.
+
+## reports
+
+```yaml
+reports:
+  load:
+    help: a load test
+    source: prom                 # metrics component (default the first)
+    metrics:
+      - { title: requests/s, unit: /s, stats: [avg, max, p95], query: 'sum(rate(http_requests_total[1m]))' }
+      - { title: p95 by service, unit: ms, legend: "{{service}}", query: '...' }
+```
+
+Each metric is a range query over the window, summarised per series by `stats`: `avg`, `min`, `max`,
+`last`, `p50`, `p90`, `p95`, `p99` (default `avg, max, last`). `rig report load --since 20m` (or
+`--from 14:05 --to 14:35`, `--source other-prom`, `-o file`) prints a markdown table and saves it under
+the project's data directory; the Load screen's `W` does the same for the time since you started the
+generator.
+A rerun cuts each failed test back to its deepest parallel ancestor (an integration case's mode),
+else its top-level test, so the steps before it run again too.
 
 ## tasks
 
@@ -135,7 +224,13 @@ tasks:
     - rig do db seed schema.sql
     - ./scripts/seed-consul.sh svc://consul:8500
     - rig up --build
+  reset-db:
+    help: empty the app's tables (keeps the schema)
+    steps: [rig do db seed truncate.sql]
 ```
+
+A task is a list of steps, or `{help, steps}`: `help` is what `rig task` and the TUI's `T` show next to
+its name (without it they show the steps).
 
 `rig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `rig down`
 with no targets leaves it running: `rig infra up|down|restart|status` changes it.
@@ -181,3 +276,9 @@ exits 2 when one is critical. Environments add their own `alerts:`.
 `rig vars set K=V` overrides a runtime `vars` entry (`$MAIN_DB` in manifests) and `rig setenv <service> K=V`
 adds env to a service; both live in the environment's state (a ConfigMap on Kubernetes, `.rig/<env>/`
 elsewhere), so every later deploy keeps them and teammates see them.
+Whatever rig keeps in the project lives under `.rig/`; in a git repository rig adds `.rig/` to
+`.gitignore` the first time it finds that folder unignored.
+
+On the local runtime, a service's `metrics` port that its process does not listen on stands for the
+process's own port serving `/metrics` (or its children's, under dlv): services that read their metrics
+port from a config store can all take a free one and still be scraped and profiled.

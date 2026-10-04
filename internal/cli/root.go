@@ -76,6 +76,7 @@ Run rig with no arguments for the terminal UI.`,
 	}
 	root.PersistentFlags().StringVarP(&g.file, "file", "f", "", "project file (default: rig.yaml found from here up, or $RIG_FILE)")
 	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default)")
+	root.PersistentFlags().StringVar(&engine.NamespaceOverride, "namespace", "", "Kubernetes namespace for this run, instead of the environment's (rig ns switches it for good)")
 	root.PersistentFlags().BoolVar(&brief, "brief", brief, "terse output for agents and scripts: no colour, tab-separated, long cells cut (or $RIG_BRIEF=1)")
 	root.PersistentPreRun = func(*cobra.Command, []string) { setBrief(brief) }
 	root.PersistentFlags().BoolVarP(&g.yes, "yes", "y", os.Getenv("RIG_YES") != "", "confirm changes to a protected environment (or $RIG_YES)")
@@ -94,6 +95,11 @@ Run rig with no arguments for the terminal UI.`,
 		c.GroupID = "data"
 		root.AddCommand(c)
 	}
+	t := testCommand()
+	t.GroupID = "obs"
+	r := reportCommand()
+	r.GroupID = "obs"
+	root.AddCommand(t, r)
 	root.AddCommand(&cobra.Command{
 		Use:     "resume [session|last]",
 		Short:   "reopen the terminal UI as a saved session left it (S saves one); without an id, list them",

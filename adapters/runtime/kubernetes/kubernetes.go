@@ -63,6 +63,8 @@ type Runtime struct {
 	top      map[string]podUse
 	topAt    time.Time
 	topTTL   time.Duration
+	hpa      map[string]hpaRef
+	hpaAt    time.Time
 
 	// HostIP is the address pods use to reach this machine; set by runtimes that know it (kind).
 	HostIP func(ctx context.Context) (string, error)
@@ -1041,7 +1043,7 @@ func (r *Runtime) StatusAll(ctx context.Context, svcs []*spec.Service) ([]core.S
 			workloads[strings.ToLower(w.Kind)+"/"+w.Metadata.Name] = w
 		}
 	}
-	use := r.topCached(ctx)
+	use, hpas := r.topCached(ctx), r.hpaCached(ctx)
 	res := make([]core.Status, len(svcs))
 	for i, s := range svcs {
 		w, ok := workloads[strings.ToLower(r.section(s).Workload)]
@@ -1058,6 +1060,9 @@ func (r *Runtime) StatusAll(ctx context.Context, svcs []*spec.Service) ([]core.S
 			}
 		}
 		st.Instances = instances(mine)
+		if h, ok := hpas[strings.ToLower(r.section(s).Workload)]; ok {
+			st.Autoscale = &h.Bounds
+		}
 		for k := range st.Instances {
 			if u, ok := use[st.Instances[k].ID]; ok {
 				st.Instances[k].CPU, st.Instances[k].Memory = u.cpu, u.mem
@@ -1086,6 +1091,112 @@ func matches(sel, labels map[string]string) bool {
 func decodePod(raw json.RawMessage) (p podItem) {
 	_ = json.Unmarshal(raw, &p)
 	return p
+}
+
+type hpaRef struct {
+	name string
+	core.Bounds
+}
+
+// hpaCached maps "kind/name" of each autoscaled workload to its HPA, read at most every 10s; a
+// namespace that forbids listing HPAs just shows none.
+func (r *Runtime) hpaCached(ctx context.Context) map[string]hpaRef {
+	r.mu.Lock()
+	if time.Since(r.hpaAt) < 10*time.Second {
+		h := r.hpa
+		r.mu.Unlock()
+		return h
+	}
+	r.hpaAt = time.Now()
+	r.mu.Unlock()
+	hpas := map[string]hpaRef{}
+	out, err := r.kubectl("get", "hpa", "-o", "json").Output(ctx)
+	if err == nil {
+		var list struct {
+			Items []struct {
+				Metadata struct{ Name string } `json:"metadata"`
+				Spec     struct {
+					Ref struct{ Kind, Name string } `json:"scaleTargetRef"`
+					Min *int                        `json:"minReplicas"`
+					Max int                         `json:"maxReplicas"`
+				} `json:"spec"`
+			} `json:"items"`
+		}
+		_ = json.Unmarshal(out, &list)
+		for _, h := range list.Items {
+			lo := 1
+			if h.Spec.Min != nil {
+				lo = *h.Spec.Min
+			}
+			hpas[strings.ToLower(h.Spec.Ref.Kind+"/"+h.Spec.Ref.Name)] = hpaRef{name: h.Metadata.Name, Bounds: core.Bounds{Min: lo, Max: h.Spec.Max}}
+		}
+	}
+	r.mu.Lock()
+	r.hpa = hpas
+	r.mu.Unlock()
+	return hpas
+}
+
+// SetAutoscale moves the bounds of the HPA that scales s, or creates one (named after the workload)
+// scaling on b's CPU and memory targets when there is none.
+func (r *Runtime) SetAutoscale(ctx context.Context, s *spec.Service, b core.Bounds) error {
+	if b.Min < 1 || b.Max < b.Min {
+		return fmt.Errorf("autoscaler bounds need 1 <= min <= max, got %d-%d", b.Min, b.Max)
+	}
+	r.mu.Lock()
+	r.hpaAt = time.Time{}
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.hpaAt = time.Time{}
+		r.mu.Unlock()
+	}()
+	wl := r.section(s).Workload
+	if h, ok := r.hpaCached(ctx)[strings.ToLower(wl)]; ok {
+		patch, _ := json.Marshal(map[string]any{"spec": map[string]int{"minReplicas": b.Min, "maxReplicas": b.Max}})
+		return r.kubectl("patch", "hpa", h.name, "--type=merge", "-p", string(patch)).Run(ctx)
+	}
+	y, err := hpaManifest(wl, b)
+	if err != nil {
+		return err
+	}
+	cmd := r.kubectl("apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(string(y))
+	return cmd.Run(ctx)
+}
+
+// hpaManifest is an autoscaling/v2 HPA for workload "kind/name"; without targets it scales on CPU at 75%.
+func hpaManifest(workload string, b core.Bounds) ([]byte, error) {
+	kind, name, ok := strings.Cut(workload, "/")
+	if !ok {
+		return nil, fmt.Errorf("workload %q: want kind/name", workload)
+	}
+	kinds := map[string]string{"deployment": "Deployment", "statefulset": "StatefulSet", "replicaset": "ReplicaSet"}
+	k, ok := kinds[strings.ToLower(kind)]
+	if !ok {
+		return nil, fmt.Errorf("%s cannot be autoscaled", workload)
+	}
+	if b.CPU <= 0 && b.Memory <= 0 {
+		b.CPU = 75
+	}
+	var metrics []any
+	for _, t := range []struct {
+		res string
+		pct int
+	}{{"cpu", b.CPU}, {"memory", b.Memory}} {
+		if t.pct > 0 {
+			metrics = append(metrics, map[string]any{"type": "Resource", "resource": map[string]any{
+				"name": t.res, "target": map[string]any{"type": "Utilization", "averageUtilization": t.pct}}})
+		}
+	}
+	return json.Marshal(map[string]any{
+		"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler",
+		"metadata": map[string]any{"name": name, "labels": map[string]string{"app.kubernetes.io/managed-by": "rig"}},
+		"spec": map[string]any{
+			"scaleTargetRef": map[string]string{"apiVersion": "apps/v1", "kind": k, "name": name},
+			"minReplicas":    b.Min, "maxReplicas": b.Max, "metrics": metrics,
+		},
+	})
 }
 
 // topCached runs `kubectl top pods` at most every 15s (once a minute when metrics-server is missing).

@@ -399,3 +399,78 @@ func (a *App) SetEnv(ctx context.Context, names []string, kv map[string]string) 
 	}
 	return nil
 }
+
+// StartInOrder starts names layer by layer in dependency order, waiting for a layer to be ready
+// before the next: marking a whole chain and starting it never races its own dependencies.
+func (a *App) StartInOrder(ctx context.Context, names []string, wait time.Duration) error {
+	layers, err := a.Spec.Order(names)
+	if err != nil {
+		return err
+	}
+	for i, layer := range layers {
+		if err := parallel(layer, func(n string) error {
+			if s := a.Spec.Services[n]; s != nil && s.Delay > 0 && i > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(s.Delay):
+				}
+			}
+			return a.Start(ctx, n)
+		}); err != nil {
+			return err
+		}
+		if i == len(layers)-1 {
+			break
+		}
+		if err := parallel(layer, func(n string) error { _, err := a.Wait(ctx, n, wait); return err }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetAutoscale moves the autoscaler bounds of a service.
+func (a *App) SetAutoscale(ctx context.Context, name string, b core.Bounds) error {
+	if err := a.Guard(); err != nil {
+		return err
+	}
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	as, ok := rt.(core.Autoscaler)
+	if !ok {
+		return fmt.Errorf("%s: the runtime has no autoscalers: %w", name, core.ErrUnsupported)
+	}
+	return as.SetAutoscale(ctx, s, b)
+}
+
+// Resources reads the requests and limits of a service's containers.
+func (a *App) Resources(ctx context.Context, name string) ([]core.Resources, error) {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return nil, err
+	}
+	rs, ok := rt.(core.Resourcer)
+	if !ok {
+		return nil, fmt.Errorf("%s: the runtime has no requests and limits: %w", name, core.ErrUnsupported)
+	}
+	return rs.Resources(ctx, s)
+}
+
+// SetResources changes one container's requests and limits (which restarts its pods).
+func (a *App) SetResources(ctx context.Context, name string, r core.Resources) error {
+	if err := a.Guard(); err != nil {
+		return err
+	}
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return err
+	}
+	rs, ok := rt.(core.Resourcer)
+	if !ok {
+		return fmt.Errorf("%s: the runtime has no requests and limits: %w", name, core.ErrUnsupported)
+	}
+	return rs.SetResources(ctx, s, r)
+}

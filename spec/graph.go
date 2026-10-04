@@ -21,7 +21,7 @@ func (p *Project) Select(targets []string) []string {
 		}
 		for n, s := range p.Services {
 			switch {
-			case t == "all" && s.Role != RoleLoad, s.InGroup(t), s.Role == t:
+			case t == "all" && s.Role != RoleLoad && !s.Manual, s.InGroup(t), s.Role == t && !s.Manual:
 				add(n)
 			}
 		}

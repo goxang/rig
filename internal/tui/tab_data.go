@@ -41,11 +41,15 @@ type dataTab struct {
 	// query is what Q ran at queryAt, shown instead of the walk until esc
 	query   string
 	queryAt []string
+	// marked rows of the walk (grid ids) that D deletes; changing is the label of a change in flight,
+	// whose status reloads the walk
+	marked   map[string]bool
+	changing string
 }
 
 type dataComp struct {
 	name, kind, adapter string
-	browse              bool
+	browse, edit        bool
 }
 
 type dataCompsMsg struct {
@@ -76,7 +80,112 @@ func (t *dataTab) hints() [][2]string {
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"/", "filter (*word*)"}, {"P", "purge queue"}, {"< >", "sort"}, {"esc ←", "components"}}
 	}
-	return [][2]string{{"enter →", "open"}, {"Q", "query here"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
+	h := [][2]string{{"enter →", "open"}, {"Q", "query here"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
+	if t.editable(c) {
+		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
+	}
+	return h
+}
+
+// editable is whether D and e work on what the right side shows: rows of a walk (not a query's) of
+// a component that can change them.
+func (t *dataTab) editable(c dataComp) bool {
+	return c.edit && t.query == "" && !t.loading && t.err == nil && len(t.paths[c.name]) > 0
+}
+
+// rowIndex is a walk row's index into t.table, from its grid id.
+func rowIndex(id string) int {
+	n, _ := strconv.Atoi(strings.SplitN(id, "\x00", 2)[0])
+	return n
+}
+
+// del deletes the marked rows, else the selected one.
+func (t *dataTab) del(m *model, c dataComp) tea.Cmd {
+	var rows []int
+	for _, r := range t.right.rows {
+		if t.marked[r.id] {
+			rows = append(rows, rowIndex(r.id))
+		}
+	}
+	if len(rows) == 0 {
+		r, ok := t.right.current()
+		if !ok {
+			return nil
+		}
+		rows = []int{rowIndex(r.id)}
+	}
+	what := fmt.Sprintf("%d rows", len(rows))
+	if len(rows) == 1 {
+		what = t.table.Rows[rows[0]][0]
+	}
+	return t.change(m, c, "delete "+what+" from "+strings.Join(t.paths[c.name], " › "), true, func(ctx context.Context, e core.Editor, path []string, tb core.Table) error {
+		return e.Delete(ctx, path, tb, rows)
+	})
+}
+
+// edit asks for a new value of one cell of the selected row: the column first when there are several.
+func (t *dataTab) edit(m *model, c dataComp) {
+	r, ok := t.right.current()
+	if !ok {
+		return
+	}
+	row := rowIndex(r.id)
+	ask := func(col int) tea.Cmd {
+		name := t.table.Columns[col]
+		m.ask(name+" of "+truncate(t.table.Rows[row][0], 40), t.table.Rows[row][col], func(v string) tea.Cmd {
+			if v == t.table.Rows[row][col] {
+				return nil
+			}
+			return t.change(m, c, "set "+name, false, func(ctx context.Context, e core.Editor, path []string, tb core.Table) error {
+				return e.Set(ctx, path, tb, row, col, v)
+			})
+		})
+		return nil
+	}
+	if len(t.table.Columns) == 1 {
+		ask(0)
+		return
+	}
+	var desc []string
+	for _, v := range t.table.Rows[row] {
+		desc = append(desc, truncate(printable(v), 60))
+	}
+	m.pick("edit which column", t.table.Columns, desc, 0, false, func(ch []string) tea.Cmd {
+		if len(ch) > 0 {
+			return ask(index(t.table.Columns, ch[0]))
+		}
+		return nil
+	})
+}
+
+// changed reloads the walk when the status of the change it started arrives.
+func (t *dataTab) changed(m *model, status string) tea.Cmd {
+	if t.changing == "" || !strings.HasPrefix(status, t.changing) {
+		return nil
+	}
+	t.changing = ""
+	return t.load(m)
+}
+
+func (t *dataTab) change(m *model, c dataComp, label string, dangerous bool, f func(context.Context, core.Editor, []string, core.Table) error) tea.Cmd {
+	a, path, tb := m.app, append([]string{}, t.paths[c.name]...), t.table
+	t.changing = label
+	return m.act(label, dangerous, func(ctx context.Context) error {
+		v, err := a.Component(c.name)
+		if err != nil {
+			return err
+		}
+		return f(ctx, v.(core.Editor), path, tb)
+	})
+}
+
+func index(xs []string, x string) int {
+	for i, s := range xs {
+		if s == x {
+			return i
+		}
+	}
+	return 0
 }
 func (t *dataTab) interval() time.Duration { return 5 * time.Second }
 
@@ -98,6 +207,7 @@ func (t *dataTab) open(m *model) tea.Cmd {
 			c := dataComp{name: n, kind: string(k), adapter: typ}
 			if v, err := a.Component(n); err == nil {
 				_, c.browse = v.(core.Browser)
+				_, c.edit = v.(core.Editor)
 			}
 			out = append(out, c)
 		}
@@ -154,7 +264,7 @@ func (t *dataTab) load(m *model) tea.Cmd {
 		return nil
 	}
 	t.seq++
-	t.loading, t.err = true, nil
+	t.loading, t.err, t.marked = true, nil, nil
 	a, gen, seq, ctx, path := m.app, m.gen, t.seq, m.ctx, append([]string{}, t.paths[c.name]...)
 	query, queryAt := t.query, t.queryAt
 	return func() tea.Msg {
@@ -271,7 +381,11 @@ func (t *dataTab) fill() {
 		if len(r) == 0 || !match(r[0]) {
 			continue
 		}
-		rows = append(rows, grow{id: strconv.Itoa(i) + "\x00" + r[0], cells: r})
+		id := strconv.Itoa(i) + "\x00" + r[0]
+		if t.marked[id] {
+			r = append([]string{sGreen.Render("● ") + r[0]}, r[1:]...)
+		}
+		rows = append(rows, grow{id: id, cells: r})
 	}
 	t.right.set(rows)
 }
@@ -362,6 +476,26 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			t.right = newGrid("dright")
 			return t.load(m)
 		})
+	case " ":
+		if r, ok := t.right.current(); ok && t.editable(c) {
+			if t.marked == nil {
+				t.marked = map[string]bool{}
+			}
+			t.marked[r.id] = !t.marked[r.id]
+			t.fill()
+			t.right.key(tea.KeyMsg{Type: tea.KeyDown})
+		}
+	case "D":
+		if t.editable(c) {
+			return t.del(m, c)
+		}
+		if c.kind != string(core.KindMessaging) {
+			m.setStatus("nothing to delete here: open a table or a key", true)
+		}
+	case "e":
+		if t.editable(c) {
+			t.edit(m, c)
+		}
 	case "P":
 		r, ok := t.right.current()
 		if !ok || c.kind != string(core.KindMessaging) {

@@ -125,7 +125,7 @@ func Top(ctx context.Context, file string) string {
 	if _, err := exec.LookPath("go"); err != nil {
 		return ""
 	}
-	out, err := exec.CommandContext(ctx, "go", "tool", "pprof", "-top", "-nodecount=20", file).Output()
+	out, err := exec.CommandContext(ctx, "go", "tool", "pprof", "-top", "-nodecount=60", file).Output()
 	if err != nil {
 		return ""
 	}

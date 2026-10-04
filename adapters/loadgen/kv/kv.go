@@ -31,6 +31,8 @@ type Options struct {
 		Sent    string `yaml:"sent"`
 		Failed  string `yaml:"failed"`
 		Latency string `yaml:"latency_p99"` // seconds
+		// PerInstance is a sent counter per generator instance, labelled pod or instance
+		PerInstance string `yaml:"per_instance"`
 	} `yaml:"metrics"`
 }
 
@@ -203,6 +205,22 @@ func (g *Gen) counters(ctx context.Context, st *core.LoadStatus) {
 	st.Sent = int64(one(m.Sent))
 	st.Failed = int64(one(m.Failed))
 	st.Latency.P99 = time.Duration(one(m.Latency) * float64(time.Second))
+	if m.PerInstance == "" {
+		return
+	}
+	ss, err := met.Instant(ctx, m.PerInstance)
+	if err != nil {
+		return
+	}
+	st.PerInstance = map[string]int64{}
+	for _, s := range ss {
+		for _, l := range []string{"pod", "instance", "kubernetes_pod_name"} {
+			if id := s.Labels[l]; id != "" {
+				st.PerInstance[id] = int64(s.Value)
+				break
+			}
+		}
+	}
 }
 
 // fieldParent walks a dotted path to the object holding its last part, creating objects when create is set.

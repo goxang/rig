@@ -56,7 +56,7 @@ func (d *Debugger) Attach(ctx context.Context, s *spec.Service, instance string)
 		if !running {
 			return core.DebugSession{}, fmt.Errorf("%s is not running", s.Name)
 		}
-		sess, err := d.local(pid)
+		sess, err := d.local(s.Name, pid)
 		if err == nil {
 			return sess, nil
 		}
@@ -92,12 +92,11 @@ func (d *Debugger) Attach(ctx context.Context, s *spec.Service, instance string)
 	return core.DebugSession{Addr: addr, Hint: hint(addr), Close: stop}, nil
 }
 
-func (d *Debugger) local(pid int) (core.DebugSession, error) {
-	port, err := freePort()
+func (d *Debugger) local(svc string, pid int) (core.DebugSession, error) {
+	addr, err := listenAddr(svc)
 	if err != nil {
 		return core.DebugSession{}, err
 	}
-	addr := "127.0.0.1:" + strconv.Itoa(port)
 	cmd := exec.Command(d.opt.Dlv, "attach", strconv.Itoa(pid), "--headless", "--listen="+addr, "--api-version=2", "--accept-multiclient", "--continue")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -115,11 +114,10 @@ func (d *Debugger) local(pid int) (core.DebugSession, error) {
 }
 
 func (d *Debugger) relaunch(ctx context.Context, rl core.Relauncher, s *spec.Service) (core.DebugSession, error) {
-	port, err := freePort()
+	addr, err := listenAddr(s.Name)
 	if err != nil {
 		return core.DebugSession{}, err
 	}
-	addr := "127.0.0.1:" + strconv.Itoa(port)
 	wrap := func(argv []string) []string {
 		return append([]string{d.opt.Dlv, "exec", argv[0], "--headless", "--listen=" + addr, "--api-version=2", "--accept-multiclient", "--continue", "--"}, argv[1:]...)
 	}
@@ -138,7 +136,18 @@ func (d *Debugger) relaunch(ctx context.Context, rl core.Relauncher, s *spec.Ser
 }
 
 func hint(addr string) string {
-	return fmt.Sprintf("dlv connect %s   (or an IDE \"Go Remote\" config on %s)", addr, addr)
+	return fmt.Sprintf("GoLand / VS Code: run the \"rig: <service>\" config `rig ide` wrote (Go Remote on %s), or dlv connect %s", addr, addr)
+}
+
+// listenAddr is the service's stable debug port, or any free one when something holds it.
+func listenAddr(svc string) (string, error) {
+	addr := "127.0.0.1:" + strconv.Itoa(core.DebugPort(svc))
+	if l, err := net.Listen("tcp", addr); err == nil {
+		l.Close()
+		return addr, nil
+	}
+	port, err := freePort()
+	return "127.0.0.1:" + strconv.Itoa(port), err
 }
 
 func freePort() (int, error) {

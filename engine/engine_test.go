@@ -246,3 +246,20 @@ func TestUpLeavesRunningDependencies(t *testing.T) {
 		t.Fatalf("running dependencies were redeployed: %v", shared.log)
 	}
 }
+
+func TestIgnoreState(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{".git", ".rig"} {
+		if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gi := filepath.Join(dir, ".gitignore")
+	_ = os.WriteFile(gi, []byte("bin/"), 0o644)
+	ignoreState(dir)
+	ignoreState(dir)
+	raw, _ := os.ReadFile(gi)
+	if got := string(raw); got != "bin/\n# rig: pids, logs, profiles, reports, test runs (rig.yaml)\n.rig/\n" {
+		t.Fatalf(".gitignore = %q", got)
+	}
+}

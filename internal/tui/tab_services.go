@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 // servicesTab lists services; enter opens one: its instances and its live log, which is only
@@ -22,18 +24,60 @@ type servicesTab struct {
 	list   *grid
 	marked map[string]bool
 	filter string
-	// role shows one kind of service: "" the project's own (apps and load generators), or infra, or all
-	role string
+	// section narrows the list: "" every app and load generator, a rig.yaml section, "other" (apps in
+	// no section) or "infra"
+	section  string
+	sections map[string]string
 
 	open_  string // the service being shown, "" for the list
 	pods   *grid
-	logs   []core.LogLine
+	log    *logView
 	logFor string
 	stream int
 	cancel context.CancelFunc
 	logErr string
 	detail string
+	prof   *profView
 	debug  map[string]core.DebugSession
+	// desired is each service's last seen replica count; scaled the last change of it, so a
+	// scale by an autoscaler (or anyone) shows on the list for a while
+	desired map[string]int
+	scaled  map[string]scaleChange
+}
+
+type scaleChange struct {
+	from, to int
+	at       time.Time
+}
+
+const scaleShown = 10 * time.Minute
+
+// noteScale records a change of a service's replica count since the last refresh.
+func (t *servicesTab) noteScale(st core.Status) {
+	if t.desired == nil {
+		t.desired, t.scaled = map[string]int{}, map[string]scaleChange{}
+	}
+	if st.State == core.StateAbsent {
+		return
+	}
+	prev, seen := t.desired[st.Service]
+	t.desired[st.Service] = st.Desired
+	if seen && prev != st.Desired {
+		t.scaled[st.Service] = scaleChange{from: prev, to: st.Desired, at: time.Now()}
+	}
+}
+
+// scaleNote is "↑ 2→3 40s ago" while the last change is recent.
+func (t *servicesTab) scaleNote(svc string) (arrow, note string) {
+	c, ok := t.scaled[svc]
+	if !ok || time.Since(c.at) > scaleShown {
+		return "", ""
+	}
+	arrow = sGreen.Render("↑")
+	if c.to < c.from {
+		arrow = sAmber.Render("↓")
+	}
+	return arrow, fmt.Sprintf("scaled %d→%d %s ago", c.from, c.to, shortAge(time.Since(c.at)))
 }
 
 type svcLogStart struct {
@@ -51,11 +95,12 @@ type svcLogBatch struct {
 
 // resultMsg carries an operation's outcome into the detail pane (and the footer).
 type resultMsg struct {
-	gen    int
-	text   string
-	status string
-	err    bool
-	debug  *debugAttach
+	gen     int
+	text    string
+	status  string
+	err     bool
+	debug   *debugAttach
+	profile *profView
 }
 
 type debugAttach struct {
@@ -67,12 +112,14 @@ func (t *servicesTab) name() string { return "Services" }
 func (t *servicesTab) typing() bool { return false }
 
 func (t *servicesTab) open(m *model) tea.Cmd {
-	t.list = newGrid("svc", col("", 1), col("", 1), col("SERVICE", 30), col("GROUPS", 18), rcol("READY", 7), rcol("RESTARTS", 8),
+	t.list = newGrid("svc", col("", 1), col("", 1), col("SERVICE", 48), col("SECTION", 12), col("GROUPS", 16), rcol("READY", 13), rcol("RESTARTS", 8),
 		rcol("CPU", 6), rcol("MEMORY", 7), col("IMAGE", 28), col("MESSAGE", 0))
-	t.list.sortBy = 2
+	t.list.sortBy = 3
+	t.sections = m.app.Spec.SectionMap()
 	t.pods = newGrid("pods", col("", 1), col("INSTANCE", 0), col("HOST", 18), rcol("READY", 5), rcol("RESTARTS", 8), rcol("AGE", 8), rcol("CPU", 6), rcol("MEMORY", 7))
 	t.marked = map[string]bool{}
 	t.debug = map[string]core.DebugSession{}
+	t.log = newLogView("svc:log", 2000)
 	return nil
 }
 
@@ -80,11 +127,12 @@ func (t *servicesTab) refresh(m *model) tea.Cmd { return nil }
 
 func (t *servicesTab) hints() [][2]string {
 	if t.open_ != "" {
-		return [][2]string{{"esc", "back"}, {"enter", "logs of instance"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile"}, {"D", "debug"}, {"l", "logs screen"}}
+		return [][2]string{{"esc", "back"}, {"enter", "logs of instance"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
+			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
+			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log lines: copied"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
 	}
-	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark all shown"}, {"i", "apps/infra/all"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-		{"d", "deploy"}, {"b", "build+deploy"}, {"/", "filter"}, {"< >", "sort"}}
+	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"[ ]", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
+		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"/", "filter"}, {"< >", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -137,6 +185,9 @@ func (t *servicesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.debug != nil {
 			t.debug[msg.debug.svc] = msg.debug.sess
 		}
+		if msg.profile != nil {
+			t.prof = msg.profile
+		}
 		return nil
 	case svcLogStart:
 		if msg.gen != m.gen || msg.stream != t.stream {
@@ -151,10 +202,7 @@ func (t *servicesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
-		t.logs = append(t.logs, msg.lines...)
-		if len(t.logs) > 2000 {
-			t.logs = t.logs[len(t.logs)-2000:]
-		}
+		t.log.add(msg.lines)
 		if msg.done {
 			return nil
 		}
@@ -190,10 +238,29 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 		for _, r := range t.list.rows {
 			t.marked[r.id] = !all
 		}
+	case "m":
+		if r, ok := t.list.current(); ok {
+			return m.showMetrics(r.id)
+		}
 	case "i":
-		t.role = map[string]string{"": "infra", "infra": "all", "all": ""}[t.role]
-		t.marked = map[string]bool{}
-		t.list.sel = 0
+		if t.section == "infra" {
+			t.setSection("")
+		} else {
+			t.setSection("infra")
+		}
+	case "[", "]":
+		names := t.sectionNames(m)
+		i := slices.Index(names, t.section)
+		if k.String() == "[" {
+			i = (i - 1 + len(names)) % len(names)
+		} else {
+			i = (i + 1) % len(names)
+		}
+		t.setSection(names[i])
+	case "D":
+		if r, ok := t.list.current(); ok {
+			return t.toggleDebug(m, r.id)
+		}
 	case "/":
 		m.ask("filter services (name or group)", t.filter, func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)
@@ -216,7 +283,7 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 	switch key {
 	case "s":
 		return m.act(label("start", names), false, func(ctx context.Context) error {
-			return each(names, func(n string) error { return a.Start(ctx, n) })
+			return a.StartInOrder(ctx, names, 3*time.Minute)
 		})
 	case "x":
 		return m.act(label("stop", names), true, func(ctx context.Context) error {
@@ -227,13 +294,15 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 			return each(names, func(n string) error { return a.Restart(ctx, n) })
 		})
 	case "+", "=":
-		return m.act(label("scale up", names), false, func(ctx context.Context) error { return a.ScaleBy(ctx, names, 1, false) })
+		return t.scale(m, names, 1)
 	case "-":
-		dangerous := false
-		for _, n := range names {
-			dangerous = dangerous || t.status(m, n).Desired <= 1
-		}
-		return m.act(label("scale down", names), dangerous, func(ctx context.Context) error { return a.ScaleBy(ctx, names, -1, false) })
+		return t.scale(m, names, -1)
+	case "h":
+		return t.editAutoscale(m, names, nil)
+	case "F":
+		return serviceManifests(m, names[0])
+	case "R":
+		return editResources(m, names[0])
 	case "d":
 		m.ask(label("deploy", names)+": image tag (empty: the last built one)", "", func(tag string) tea.Cmd {
 			tag = strings.TrimSpace(tag)
@@ -317,7 +386,8 @@ func each(names []string, f func(string) error) error {
 // openService shows one service and streams its log (or one instance's) until it is closed.
 func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
 	t.closeLogs()
-	t.open_, t.logs, t.logErr, t.detail = name, nil, "", ""
+	t.open_, t.logErr, t.detail = name, "", ""
+	t.log.reset()
 	t.logFor = instance
 	t.stream++
 	ctx, cancel := context.WithCancel(m.ctx)
@@ -360,12 +430,31 @@ func nextSvcLog(gen, stream int, ch <-chan core.LogLine) tea.Cmd {
 }
 
 func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
+	if t.prof != nil && t.prof.svc == t.open_ {
+		if t.prof.grid.key(k) {
+			return nil
+		}
+		switch k.String() {
+		case "W":
+			t.prof.save(m)
+			return nil
+		case "esc", "backspace":
+			t.prof = nil
+			return nil
+		}
+	}
 	if t.pods.key(k) {
 		return nil
 	}
 	name := t.open_
 	switch k.String() {
-	case "esc", "backspace", "left":
+	case "m":
+		return m.showMetrics(name)
+	case "esc", "backspace":
+		if t.detail != "" {
+			t.detail = ""
+			return nil
+		}
 		t.closeLogs()
 		t.open_ = ""
 		return nil
@@ -383,19 +472,32 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			inst = r.id
 		}
 		return t.shell(m, name, inst)
-	case "c":
-		t.logs = nil
 	case "p":
-		return t.profile(m, name)
+		t.pickProfile(m, name)
+		return nil
 	case "D":
 		return t.toggleDebug(m, name)
 	default:
+		if t.log.key(m, k, false) {
+			t.detail = ""
+			return nil
+		}
 		return t.ops(m, k.String(), []string{name})
 	}
 	return nil
 }
 
 func (t *servicesTab) click(m *model, h hit) tea.Cmd {
+	if i, ok := stripHit(h, "svc:section"); ok {
+		names := t.sectionNames(m)
+		if i < len(names) {
+			t.setSection(names[i])
+			if h.double {
+				t.markShown()
+			}
+		}
+		return nil
+	}
 	if t.open_ == "" {
 		if t.list.click(h) && h.double {
 			if r, ok := t.list.current(); ok {
@@ -413,6 +515,9 @@ func (t *servicesTab) click(m *model, h hit) tea.Cmd {
 	if h.id == "back" {
 		t.closeLogs()
 		t.open_ = ""
+		return nil
+	}
+	if t.prof != nil && t.prof.grid.click(h) {
 		return nil
 	}
 	if t.pods.click(h) && h.double {
@@ -438,37 +543,6 @@ func (t *servicesTab) shell(m *model, svc, instance string) tea.Cmd {
 		}
 		return statusMsg{text: "shell on " + svc + " closed"}
 	})
-}
-
-func (t *servicesTab) profile(m *model, svc string) tea.Cmd {
-	s := m.app.Spec.Services[svc]
-	m.ask("profile "+svc+" (kind duration)", "cpu 10s", func(v string) tea.Cmd {
-		f := strings.Fields(v)
-		kind, dur := "cpu", 10*time.Second
-		if len(f) > 0 {
-			kind = f[0]
-		}
-		if len(f) > 1 {
-			if d, err := time.ParseDuration(f[1]); err == nil {
-				dur = d
-			}
-		}
-		a, gen, ctx := m.app, m.gen, m.ctx
-		m.busy++
-		m.setStatus(fmt.Sprintf("profiling %s (%s, %s)…", svc, kind, dur), false)
-		return func() tea.Msg {
-			p, _, err := engine.Get[core.Profiler](a, core.KindProfiler, "")
-			if err != nil {
-				return resultMsg{gen: gen, status: "profile: " + err.Error(), err: true}
-			}
-			res, err := p.Capture(ctx, core.ProfileRequest{Service: s, Kind: kind, Duration: dur})
-			if err != nil {
-				return resultMsg{gen: gen, status: "profile: " + err.Error(), err: true}
-			}
-			return resultMsg{gen: gen, text: sAccent.Render(res.File) + "\n" + res.Summary, status: "profile saved: " + res.File}
-		}
-	})
-	return nil
 }
 
 func (t *servicesTab) toggleDebug(m *model, svc string) tea.Cmd {
@@ -522,7 +596,8 @@ func (t *servicesTab) rows(m *model) []grow {
 		if s == nil {
 			continue
 		}
-		if infra := s.Role == "infra"; t.role == "" && infra || t.role == "infra" && !infra {
+		sec := t.sectionOf(s)
+		if t.section == "" && sec == "infra" || t.section != "" && sec != t.section {
 			continue
 		}
 		groups := strings.Join(s.Groups, ",")
@@ -543,17 +618,24 @@ func (t *servicesTab) rows(m *model) []grow {
 		if restarts > 0 {
 			rs = sAmber.Render(rs)
 		}
+		arrow, note := t.scaleNote(st.Service)
 		msg := st.Message
 		if msg != "" {
 			msg = sAmber.Render(msg)
+		}
+		if note != "" {
+			if msg != "" {
+				msg += " "
+			}
+			msg += sDim.Render(note)
 		}
 		mark := " "
 		if t.marked[st.Service] {
 			mark = sAccent.Render("●")
 		}
 		rows = append(rows, grow{id: st.Service,
-			cells: []string{mark, stateDot(st.State), name, sDim.Render(groups), fmt.Sprintf("%d/%d", st.Ready, st.Desired), rs, cpuText(cpu), bytesText(mem), tagOf(st.Image), msg},
-			keys:  []any{nil, string(st.State), st.Service, groups, float64(st.Ready), float64(restarts), cpu, float64(mem), nil, nil}})
+			cells: []string{mark, stateDot(st.State), name, sec, sDim.Render(groups), fmt.Sprintf("%d/%d", st.Ready, st.Desired) + arrow + hpaNote(st), rs, cpuText(cpu), bytesText(mem), tagOf(st.Image), msg},
+			keys:  []any{nil, string(st.State), st.Service, t.sectionRank(m, sec, st.Service), groups, float64(st.Ready), float64(restarts), cpu, float64(mem), nil, nil}})
 	}
 	return rows
 }
@@ -577,8 +659,13 @@ func (t *servicesTab) view(m *model, w, h int) string {
 			marked++
 		}
 	}
-	title := fmt.Sprintf("%s · %d  (i: %s)", map[string]string{"": "services", "infra": "infrastructure", "all": "services and infrastructure"}[t.role], len(t.list.rows),
-		map[string]string{"": "infrastructure", "infra": "all", "all": "services"}[t.role])
+	title := fmt.Sprintf("%s · %d", map[string]string{"": "services", "infra": "infrastructure"}[t.section], len(t.list.rows))
+	if t.section != "" && t.section != "infra" {
+		title = fmt.Sprintf("%s · %d", t.section, len(t.list.rows))
+		if sec := m.app.Spec.Sections[t.section]; sec != nil && sec.Help != "" {
+			title += " · " + sec.Help
+		}
+	}
 	if t.filter != "" {
 		title += " · filter " + t.filter
 	}
@@ -588,8 +675,10 @@ func (t *servicesTab) view(m *model, w, h int) string {
 	if len(m.services) == 0 {
 		return panel(title, sDim.Render("asking the runtime…"), w, h, true)
 	}
-	body := t.list.view(m, 1, 1, w-2, h-2, true)
-	m.zone("svc:mark", 1, 2, 2, t.list.shown)
+	names := t.sectionNames(m)
+	strip := m.strip("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section)) + sDim.Render("  [ ] · dbl-click marks")
+	body := strip + "\n" + t.list.view(m, 1, 2, w-2, h-3, true)
+	m.zone("svc:mark", 1, 3, 2, t.list.shown)
 	return panel(title, body, w, h, true)
 }
 
@@ -605,6 +694,9 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	}
 	if len(s.DependsOn) > 0 {
 		b.WriteString(sDim.Render("  needs " + strings.Join(s.DependsOn, ",")))
+	}
+	if as := st.Autoscale; as != nil {
+		b.WriteString(sDim.Render(fmt.Sprintf("  autoscaler %d-%d (h)", as.Min, as.Max)))
 	}
 	b.WriteString("\n")
 	if st.Image != "" {
@@ -645,28 +737,28 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	if t.logFor != "" {
 		src = t.logFor
 	}
-	var lb strings.Builder
+	var body string
+	title := "log · " + src + " · " + t.log.state() + " · drag copies · l: Logs screen"
 	switch {
+	case t.prof != nil && t.prof.svc == name:
+		title = fmt.Sprintf("%s profile · %s · ↑↓ < > I sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
+		body = t.prof.view(m, 1, headH+1+podsH+1, w-2, logH-2)
 	case t.detail != "":
-		lb.WriteString(t.detail)
+		body = t.detail
 	case t.logErr != "":
-		lb.WriteString(sRed.Render(wrap(t.logErr, w-4)))
-	case len(t.logs) == 0:
-		lb.WriteString(sDim.Render("waiting for log lines…"))
+		body = sRed.Render(wrap(t.logErr, w-4))
+	case len(t.log.lines) == 0:
+		body = sDim.Render("waiting for log lines…")
 	default:
-		lines := t.logs
-		if keep := logH - 2; len(lines) > keep {
-			lines = lines[len(lines)-keep:]
-		}
-		for _, l := range lines {
+		body = t.log.render(m, 1, headH+1+podsH+1, w-2, logH-2, func(l core.LogLine) string {
 			inst := ""
 			if t.logFor == "" && len(st.Instances) > 1 && l.Instance != "" {
 				inst = lipgloss.NewStyle().Foreground(colorFor(l.Instance)).Render(shortInstance(l.Instance)) + " "
 			}
-			lb.WriteString(sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + pretty(l.Text) + "\n")
-		}
+			return sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + pretty(l.Text)
+		})
 	}
-	logs := panel("log · "+src+" · following", strings.TrimRight(lb.String(), "\n"), w, logH, false)
+	logs := panel(title, body, w, logH, t.prof != nil && t.prof.svc == name)
 	return lipgloss.JoinVertical(lipgloss.Left, " "+head, "", podsBox, logs)
 }
 
@@ -694,4 +786,223 @@ func lastPath(img string) string {
 		return img[i+1:]
 	}
 	return img
+}
+
+func (t *servicesTab) setSection(name string) {
+	t.section = name
+	t.marked = map[string]bool{}
+	t.list.sel = 0
+}
+
+func (t *servicesTab) markShown() {
+	for _, r := range t.list.rows {
+		t.marked[r.id] = true
+	}
+}
+
+// sectionOf is the section a service shows under: infrastructure first, then rig.yaml's sections.
+func (t *servicesTab) sectionOf(s *spec.Service) string {
+	if s.Role == spec.RoleInfra {
+		return "infra"
+	}
+	if sec, ok := t.sections[s.Name]; ok {
+		return sec
+	}
+	return "other"
+}
+
+// sectionNames are the strip's entries: everything, each section with services here, other, infra.
+func (t *servicesTab) sectionNames(m *model) []string {
+	have := map[string]bool{}
+	for _, st := range m.services {
+		if s := m.app.Spec.Services[st.Service]; s != nil {
+			have[t.sectionOf(s)] = true
+		}
+	}
+	names := []string{""}
+	for _, n := range append(slices.Clone(m.app.Spec.SectionOrder), "other", "infra") {
+		if have[n] {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// sectionRank sorts by section, then by where the section lists the service (unlisted ones, which
+// came in through a group, after the listed ones).
+func (t *servicesTab) sectionRank(m *model, sec, svc string) float64 {
+	i := slices.Index(m.app.Spec.SectionOrder, sec)
+	if i < 0 {
+		return float64(len(m.app.Spec.SectionOrder) + map[string]int{"other": 0, "infra": 1}[sec])
+	}
+	pos := slices.Index(m.app.Spec.Sections[sec].Services, svc)
+	if pos < 0 {
+		pos = 999
+	}
+	return float64(i) + float64(pos)/1000
+}
+
+// sectionLabels show each section's running count: "core 7/9".
+func (t *servicesTab) sectionLabels(m *model, names []string) []string {
+	up, all := map[string]int{}, map[string]int{}
+	for _, st := range m.services {
+		s := m.app.Spec.Services[st.Service]
+		if s == nil {
+			continue
+		}
+		sec := t.sectionOf(s)
+		for _, k := range []string{sec, ""} {
+			if k == "" && sec == "infra" {
+				continue
+			}
+			all[k]++
+			if engine.Ready(st) {
+				up[k]++
+			}
+		}
+	}
+	out := make([]string, len(names))
+	for i, n := range names {
+		l := n
+		if n == "" {
+			l = "all"
+		}
+		out[i] = fmt.Sprintf("%s %d/%d", l, up[n], all[n])
+	}
+	return out
+}
+
+func hpaNote(st core.Status) string {
+	if st.Autoscale == nil {
+		return ""
+	}
+	return sDim.Render(fmt.Sprintf(" ⇕%d-%d", st.Autoscale.Min, st.Autoscale.Max))
+}
+
+// scale moves replicas by d; when that leaves an autoscaler's range (which would put it back), it
+// asks whether to move the autoscaler too.
+func (t *servicesTab) scale(m *model, names []string, d int) tea.Cmd {
+	a := m.app
+	verb := "scale up"
+	if d < 0 {
+		verb = "scale down"
+	}
+	dangerous := false
+	want := map[string]int{}
+	var outside []string
+	for _, n := range names {
+		st := t.status(m, n)
+		want[n] = max(st.Desired+d, 0)
+		dangerous = dangerous || d < 0 && st.Desired <= 1
+		// at 0 replicas an HPA stands still, so stopping never fights it
+		if b := st.Autoscale; b != nil && want[n] > 0 && (want[n] < b.Min || want[n] > b.Max) {
+			outside = append(outside, n)
+		}
+	}
+	scale := func(ctx context.Context) error { return a.ScaleBy(ctx, names, d, false) }
+	if len(outside) == 0 {
+		return m.act(label(verb, names), dangerous, scale)
+	}
+	fit := map[string]core.Bounds{}
+	var fits []string
+	for _, n := range outside {
+		b := *t.status(m, n).Autoscale
+		b.Min, b.Max = min(b.Min, want[n]), max(b.Max, want[n])
+		fit[n] = b
+		fits = append(fits, fmt.Sprintf("%s %d-%d", n, b.Min, b.Max))
+	}
+	cur := t.status(m, outside[0]).Autoscale
+	opts := []string{"move the autoscaler", "set autoscaler bounds…", "scale only", "cancel"}
+	desc := []string{
+		"and scale: " + strings.Join(fits, ", "),
+		"type min and max, then scale",
+		fmt.Sprintf("the autoscaler (%d-%d) will put it back", cur.Min, cur.Max),
+		"",
+	}
+	title := fmt.Sprintf("%s: %s outside its autoscaler's range", label(verb, names), strings.Join(outside, ", "))
+	m.pick(title, opts, desc, 0, false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		switch c[0] {
+		case opts[0]:
+			return m.act(label(verb, names)+" and its autoscaler", dangerous, func(ctx context.Context) error {
+				if err := each(outside, func(n string) error { return a.SetAutoscale(ctx, n, fit[n]) }); err != nil {
+					return err
+				}
+				return scale(ctx)
+			})
+		case opts[1]:
+			return t.editAutoscale(m, outside, scale)
+		case opts[2]:
+			return m.act(label(verb, names), dangerous, scale)
+		}
+		return nil
+	})
+	return nil
+}
+
+// editAutoscale asks for new autoscaler bounds of names, then runs then (when set) after them.
+func (t *servicesTab) editAutoscale(m *model, names []string, then func(context.Context) error) tea.Cmd {
+	var cur *core.Bounds
+	for _, n := range names {
+		if b := t.status(m, n).Autoscale; b != nil {
+			cur = b
+			break
+		}
+	}
+	a := m.app
+	if cur == nil {
+		if _, ok := a.Runtime().(core.Autoscaler); !ok {
+			m.setStatus(m.app.Env.Name+": the runtime has no autoscalers", true)
+			return nil
+		}
+		n := max(1, t.status(m, names[0]).Desired)
+		m.ask(label("new autoscaler for", names)+": min max cpu% [memory%]", fmt.Sprintf("%d %d 75", n, n*3), func(v string) tea.Cmd {
+			var b core.Bounds
+			f := strings.Fields(v)
+			if len(f) < 3 {
+				m.setStatus("autoscaler: type min, max and a CPU target (percent of requests), memory optional", true)
+				return nil
+			}
+			fmt.Sscan(strings.Join(f, " "), &b.Min, &b.Max, &b.CPU, &b.Memory)
+			return m.act(fmt.Sprintf("%s %d-%d at cpu %d%%", label("new autoscaler for", names), b.Min, b.Max, b.CPU), false, func(ctx context.Context) error {
+				if err := each(names, func(n string) error { return a.SetAutoscale(ctx, n, b) }); err != nil || then == nil {
+					return err
+				}
+				return then(ctx)
+			})
+		})
+		return nil
+	}
+	m.ask(label("autoscaler of", names)+": min max", fmt.Sprintf("%d %d", cur.Min, cur.Max), func(v string) tea.Cmd {
+		var b core.Bounds
+		if _, err := fmt.Sscan(v, &b.Min, &b.Max); err != nil {
+			m.setStatus("autoscaler: type two numbers, min and max", true)
+			return nil
+		}
+		return m.act(fmt.Sprintf("%s to %d-%d", label("autoscaler of", names), b.Min, b.Max), false, func(ctx context.Context) error {
+			if err := each(names, func(n string) error { return a.SetAutoscale(ctx, n, b) }); err != nil || then == nil {
+				return err
+			}
+			return then(ctx)
+		})
+	})
+	return nil
+}
+
+func (t *servicesTab) drag(m *model, h hit, phase dragPhase) bool {
+	if t.open_ == "" || h.id != "svc:log" {
+		return false
+	}
+	t.log.drag(m, h, phase)
+	return true
+}
+
+func (t *servicesTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
+	if t.open_ == "" || h.id != "svc:log" {
+		return nil, false
+	}
+	t.log.wheel(up)
+	return nil, true
 }

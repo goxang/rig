@@ -156,7 +156,9 @@ func (t *hostsTab) view(m *model, w, h int) string {
 			line += strings.Repeat(" ", 11)
 		}
 		if i == t.sel {
-			line = sSelected.Render(padRight(line, inner))
+			line = highlight(sSelected, line, inner)
+		} else if m.hovering(1, 3+i, inner, 1) {
+			line = highlight(sHover, line, inner)
 		}
 		b.WriteString(line + "\n")
 	}
@@ -172,7 +174,19 @@ func (t *hostsTab) view(m *model, w, h int) string {
 			b.WriteString(viz.LineChart([]viz.Line{{Name: "cpu % " + x.Name, Points: pts, Color: viz.Palette[2]}}, inner, h-len(t.hosts)-8, "%"))
 		}
 	}
+	m.zone("hosts:rows", 1, 3, inner, len(t.hosts))
 	return panel("hosts · "+t.source, b.String(), w, h, true)
+}
+
+func (t *hostsTab) click(m *model, h hit) tea.Cmd {
+	if h.id != "hosts:rows" || h.y >= len(t.hosts) {
+		return nil
+	}
+	t.sel = h.y
+	if h.double {
+		return t.shell(m, t.hosts[t.sel].Name, nil)
+	}
+	return nil
 }
 
 // meters is a host's CPU, memory and disk as htop bars; zero totals leave a blank bar.
