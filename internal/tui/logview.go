@@ -31,6 +31,7 @@ type logView struct {
 	anchor, head lpos
 	selecting    bool
 	dragged      bool
+	wasPaused    bool
 }
 
 // lpos is a column of a log line's text as drawn, before the sideways scroll.
@@ -203,11 +204,11 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 	at := lpos{v.start + min(max(h.y, 0), len(v.visible)-1), min(max(h.x, 0), v.width-1) + v.hoff}
 	switch phase {
 	case dragPress:
-		v.anchor, v.head, v.selecting, v.dragged = at, at, true, false
+		// the lines must stay put under the mouse; a plain click lets them go again
+		v.anchor, v.head, v.selecting, v.dragged, v.wasPaused, v.paused = at, at, true, false, v.paused, true
 	case dragMove:
 		if v.selecting && at != v.anchor {
 			v.head, v.dragged = at, true
-			v.paused = true // the lines must stay put under the mouse
 		}
 	case dragRelease:
 		if v.selecting && v.dragged {
@@ -217,6 +218,9 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 			}
 		}
 		v.selecting = false
+		if !v.dragged && !v.wasPaused {
+			v.paused, v.scroll = false, 0
+		}
 	}
 }
 
