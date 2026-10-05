@@ -63,11 +63,13 @@ Screens load nothing until opened, and only the one showing refreshes. Everythin
 (`<` `>` pick the column, `I` inverts, or click a header) and works with the mouse. On a Kubernetes
 cluster, dangerous changes (stop, deploy, delete, edits) ask first and `enter` confirms; local, docker
 and kind never ask. `?` shows the keys of the current screen.
+Drag over any text (results, queries, test output, the chat) to copy it; the selection stays inside the
+box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and over OSC 52.
 
 | screen | |
 |---|---|
 | Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `o` puts every service into GoLand (below); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
-| Logs | the services you pick, merged, or one instance; `←` `→` scroll sideways, dragging over lines copies them |
+| Logs | the services you pick, merged, or one instance; `←` `→` scroll sideways, dragging over text copies it, and past an edge scrolls |
 | Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV |
