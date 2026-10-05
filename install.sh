@@ -47,7 +47,10 @@ if command -v sha256sum >/dev/null 2>&1; then
 else
   got=$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)
 fi
-[ -n "$want" ] && [ "$want" = "$got" ] || { echo "rig: checksum mismatch for $asset" >&2; exit 1; }
+if [ -z "$want" ] || [ "$want" != "$got" ]; then
+  echo "rig: checksum mismatch for $asset" >&2
+  exit 1
+fi
 
 tar -xzf "$tmp/$asset" -C "$tmp" rig
 install -m 0755 "$tmp/rig" "$dir/rig"
