@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
 
@@ -91,14 +91,6 @@ func Write(a *engine.App, names []string) (Result, error) {
 		}
 	}
 	return r, nil
-}
-
-func runtimeOf(a *engine.App, svc string) core.Runtime {
-	rt, _, err := a.Owner(svc)
-	if err != nil {
-		return nil
-	}
-	return rt
 }
 
 func fileName(config string) string {
@@ -281,7 +273,7 @@ func Open(dir string) error {
 		return errors.New("GoLand not found: put goland on PATH or set RIG_GOLAND")
 	}
 	cmd := exec.Command(bin, dir)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sh.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -172,11 +172,9 @@ func patchWorkload(m map[string]any, kind string, o RenderOptions) error {
 		tmpl = child(spec, "template")
 	}
 	addLabels(child(tmpl, "metadata"), o.Labels)
-	podSpec := tmpl
+	podSpec := child(m, "spec")
 	if kind != "Pod" {
 		podSpec = child(tmpl, "spec")
-	} else {
-		podSpec = child(m, "spec")
 	}
 	containers, _ := podSpec["containers"].([]any)
 	if len(containers) == 0 {

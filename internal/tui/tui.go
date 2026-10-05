@@ -303,7 +303,7 @@ func Chat(ctx context.Context, a *engine.App, id string) error {
 
 func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) error {
 	if a.Env == nil {
-		return fmt.Errorf("no environment: define one under environments: and set default:")
+		return fmt.Errorf("no environment: define one under environments: and set default")
 	}
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
 	m.tabs = newTabs(a, m.all, m.simple)

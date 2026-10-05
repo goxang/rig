@@ -133,7 +133,7 @@ func withApp(f func(ctx context.Context, a *engine.App, args []string) error) fu
 		}
 		defer a.Close()
 		if a.Env == nil {
-			return errors.New("no environment: define one under environments: and set default:")
+			return errors.New("no environment: define one under environments: and set default")
 		}
 		ctx := cmd.Context()
 		if g.yes {

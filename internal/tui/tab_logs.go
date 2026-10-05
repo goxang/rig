@@ -404,18 +404,6 @@ func newLogFormat(ui *spec.LogsUI) logFormat {
 	return f
 }
 
-func parseLogJSON(s string) (map[string]any, bool) {
-	t := strings.TrimSpace(s)
-	if !strings.HasPrefix(t, "{") {
-		return nil, false
-	}
-	var m map[string]any
-	return m, json.Unmarshal([]byte(t), &m) == nil
-}
-
-// pretty is the format of the Logs screen and service pages before ui.logs; tests and other callers keep it.
-func pretty(s string) string { return newLogFormat(nil).render(s) }
-
 // tree is line s parsed, cached: the screen redraws the same lines every second.
 func (f logFormat) tree(s string) *jnode {
 	if n, ok := f.trees[s]; ok {
