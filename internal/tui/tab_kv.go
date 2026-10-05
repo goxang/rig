@@ -79,9 +79,9 @@ func (t *kvTab) name() string { return "KV" }
 func (t *kvTab) typing() bool { return false }
 func (t *kvTab) hints() [][2]string {
 	if t.inTree {
-		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"esc", "back to keys"}}
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"s", "config file"}, {"esc", "back to keys"}}
 	}
-	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"J/K", "scroll value"}}
+	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"s", "config file"}, {"J/K", "scroll value"}}
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
@@ -438,6 +438,10 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return t.enter(m, r.id)
 		case "left", "backspace", "esc":
 			return t.up(m)
+		case "s":
+			if ok && !strings.HasSuffix(r.id, "/") {
+				return t.openSource(m, r.id, "")
+			}
 		case "e":
 			if ok && !strings.HasSuffix(r.id, "/") {
 				if t.valueFor != r.id {
@@ -630,6 +634,8 @@ func (t *kvTab) setTree() {
 func (t *kvTab) treeKey(m *model, k tea.KeyMsg) tea.Cmd {
 	n := t.tree.current()
 	switch k.String() {
+	case "s":
+		return t.openSource(m, t.treeFor, n.path())
 	case "esc", "q":
 		t.inTree = false
 	case "enter", "e":

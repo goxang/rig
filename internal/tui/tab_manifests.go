@@ -90,7 +90,7 @@ func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
 	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
-		{"a", "apply"}, {"/", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"J/K", "yaml"}, {"o", "editor"}}
+		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"J/K", "yaml"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
@@ -292,6 +292,8 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		switch msg.String() {
 		case "/":
+			return t.search(m)
+		case "f":
 			m.ask("filter", t.filter, func(v string) tea.Cmd {
 				t.filter, t.sel, t.offset = v, 0, 0
 				return nil
