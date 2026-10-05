@@ -81,7 +81,7 @@ func serviceCommands() []*cobra.Command {
 		Use:   "deploy <service|group...>",
 		Short: "roll out services: --tag deploys that image tag from the registry, --build builds a fresh one first",
 		Example: `  rig deploy app -t master-20261003     # every app at an existing tag, infra untouched
-  rig deploy parser --build             # build from the working tree, push, roll out
+  rig deploy api --build             # build from the working tree, push, roll out
   rig deploy core --build --ref master  # build branch master, push, roll out`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
@@ -297,9 +297,9 @@ func serviceCommands() []*cobra.Command {
 	setenv := &cobra.Command{
 		Use:   "setenv <service|group> [K=V... | K=]",
 		Short: "env vars of services, kept in the environment's state so every deploy keeps them; running ones redeploy",
-		Example: `  rig setenv loadtestv2-shaparakv2-iso-pos              # what is set
-  rig -e loadtest2 -y setenv parser VERBOSITY=2 LOG_MODE=json
-  rig -e loadtest2 -y setenv parser VERBOSITY=             # back to the manifest's`,
+		Example: `  rig setenv load-generator              # what is set
+  rig -e staging -y setenv api VERBOSITY=2 LOG_MODE=json
+  rig -e staging -y setenv api VERBOSITY=             # back to the manifest's`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			names, err := a.Targets(args[:1], false)
