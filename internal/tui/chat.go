@@ -831,6 +831,13 @@ func (m *model) askTemplate(label, template, hint string, submit func(string) te
 	m.prompt.input.Placeholder = template
 }
 
+// asPopup shows the open prompt as a box over the screen: for queries, which outgrow the footer.
+func (m *model) asPopup() {
+	if m.prompt != nil {
+		m.prompt.popup = true
+	}
+}
+
 // toggleAutocomplete switches AI suggestions while typing, for good (ai.json autocomplete).
 func (m *model) toggleAutocomplete() {
 	r := m.aiRunner()

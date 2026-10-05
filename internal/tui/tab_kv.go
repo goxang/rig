@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,6 +38,19 @@ type kvTab struct {
 	inTree  bool
 	// treeNext walks into the tree once the value being fetched arrives (enter on a key)
 	treeNext bool
+	// jumpKey and jumpPath are a search hit being opened: the key to select once its folder
+	// loads, and the field to select once its value does
+	jumpKey, jumpPath string
+}
+
+// kvHit is one search row: a key, the path of a field of its JSON value ($.a.b; empty for the key
+// itself), and the value.
+type kvHit struct{ key, path, value string }
+
+type kvIndexMsg struct {
+	gen  int
+	hits []kvHit
+	err  error
 }
 
 type kvKeysMsg struct {
@@ -67,7 +81,7 @@ func (t *kvTab) hints() [][2]string {
 	if t.inTree {
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"esc", "back to keys"}}
 	}
-	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "filter"}, {"J/K", "scroll value"}}
+	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"J/K", "scroll value"}}
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
@@ -346,6 +360,16 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		t.keys = msg.keys
 		t.list.set(t.entries())
+		if k := t.jumpKey; k != "" {
+			t.jumpKey = ""
+			for i, r := range t.list.rows {
+				if r.id == k {
+					t.list.sel = i
+				}
+			}
+			t.scroll, t.treeNext = 0, t.jumpPath != ""
+			return t.fetch(m, k)
+		}
 	case kvValueMsg:
 		if msg.gen != m.gen {
 			return nil
@@ -358,8 +382,20 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		t.setTree()
 		if t.treeNext && t.tree != nil {
 			t.inTree = true
+			if t.jumpPath != "" {
+				t.tree.selectPath(t.jumpPath)
+			}
 		}
-		t.treeNext = false
+		t.treeNext, t.jumpPath = false, ""
+	case kvIndexMsg:
+		if msg.gen != m.gen {
+			return nil
+		}
+		if msg.err != nil {
+			m.setStatus("search: "+msg.err.Error(), true)
+			return nil
+		}
+		t.pickHit(m, msg.hits)
 	case kvEditedMsg:
 		defer os.Remove(msg.file)
 		if msg.err != nil {
@@ -458,11 +494,8 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				})
 			}
 		case "/":
-			m.ask("filter keys", t.filter, func(v string) tea.Cmd {
-				t.filter = strings.TrimSpace(v)
-				t.list.set(t.entries())
-				return nil
-			})
+			m.setStatus("reading every key of "+t.comp+"…", false)
+			return t.index(m)
 		case "r":
 			return t.load(m)
 		case "c":
@@ -677,4 +710,104 @@ func (t *kvTab) editField(m *model) tea.Cmd {
 func (t *kvTab) saveTree(m *model, what string) tea.Cmd {
 	m.setStatus(what, false)
 	return t.save(m, t.treeFor, t.tree.root.bytes())
+}
+
+// index reads every key and value of the store, one row per key and per field of a JSON value.
+func (t *kvTab) index(m *model) tea.Cmd {
+	a, gen, ctx, comp := m.app, m.gen, m.ctx, t.comp
+	return func() tea.Msg {
+		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
+		if err != nil {
+			return kvIndexMsg{gen: gen, err: err}
+		}
+		c, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		keys, err := kv.List(c, "")
+		if err != nil {
+			return kvIndexMsg{gen: gen, err: err}
+		}
+		values := make([][]byte, len(keys))
+		sem := make(chan struct{}, 16)
+		var wg sync.WaitGroup
+		for i, k := range keys {
+			if strings.HasSuffix(k, "/") {
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				values[i], _, _ = kv.Get(c, k)
+			}()
+		}
+		wg.Wait()
+		var hits []kvHit
+		for i, k := range keys {
+			if strings.HasSuffix(k, "/") {
+				continue
+			}
+			hits = append(hits, kvHits(k, values[i])...)
+		}
+		return kvIndexMsg{gen: gen, hits: hits}
+	}
+}
+
+// kvHits are the key's own row and, for a JSON value, a row per scalar field.
+func kvHits(key string, value []byte) []kvHit {
+	v := bytes.TrimSpace(value)
+	root, err := parseJSON(v)
+	if err != nil || !root.container() {
+		return []kvHit{{key: key, value: oneLine(string(v))}}
+	}
+	hits := []kvHit{{key: key}}
+	walkNodes(root, func(n *jnode) bool {
+		if !n.container() {
+			hits = append(hits, kvHit{key: key, path: n.path(), value: oneLine(n.text())})
+		}
+		return true
+	})
+	return hits
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// pickHit lists the hits in a picker that filters as you type, on key, field and value alike.
+func (t *kvTab) pickHit(m *model, hits []kvHit) {
+	items, desc := make([]string, len(hits)), make([]string, len(hits))
+	for i, h := range hits {
+		items[i] = h.key
+		if h.path != "" {
+			items[i] += "  " + strings.TrimPrefix(h.path, "$.")
+		}
+		desc[i] = h.value
+	}
+	m.pick("search "+t.comp+": type part of a key, field or value", items, desc, 0, false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		for i, it := range items {
+			if it == c[0] {
+				return t.jump(m, hits[i])
+			}
+		}
+		return nil
+	})
+}
+
+// jump opens the hit's folder, selects its key and, for a field, that field in the value's tree.
+func (t *kvTab) jump(m *model, h kvHit) tea.Cmd {
+	dir := ""
+	if i := strings.LastIndex(h.key, "/"); i >= 0 {
+		dir = h.key[:i+1]
+	}
+	t.prefix, t.filter, t.list.sel = dir, "", 0
+	t.jumpKey, t.jumpPath = h.key, h.path
+	return t.load(m)
 }

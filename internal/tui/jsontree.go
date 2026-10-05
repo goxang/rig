@@ -220,6 +220,29 @@ func (t *jsonTree) flatten() {
 
 func (t *jsonTree) current() *jnode { return t.rows[t.sel].n }
 
+// selectPath selects the node at path ($.a.b[0]), opening the containers above it.
+func (t *jsonTree) selectPath(path string) {
+	var target *jnode
+	walkNodes(t.root, func(n *jnode) bool {
+		if n.path() == path {
+			target = n
+		}
+		return target == nil
+	})
+	if target == nil {
+		return
+	}
+	for p := target.parent; p != nil; p = p.parent {
+		p.closed = false
+	}
+	t.flatten()
+	for i, r := range t.rows {
+		if r.n == target {
+			t.sel = i
+		}
+	}
+}
+
 // fold sets every container below depth d open and every deeper one closed.
 func (t *jsonTree) fold(depth int) {
 	var walk func(n *jnode, d int)

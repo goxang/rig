@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
@@ -105,6 +106,8 @@ type model struct {
 	alertsAt   time.Time
 	alertsBusy bool
 	showAlerts bool
+	// envInfo is the ctrl+e box: what this environment resolves to, empty when closed
+	envInfo string
 
 	refreshed map[int]time.Time
 	sched     *scheduler
@@ -143,6 +146,9 @@ type prompt struct {
 	took     time.Duration
 	// described is what the AI wrote for the ":?description" in describedFor, the input it saw
 	described, describedFor string
+	// popup draws the input as a box over the screen, wrapped (queries); all is ctrl+a's
+	// select-all, which the next key copies, replaces or drops
+	popup, all bool
 }
 
 type (
@@ -559,6 +565,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.tabs[m.active].refresh(m))
 		}
 		return m, batch(cmds...)
+	case envInfoMsg:
+		if msg.gen == m.gen {
+			m.envInfo = msg.text
+			m.setStatus("", false)
+		}
+		return m, nil
 	case alertsMsg:
 		if msg.gen == m.gen {
 			m.alerts, m.alertErrs = msg.firing, msg.errs
@@ -866,7 +878,7 @@ func stripHit(h hit, id string) (int, bool) {
 }
 
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
-	if k.String() == "ctrl+c" {
+	if k.String() == "ctrl+c" && (m.prompt == nil || !m.prompt.popup) {
 		return tea.Quit
 	}
 	m.sel = nil
@@ -885,6 +897,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if m.prompt != nil {
+		if p := m.prompt; p.popup {
+			if cmd, done := m.popupKey(k); done {
+				return cmd
+			}
+		}
 		switch k.String() {
 		case "esc":
 			m.prompt = nil
@@ -944,8 +961,13 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return m.picker.key(m, k)
 		}
 	}
-	if m.help || m.showAlerts {
-		m.help, m.showAlerts = false, false
+	if m.envInfo != "" && k.String() == "y" {
+		copyText(ansi.Strip(m.envInfo))
+		m.setStatus("copied the environment", false)
+		return nil
+	}
+	if m.help || m.showAlerts || m.envInfo != "" {
+		m.help, m.showAlerts, m.envInfo = false, false, ""
 		return nil
 	}
 	if c := m.chat; c != nil && c.open && c.focus {
@@ -977,6 +999,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "A":
 			m.showAlerts = true
 			return nil
+		case "ctrl+e":
+			return m.fetchEnvInfo()
 		case "E":
 			m.pickEnv()
 			return nil
@@ -1262,6 +1286,10 @@ func (m *model) View() string {
 		body = m.overlay(m.helpView(), bodyH)
 	case m.showAlerts:
 		body = m.overlay(m.alertsView(), bodyH)
+	case m.envInfo != "":
+		body = m.overlay(m.envInfo, bodyH)
+	case m.prompt != nil && m.prompt.popup:
+		body = m.overlay(m.promptPopup(), bodyH)
 	case m.picker != nil:
 		body = m.picker.view(m, bodyH)
 	case m.chat != nil && m.chat.open:
@@ -1373,6 +1401,12 @@ func (m *model) footer() string {
 	switch {
 	case m.confirm != nil:
 		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3, m.h-2)
+	case m.prompt != nil && m.prompt.popup:
+		var hs []string
+		for _, h := range [][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a", "select all"}, {"ctrl+c ctrl+y", "copy"}, {"drag", "select text"}, {"tab", "take the AI's / the template"}} {
+			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
+		}
+		line = " " + strings.Join(hs, "  ")
 	case m.prompt != nil:
 		line = m.promptView()
 	case m.picker != nil:
@@ -1493,7 +1527,7 @@ func (m *model) helpView() string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {
@@ -1536,4 +1570,80 @@ func listKeys(k tea.KeyMsg, sel *int, n int) bool {
 		return false
 	}
 	return true
+}
+
+// popupKey handles a popup prompt's own keys: select all, copy, and what a key does to a selection.
+func (m *model) popupKey(k tea.KeyMsg) (tea.Cmd, bool) {
+	p := m.prompt
+	value := p.input.Value()
+	if value == "" {
+		value = p.template
+	}
+	switch k.String() {
+	case "ctrl+a":
+		p.all = true
+		return nil, true
+	case "ctrl+c", "ctrl+y":
+		copyText(value)
+		m.setStatus("copied the query", false)
+		return nil, true
+	}
+	if !p.all {
+		return nil, false
+	}
+	p.all = false
+	switch k.Type {
+	case tea.KeyBackspace, tea.KeyDelete:
+		p.input.SetValue("")
+		return nil, true
+	case tea.KeyRunes, tea.KeySpace:
+		p.input.SetValue("")
+	}
+	return nil, false
+}
+
+// promptPopup is a popup prompt's box: the label, the whole input wrapped with its cursor, and
+// what the AI offers.
+func (m *model) promptPopup() string {
+	p := m.prompt
+	w := min(m.w-6, 110)
+	text, style := p.input.Value(), lipgloss.NewStyle()
+	if text == "" {
+		text, style = p.template, sDim
+	}
+	runes := []rune(text)
+	pos := min(p.input.Position(), len(runes))
+	var body string
+	if p.all {
+		body = sSel.Render(text)
+	} else {
+		at := " "
+		if pos < len(runes) {
+			at = string(runes[pos])
+		}
+		after := ""
+		if pos < len(runes) {
+			after = string(runes[pos+1:])
+		}
+		body = style.Render(string(runes[:pos])) + sCursor.Render(at) + style.Render(after)
+	}
+	body = ansi.Wrap(body, w-4, " ,")
+	var notes []string
+	if p.waiting {
+		notes = append(notes, sDim.Render("⋯ the AI is writing"))
+	}
+	if s := p.input.MatchedSuggestions(); p.input.ShowSuggestions && len(s) > 0 && s[0] != p.input.Value() {
+		notes = append(notes, sAccent.Render("✦ ")+sDim.Render(ansi.Wrap(s[0], w-6, " ,"))+sDim.Render("  (tab takes it)"))
+	}
+	if p.described != "" && p.describedFor == p.input.Value() {
+		notes = append(notes, sAccent.Render("✦ ")+ansi.Wrap(p.described, w-6, " ,")+sDim.Render("  (tab takes it)"))
+	}
+	if p.input.Value() == "" && p.template != "" {
+		notes = append(notes, sDim.Render("tab fills in the template, enter runs it as is"))
+	}
+	content := sTitle.Render(p.label) + "\n\n" + body
+	if len(notes) > 0 {
+		content += "\n\n" + strings.Join(notes, "\n")
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(0, 1).Width(w).Render(content)
 }
