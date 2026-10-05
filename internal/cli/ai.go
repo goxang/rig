@@ -96,7 +96,7 @@ Kubernetes environments a dangerous step you did not ask for in so many words wa
 func aiConfigCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "config [key=value ...]",
-		Short: "show or change the AI setup (~/.config/rig/ai.json): backend, provider, model, fast_model, url, api_key, proxy, autocomplete, disabled",
+		Short: "show or change the AI setup (~/.config/rig/ai.json): backend, provider, model, effort, fast_model, fast_url, url, api_key, proxy, autocomplete, disabled",
 		Long: `Without arguments, prints the setup and what it resolves to on this machine. key= clears a setting.
 
   backend       opencode | claude (default: opencode when installed, else claude)
@@ -104,13 +104,18 @@ func aiConfigCommand() *cobra.Command {
                 own: your opencode config or Claude Code login as they are (default when opencode has a model set)
                 opencode: opencode's free models (default otherwise)
   model         e.g. opencode/big-pickle, deepseek-chat, sonnet
+  effort        reasoning level of chat turns: Claude Code's --effort (low … max), opencode's --variant
   fast_model    model for inline completions (default: haiku on claude, else model)
+  fast_url, fast_api_key
+                an OpenAI-compatible endpoint completions call directly: one HTTP request (~1s)
+                instead of starting the backend (several seconds), whatever the chat uses
   url, api_key  the endpoint and key of openai, 9router, deepseek or anthropic
   proxy         every AI request goes through it, e.g. localhost:10808 or socks5://127.0.0.1:1080
   autocomplete  false turns off suggestions while typing queries
   disabled      true turns the assistant off
 
-RIG_AI_BACKEND, RIG_AI_PROVIDER, RIG_AI_MODEL, RIG_AI_URL, RIG_AI_API_KEY and RIG_AI_PROXY override it for one run.`,
+In the UI: /model, /effort, /fast and /autocomplete in the chat (@), ctrl+t in a query prompt.
+RIG_AI_<KEY> (RIG_AI_MODEL, RIG_AI_FAST_URL, ...) overrides a setting for one run.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := ai.LoadConfig()
 			if err != nil {

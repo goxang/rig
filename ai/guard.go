@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -201,4 +202,43 @@ func Quoted(message, quote string) bool {
 		return false
 	}
 	return strings.Contains(m, q)
+}
+
+// DeniedPath tells whether rel, a slash path inside the project, is one of DefaultDeny or extra
+// (globs: * within a name, ** across directories; a pattern without / matches a name at any depth).
+func DeniedPath(rel string, extra []string) bool {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "./")
+	for _, p := range append(append([]string{}, DefaultDeny...), extra...) {
+		p = strings.TrimPrefix(p, "./")
+		if !strings.Contains(p, "/") {
+			p = "**/" + p
+		}
+		// a/** keeps a itself too: deleting or moving the directory would reach what is in it
+		if globRe(p).MatchString(rel) || globRe(p+"/**").MatchString(rel) || globRe(strings.TrimSuffix(p, "/**")).MatchString(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+func globRe(p string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(p); i++ {
+		switch {
+		case strings.HasPrefix(p[i:], "**/"):
+			b.WriteString("(.*/)?")
+			i += 2
+		case strings.HasPrefix(p[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case p[i] == '*':
+			b.WriteString("[^/]*")
+		case p[i] == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(p[i : i+1]))
+		}
+	}
+	return regexp.MustCompile(b.String() + "$")
 }

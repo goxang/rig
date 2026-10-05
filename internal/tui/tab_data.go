@@ -80,7 +80,7 @@ func (t *dataTab) hints() [][2]string {
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"/", "filter (*word*)"}, {"P", "purge queue"}, {"< >", "sort"}, {"esc ←", "components"}}
 	}
-	h := [][2]string{{"enter →", "open"}, {"Q", "query here"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
+	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
 	if t.editable(c) {
 		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
 	}
@@ -317,7 +317,7 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 	case suggestMsg:
 		if msg.gen == m.gen && m.prompt == nil && msg.comp == t.current().name {
 			m.setStatus("", false)
-			t.askQuery(m, t.current(), msg.at, msg.text)
+			t.askQuery(m, t.current(), msg.at, "", msg.text)
 		}
 	case browseMsg:
 		if msg.gen != m.gen || msg.seq != t.seq {
@@ -466,22 +466,42 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			at = t.queryAt
 		}
 		if t.query != "" {
-			t.askQuery(m, c, at, t.query)
+			t.askQuery(m, c, at, t.query, "")
 			return nil
 		}
 		v, err := m.app.Component(c.name)
 		pq, ok := v.(core.PathQuerier)
 		if err != nil || !ok {
-			t.askQuery(m, c, at, "")
+			t.askQuery(m, c, at, "", "")
 			return nil
 		}
 		gen, ctx := m.gen, m.ctx
+		rq, _ := v.(core.RowQuerier)
+		row, tb := -1, t.table
+		if r, ok := t.right.current(); ok && t.leaf && rq != nil {
+			row = rowIndex(r.id)
+		}
 		m.setStatus("preparing a query for "+strings.Join(at, " › ")+"…", false)
 		return func() tea.Msg {
 			c2, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
+			if row >= 0 {
+				if q := rq.SuggestRowQuery(c2, at, tb, row); q != "" {
+					return suggestMsg{gen: gen, comp: c.name, at: at, text: q}
+				}
+			}
 			return suggestMsg{gen: gen, comp: c.name, at: at, text: pq.SuggestQuery(c2, at)}
 		}
+	case "y", "Y":
+		if c.kind == string(core.KindMessaging) {
+			return nil
+		}
+		rows := t.table.Rows
+		if r, ok := t.right.current(); ok && k.String() == "y" {
+			rows = [][]string{t.table.Rows[rowIndex(r.id)]}
+		}
+		osc52(tsv(t.table.Columns, rows))
+		m.setStatus(fmt.Sprintf("copied %d rows (tab-separated, with the header)", len(rows)), false)
 	case " ":
 		if r, ok := t.right.current(); ok && t.editable(c) {
 			if t.marked == nil {
@@ -526,9 +546,9 @@ type suggestMsg struct {
 	text string
 }
 
-// askQuery asks for a query to run at a walk position, offering text; the AI completes it knowing
-// where it runs and what the screen lists there.
-func (t *dataTab) askQuery(m *model, c dataComp, at []string, text string) {
+// askQuery asks for a query to run at a walk position, editing value or offering template; the AI
+// completes it knowing where it runs and what the screen lists there.
+func (t *dataTab) askQuery(m *model, c dataComp, at []string, value, template string) {
 	hint := fmt.Sprintf("a %s query (%s adapter) on component %s, at %s", c.kind, c.adapter, c.name, strings.Join(at, " › "))
 	if len(t.table.Columns) > 0 {
 		names := []string{}
@@ -540,14 +560,20 @@ func (t *dataTab) askQuery(m *model, c dataComp, at []string, text string) {
 		}
 		hint += "; the screen lists " + strings.Join(t.table.Columns, ", ") + ": " + strings.Join(names, ", ")
 	}
-	m.askAI("query "+c.name+" › "+strings.Join(at, " › "), text, hint, func(v string) tea.Cmd {
+	run := func(v string) tea.Cmd {
 		if v = strings.TrimSpace(v); v == "" {
 			return nil
 		}
 		t.query, t.queryAt, t.filter = v, at, ""
 		t.right = newGrid("dright")
 		return t.load(m)
-	})
+	}
+	label := "query " + c.name + " › " + strings.Join(at, " › ")
+	if value != "" || template == "" {
+		m.askAI(label, value, hint, run)
+		return
+	}
+	m.askTemplate(label, template, hint, run)
 }
 
 func (t *dataTab) click(m *model, h hit) tea.Cmd {

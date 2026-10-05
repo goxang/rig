@@ -140,8 +140,11 @@ func callTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool
 	if args == nil {
 		args = map[string]any{}
 	}
-	if t.Name == "rig_ui" {
+	switch t.Name {
+	case "rig_ui":
 		return uiTool(args)
+	case "rig_file":
+		return fileTool(args)
 	}
 	argv, err := t.argv(args)
 	if err != nil {
@@ -487,6 +490,11 @@ func mcpTools() []mcpTool {
 			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"add_query", "schedule", "unschedule", "open", "logs"}},
 				"name": pString("query name"), "component": pString("component to query"), "query": pString("query text"), "every": pString("schedule interval, e.g. 30s"),
 				"screen": pString("screen to open"), "services": pTargets, "grep": pString("log filter")}, "action")},
+		{Name: "rig_file", Description: "the project's files, inside its directory only: list (path, recursive), read (path), write (path, content: creates or replaces), edit (path, old, new: old must be exact and unique unless all: true), move (path, to), delete (path: a file, or a directory with what is in it; needs the user's go-ahead). Paths are relative to the project. Credentials and .git are out of reach.",
+			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"list", "read", "write", "edit", "move", "delete"}},
+				"path": pString("file or directory, relative to the project"), "to": pString("move: the new path"), "content": pString("write: the whole new content"),
+				"old": pString("edit: the exact text to replace"), "new": pString("edit: what replaces it"), "all": pBool("edit: replace every occurrence"),
+				"recursive": pBool("list: walk subdirectories")}, "action")},
 		{Name: "rig", Description: "any rig command line, for what the other tools do not cover (e.g. [\"do\", \"runtime\", \"events\"], [\"traces\", \"--min\", \"500ms\"])",
 			InputSchema: schema(map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "args"),
 			argv: func(a map[string]any) ([]string, error) {

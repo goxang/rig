@@ -113,11 +113,22 @@ func (r *Cache) QueryAt(ctx context.Context, path []string, q string) (core.Tabl
 	return t, nil
 }
 
-func (r *Cache) SuggestQuery(_ context.Context, path []string) string {
-	if len(path) >= 2 {
-		return "TYPE " + quoteArg(path[1])
+// SuggestQuery reads a key the way its type is read; elsewhere it scans.
+func (r *Cache) SuggestQuery(ctx context.Context, path []string) string {
+	if len(path) < 2 {
+		return "SCAN 0 MATCH * COUNT 100"
 	}
-	return "SCAN 0 MATCH * COUNT 100"
+	key := quoteArg(path[1])
+	t, err := r.QueryAt(ctx, path[:1], "TYPE "+key)
+	if err != nil || len(t.Rows) == 0 {
+		return "TYPE " + key
+	}
+	read := map[string]string{"string": "GET %s", "hash": "HGETALL %s", "list": "LRANGE %s 0 99", "set": "SMEMBERS %s",
+		"zset": "ZRANGE %s 0 99 WITHSCORES", "stream": "XRANGE %s - + COUNT 100"}[strings.TrimSpace(t.Rows[0][0])]
+	if read == "" {
+		return "TYPE " + key
+	}
+	return fmt.Sprintf(read, key)
 }
 
 func quoteArg(s string) string {
