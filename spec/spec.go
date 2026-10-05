@@ -42,6 +42,8 @@ type Project struct {
 	Reports map[string]*Report `yaml:"reports"`
 	// Sections split the Services screen by business area; services in none fall under "other".
 	Sections map[string]*Section `yaml:"sections"`
+	// UI picks the screens of `rig` and their order.
+	UI *UI `yaml:"ui"`
 	// AI tells the assistant (`rig ai`, @ in the UI) about the project: paths it must not read, notes.
 	AI *AI `yaml:"ai"`
 
@@ -53,6 +55,15 @@ type Project struct {
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
 	File string `yaml:"-"`
+}
+
+// Screens are the UI's screens in their default order.
+var Screens = []string{"services", "logs", "metrics", "traces", "queries", "kv", "data", "load", "manifests", "hosts", "tests"}
+
+type UI struct {
+	// Tabs are the screens shown, in order (number keys follow it); left out, every screen the
+	// project configures something for shows, in the order of Screens.
+	Tabs []string `yaml:"tabs"`
 }
 
 type AI struct {

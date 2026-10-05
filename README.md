@@ -80,8 +80,10 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell (double-click) |
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
-Screens switch with `1`-`0` and `` ` `` (Tests), or a click on their name; tabs inside a screen
-(dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too.
+Screens switch with `1`-`0` and `` ` `` (the eleventh), or a click on their name; tabs inside a screen
+(dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
+shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
+logs, data, tests] }` picks the screens and their order, and the number keys follow it.
 `T` runs a task from rig.yaml, `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -229,6 +230,13 @@ func (p *Project) validate() error {
 		for _, d := range s.DependsOn {
 			if _, ok := p.Services[d]; !ok {
 				errs = append(errs, fmt.Sprintf("service %s depends on unknown %q", n, d))
+			}
+		}
+	}
+	if p.UI != nil {
+		for _, t := range p.UI.Tabs {
+			if !slices.Contains(Screens, t) {
+				errs = append(errs, fmt.Sprintf("ui.tabs: unknown screen %q (screens: %s)", t, strings.Join(Screens, ", ")))
 			}
 		}
 	}
