@@ -27,5 +27,6 @@ import (
 	_ "github.com/goxang/rig/adapters/runtime/kubernetes"
 	_ "github.com/goxang/rig/adapters/runtime/local"
 	_ "github.com/goxang/rig/adapters/tracing/jaeger"
+	_ "github.com/goxang/rig/adapters/tracing/tempo"
 	_ "github.com/goxang/rig/adapters/tracing/zipkin"
 )
