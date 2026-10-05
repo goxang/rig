@@ -328,11 +328,16 @@ func (p Panel) Targets() []PanelQuery {
 	return []PanelQuery{{Query: p.Query, Legend: p.Legend}}
 }
 
-// TestSuite is a set of Go packages tested together (go test -json), with the flags it always needs.
+// TestSuite is a set of Go packages tested together (go test -json), with the flags it always needs,
+// or a Command of any stack.
 type TestSuite struct {
-	Name     string   `yaml:"-"`
-	Help     string   `yaml:"help"`
-	Group    string   `yaml:"group"`
+	Name  string `yaml:"-"`
+	Help  string `yaml:"help"`
+	Group string `yaml:"group"`
+	// Command runs the suite through sh instead of go test: pytest, jest, mvn test, cargo test, ...
+	// Writing JUnit XML to $RIG_JUNIT gives the screen one row per test; without it the suite passes
+	// or fails as a whole by its exit status.
+	Command  string   `yaml:"command"`
 	Packages []string `yaml:"packages"`
 	// Exclude drops packages from Packages (go list patterns: ./pkg/tests/...), so a suite can be
 	// "everything but the integration tests".

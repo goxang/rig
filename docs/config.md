@@ -201,6 +201,18 @@ is set. Runs are kept (the last 50) for `rig test report`, reruns of failures an
 reruns the last run's failures, `--junit file` writes JUnit XML, `-o file` the full report;
 `rig test ./pkg/x/...` runs packages with no suite; `rig test report [run] [-o file]`, `rig test runs`.
 
+Other stacks run a `command` through `sh` in `dir`, with `env`, `needs` and `report` as above. JUnit XML
+written to `$RIG_JUNIT` becomes a row per test (a class or file per package); without it the suite passes
+or fails by its exit status. `$RIG_RUN` is a regex of the tests `--failed` reruns (`.*` otherwise):
+
+```yaml
+tests:
+  py:   { dir: api, command: 'pytest --junitxml=$RIG_JUNIT' }
+  web:  { dir: web, command: 'npx jest --reporters=default --reporters=jest-junit -t "$RIG_RUN"', env: { JEST_JUNIT_OUTPUT_FILE: $RIG_JUNIT } }
+  node: { command: 'node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=$RIG_JUNIT --test-name-pattern="$RIG_RUN"' }
+  jvm:  { dir: billing, command: 'mvn -q test && cat target/surefire-reports/*.xml > $RIG_JUNIT' }
+```
+
 ## reports
 
 ```yaml
