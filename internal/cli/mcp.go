@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/internal/scaffold"
 )
 
 // mcpCommand serves rig to AI agents over the Model Context Protocol (JSON-RPC on stdio). Every tool
@@ -345,6 +346,30 @@ func flag(a map[string]any, k, f string) []string {
 
 func mcpTools() []mcpTool {
 	return []mcpTool{
+		{Name: "rig_init", Description: "draft rig.yaml from what the project has (compose files, Kubernetes manifests, Go/Python/Node/Java/Rust services) plus infrastructure presets; returns the YAML. write: true writes it (force: true replaces an existing rig.yaml). After writing or editing rig.yaml, rig_envs checks it loads.",
+			InputSchema: schema(map[string]any{
+				"with":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "infrastructure to add: " + strings.Join(scaffold.Presets(), ", ")},
+				"write": pBool("write rig.yaml instead of returning the draft"),
+				"force": pBool("replace an existing rig.yaml"),
+			}),
+			argv: func(a map[string]any) ([]string, error) {
+				argv := []string{"init"}
+				if w := list(a, "with"); len(w) > 0 {
+					argv = append(argv, "--with", strings.Join(w, ","))
+				}
+				if str(a, "write") != "true" {
+					return append(argv, "--dry-run"), nil
+				}
+				return append(argv, flag(a, "force", "--force")...), nil
+			}},
+		{Name: "rig_docs", Description: "rig's reference: config (every rig.yaml key: services, environments, components, otel, ui tabs, dashboards and panels, queries, tests, tasks, alerts), design (adapters and what each kind does), manifests",
+			InputSchema: schema(map[string]any{"name": pString("config (default), design or manifests")}),
+			argv: func(a map[string]any) ([]string, error) {
+				if n := str(a, "name"); n != "" {
+					return []string{"docs", n}, nil
+				}
+				return []string{"docs"}, nil
+			}},
 		{Name: "rig_envs", Description: "environments of the project, their runtimes, and the components of the current one",
 			InputSchema: schema(map[string]any{}),
 			argv:        func(map[string]any) ([]string, error) { return []string{"env"}, nil }},
