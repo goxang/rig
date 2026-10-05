@@ -3,6 +3,7 @@ module github.com/goxang/rig
 go 1.23.0
 
 require (
+	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.7
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -20,7 +21,6 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.1 // indirect
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect

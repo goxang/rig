@@ -286,7 +286,7 @@ func (t *testsTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if r := t.runs[name]; r != nil {
 			var b bytes.Buffer
 			r.WriteReport(&b, true)
-			osc52(b.String())
+			copyText(b.String())
 			m.setStatus("failure report copied", false)
 		}
 	default:
@@ -447,7 +447,7 @@ func (t *testsTab) writeReport(m *model) {
 
 func (t *testsTab) copyOutput(m *model) {
 	lines := t.output(m)
-	osc52(strings.Join(lines, "\n"))
+	copyText(strings.Join(lines, "\n"))
 	m.setStatus(fmt.Sprintf("%d lines copied", len(lines)), false)
 }
 

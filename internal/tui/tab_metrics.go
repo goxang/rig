@@ -551,7 +551,7 @@ func (t *metricsTab) rowOf(m *model, pi int) string {
 
 func (t *metricsTab) copyQuery(m *model) {
 	if t.focus < len(t.data) && t.data[t.focus].query != "" {
-		osc52(t.data[t.focus].query)
+		copyText(t.data[t.focus].query)
 		m.setStatus("query copied", false)
 	}
 }

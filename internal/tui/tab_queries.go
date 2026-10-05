@@ -396,7 +396,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.focusRes = true
 		case "y":
 			if q != nil {
-				osc52(q.Query)
+				copyText(q.Query)
 				m.setStatus("copied "+name+"'s query", false)
 			}
 		case "Y":
@@ -690,7 +690,7 @@ func (t *queriesTab) copyResult(m *model, key string) {
 		m.setStatus("no result to copy", true)
 		return
 	}
-	osc52(tsv(tb.Columns, rows))
+	copyText(tsv(tb.Columns, rows))
 	m.setStatus(fmt.Sprintf("copied %d rows (tab-separated, with the header)", len(rows)), false)
 }
 
