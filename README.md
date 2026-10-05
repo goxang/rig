@@ -6,9 +6,10 @@ CLI and one terminal UI.
 
 - **Services**: up (in dependency order, with start delays), down, start, stop, restart, scale (also `+1`), deploy by tag, build (also from a git ref), logs, exec
 - **Infrastructure**: started once and left alone; one shared instance can serve local processes, docker and kind (`rig infra`)
-- **Observe**: Grafana-style dashboards (rows, variables, stat/gauge/bar/table panels, clickable legends), traces filtered by service, operation and duration, profiles, debuggers
-- **Tests**: go test suites from `rig.yaml` with live results, filters, output, reruns of failures, race, coverage, benchmarks against the last run, JUnit
-- **Data & load**: databases, caches, queues, key-value stores (browse, edit, restart readers), load generators (rate and instances), saved queries that run on a schedule
+- **Any stack**: services are processes, containers or pods, in any language; `rig init` reads compose files, Kubernetes manifests and Go, Python (Django, FastAPI, Flask), Node, Java and Rust projects
+- **Observe**: Grafana-style dashboards (rows, variables, stat/gauge/bar/table panels, clickable legends), traces (Jaeger, Zipkin, Tempo with TraceQL) filtered by service, operation and duration, OpenTelemetry wired into every service (`otel:`), profiles, debuggers
+- **Tests**: go test suites, or any runner through JUnit XML (pytest, jest, node, maven, gradle), with live results, filters, output, reruns of failures, race, coverage, benchmarks against the last run
+- **Data & load**: databases (Postgres, MySQL, SQL Server), caches, queues (RabbitMQ, Kafka), key-value stores (browse, edit, restart readers), load generators (rate and instances), saved queries that run on a schedule
 - **Alerts**: node cpu/memory/disk (or any query) over a threshold, in the TUI header and `rig alerts`
 - **Secrets**: `rig secret set`, kept outside the repo; `helm:` charts deploy like manifests
 - **Agents**: `rig mcp` serves all of it to AI agents over MCP; `--brief` keeps every answer short
@@ -23,10 +24,22 @@ go install github.com/goxang/rig/cmd/rig@latest   # Go 1.23+, lands in $(go env 
 
 `kubectl`, `docker`, `kind`, `ssh` and `dlv` are used when the matching adapter is.
 
+## Start
+
+```bash
+cd your-project
+rig init                                    # rig.yaml from what is there: compose, manifests, sources
+rig init --with postgres,redis,kafka,otel   # plus infrastructure (--dry-run prints instead of writing)
+rig up                                      # everything, in dependency order
+rig                                         # the terminal UI
+```
+
+`rig init` guesses; read the file it writes. Screens show only for what rig.yaml configures, so a
+project with just services gets just Services, Logs and Hosts. Every key is in [docs/config.md](docs/config.md).
+
 ## Use
 
 ```bash
-rig init                      # starter rig.yaml from this directory (Go mains, .godev.yaml, manifests)
 rig                           # terminal UI
 rig infra up                  # infrastructure, once
 rig up test                   # every service tagged test, and what they depend on

@@ -13,6 +13,7 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/scaffold"
 	"github.com/goxang/rig/internal/viz"
 	"github.com/goxang/rig/manifest"
 	"github.com/goxang/rig/plugin"
@@ -201,14 +202,23 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		}),
 	}
 
-	var force bool
+	var (
+		force, dry bool
+		with       []string
+	)
 	initCmd := &cobra.Command{
-		Use: "init", Short: "write a starter rig.yaml from what this directory has (Go mains, .godev.yaml, manifests)",
+		Use:   "init",
+		Short: "write rig.yaml from what this directory has: compose files, Kubernetes manifests, Go/Python/Node/Java/Rust services",
+		Example: `  rig init                          # look around and write rig.yaml
+  rig init --dry-run                # print it instead
+  rig init --with postgres,redis    # plus infrastructure (` + strings.Join(scaffold.Presets(), ", ") + `)`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return initProject(cmd.Context(), force)
+			return initProject(cmd.Context(), force, dry, with)
 		},
 	}
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing rig.yaml")
+	initCmd.Flags().BoolVar(&dry, "dry-run", false, "print rig.yaml instead of writing it")
+	initCmd.Flags().StringSliceVar(&with, "with", nil, "infrastructure to add: "+strings.Join(scaffold.Presets(), ", "))
 
 	task := &cobra.Command{
 		Use: "task [name [args...]]", Short: "run a task from rig.yaml (its shell steps, in order, args as $1... and $RIG_ARGS), or list them",
