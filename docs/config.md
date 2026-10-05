@@ -208,7 +208,7 @@ or fails by its exit status. `$RIG_RUN` is a regex of the tests `--failed` rerun
 ```yaml
 tests:
   py:   { dir: api, command: 'pytest --junitxml=$RIG_JUNIT' }
-  web:  { dir: web, command: 'npx jest --reporters=default --reporters=jest-junit -t "$RIG_RUN"', env: { JEST_JUNIT_OUTPUT_FILE: $RIG_JUNIT } }
+  web:  { dir: web, command: 'JEST_JUNIT_OUTPUT_FILE=$RIG_JUNIT npx jest --reporters=default --reporters=jest-junit -t "$RIG_RUN"' }
   node: { command: 'node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=$RIG_JUNIT --test-name-pattern="$RIG_RUN"' }
   jvm:  { dir: billing, command: 'mvn -q test && cat target/surefire-reports/*.xml > $RIG_JUNIT' }
 ```
