@@ -53,7 +53,7 @@ func manifestHits(o *manifest.Object) []manifestHit {
 }
 
 // search lists every object, field and value of the scanned manifests in a picker that filters as
-// you type; enter selects the object and scrolls its YAML to the field.
+// you type; enter selects the object and its field.
 func (t *manifestsTab) search(m *model) tea.Cmd {
 	if t.set == nil {
 		return nil
@@ -85,7 +85,7 @@ func (t *manifestsTab) search(m *model) tea.Cmd {
 	return nil
 }
 
-// jump shows every object again and selects the hit's, its YAML a few lines above the field.
+// jump shows every object again and selects the hit's object and field.
 func (t *manifestsTab) jump(h manifestHit) {
 	t.tree, t.file, t.filter, t.offset = false, "", "", 0
 	for i, e := range t.entries() {
@@ -94,5 +94,8 @@ func (t *manifestsTab) jump(h manifestHit) {
 			break
 		}
 	}
-	t.yamlOff = max(0, h.line-3)
+	t.jumpPath = ""
+	if h.path != "" {
+		t.jumpPath = "$." + h.path
+	}
 }

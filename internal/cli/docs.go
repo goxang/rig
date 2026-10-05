@@ -14,8 +14,8 @@ import (
 
 func docsCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "docs [config|design|manifests]",
-		Short: "rig's reference, from the binary: every rig.yaml key (config), adapters (design), manifests",
+		Use:   "docs [config|guide|design|manifests]",
+		Short: "rig's reference, from the binary: every rig.yaml key (config), CLI, screens and AI (guide), adapters (design), manifests",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			name := "config"
@@ -24,7 +24,7 @@ func docsCommand() *cobra.Command {
 			}
 			raw, err := docs.FS.ReadFile(strings.TrimSuffix(name, ".md") + ".md")
 			if err != nil {
-				return fmt.Errorf("no doc %q: have config, design, manifests", name)
+				return fmt.Errorf("no doc %q: have config, guide, design, manifests", name)
 			}
 			_, err = os.Stdout.Write(raw)
 			return err

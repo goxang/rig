@@ -396,3 +396,112 @@ func dropInjected(live, file *yaml.Node, drop map[string]bool) {
 	}
 	walk(live, file, "")
 }
+
+// PatchScalar writes n, a scalar of o that was edited in memory (it keeps its Line and Column), over
+// the scalar's text in o.File and leaves every other byte alone. ok is false when the scalar is not
+// one it can find on its line (block or multi-line scalars); the caller re-encodes the document then.
+func PatchScalar(o *Object, n *yaml.Node) (ok bool, err error) {
+	if n.Kind != yaml.ScalarNode || n.Line == 0 || n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		return false, nil
+	}
+	raw, err := os.ReadFile(o.File)
+	if err != nil {
+		return false, err
+	}
+	lines := bytes.SplitAfter(raw, []byte("\n"))
+	if n.Line > len(lines) {
+		return false, nil
+	}
+	line := lines[n.Line-1]
+	runes := []rune(string(line))
+	if n.Column-1 > len(runes) {
+		return false, nil
+	}
+	start := len(string(runes[:n.Column-1]))
+	flow := bytes.Count(line[:start], []byte("{"))+bytes.Count(line[:start], []byte("[")) >
+		bytes.Count(line[:start], []byte("}"))+bytes.Count(line[:start], []byte("]"))
+	end := scalarEnd(line, start, flow)
+	if end < 0 {
+		return false, nil
+	}
+	v := *n
+	v.HeadComment, v.LineComment, v.FootComment = "", "", ""
+	text, err := yaml.Marshal(&v)
+	if err != nil {
+		return false, err
+	}
+	if v.Style == 0 && flow && bytes.ContainsAny(text, ",[]{}") {
+		v.Style, n.Style = yaml.DoubleQuotedStyle, yaml.DoubleQuotedStyle
+		text, _ = yaml.Marshal(&v)
+	}
+	text = bytes.TrimSuffix(text, []byte("\n"))
+	if bytes.Contains(text, []byte("\n")) {
+		return false, nil
+	}
+	want, err := o.YAML()
+	if err != nil {
+		return false, err
+	}
+	var out []byte
+	for i, l := range lines {
+		if i == n.Line-1 {
+			l = append(append(append([]byte{}, line[:start]...), text...), line[end:]...)
+		}
+		out = append(out, l...)
+	}
+	if err := os.WriteFile(o.File, out, 0o644); err != nil {
+		return false, err
+	}
+	// the patched file must read back as exactly the edited object, else the edit falls back
+	if after, err := Scan(o.File); err == nil {
+		for _, x := range after.Objects {
+			if x.Doc == o.Doc && x.ID() == o.ID() {
+				if got, err := x.YAML(); err == nil && bytes.Equal(got, want) {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, os.WriteFile(o.File, raw, 0o644)
+}
+
+// scalarEnd is where the one-line scalar starting at line[start] ends, -1 when it does not end there.
+func scalarEnd(line []byte, start int, flow bool) int {
+	s := line[start:]
+	if len(s) == 0 {
+		return -1
+	}
+	switch s[0] {
+	case '"':
+		for i := 1; i < len(s); i++ {
+			switch s[i] {
+			case '\\':
+				i++
+			case '"':
+				return start + i + 1
+			}
+		}
+		return -1
+	case '\'':
+		for i := 1; i < len(s); i++ {
+			if s[i] == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				return start + i + 1
+			}
+		}
+		return -1
+	case '|', '>':
+		return -1
+	}
+	end := len(bytes.TrimRight(s, "\r\n"))
+	for i := 0; i < end; i++ {
+		if flow && bytes.IndexByte([]byte(",]}"), s[i]) >= 0 || s[i] == '#' && i > 0 && (s[i-1] == ' ' || s[i-1] == '\t') {
+			end = i
+			break
+		}
+	}
+	return start + len(bytes.TrimRight(s[:end], " \t"))
+}

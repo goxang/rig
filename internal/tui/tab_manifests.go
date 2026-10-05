@@ -10,7 +10,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"gopkg.in/yaml.v3"
 
 	"github.com/goxang/rig/internal/viz"
 	"github.com/goxang/rig/manifest"
@@ -20,15 +19,21 @@ import (
 // object relates to the rest, what is wrong (i: the file's, I: all). Marked objects (space) or the
 // selected one can be applied to the environment (a) or become a rig.yaml service (n).
 type manifestsTab struct {
-	dirs    []string
-	set     *manifest.Set
-	err     string
-	filter  string
-	sel     int
-	offset  int
-	issues  string // "", "file" or "all"
-	yamlOff int
-	marked  map[string]bool
+	dirs   []string
+	set    *manifest.Set
+	err    string
+	filter string
+	sel    int
+	offset int
+	issues string // "", "file" or "all"
+	marked map[string]bool
+
+	// fields is the selected object field by field; inFields gives it the keys, and edits save into the file
+	fields    *jsonTree
+	fieldsObj *manifest.Object
+	fieldsID  string
+	inFields  bool
+	jumpPath  string // a search hit's field, selected once its object shows
 
 	tree bool   // folders and files instead of every object
 	cwd  string // the folder the tree shows
@@ -89,8 +94,11 @@ type applier interface {
 func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
-	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
-		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"J/K", "yaml"}, {"o", "editor"}}
+	if t.inFields {
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"y", "copy value"}, {"esc", "back to objects"}}
+	}
+	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
@@ -286,8 +294,10 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		}
+		if t.inFields && t.fields != nil {
+			return t.fieldKey(m, msg)
+		}
 		if listKeys(msg, &t.sel, len(t.entries())) {
-			t.yamlOff = 0
 			return nil
 		}
 		switch msg.String() {
@@ -302,10 +312,14 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.tree, t.sel, t.offset, t.file = !t.tree, 0, 0, ""
 		case "v":
 			return t.gotoService(m)
-		case "enter", "right", "l":
+		case "enter", "right", "l", "tab":
 			e, ok := t.current()
 			if ok && e.obj != nil && msg.String() == "enter" {
 				return t.gotoService(m)
+			}
+			if ok && e.obj != nil && t.fields != nil {
+				t.inFields = true
+				return nil
 			}
 			if !ok || !t.tree {
 				return nil
@@ -364,10 +378,6 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			root := m.app.Spec.Dir
 			m.setStatus("looking for manifest folders…", false)
 			return func() tea.Msg { return manifestFoldersMsg{root: root, folders: manifest.Folders(root)} }
-		case "J":
-			t.yamlOff += 5
-		case "K":
-			t.yamlOff = max(0, t.yamlOff-5)
 		}
 	}
 	return nil
@@ -498,6 +508,14 @@ func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
 		}
 		return nil
 	}
+	if t.fields != nil && t.fields.click(h) {
+		t.inFields = true
+		if h.double && !t.fields.current().container() {
+			return t.editField(m)
+		}
+		return nil
+	}
+	t.inFields = false
 	if h.id == "mf:svc" {
 		return t.gotoService(m)
 	}
@@ -608,7 +626,7 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 			mine = append(mine, i)
 		}
 	}
-	head := sDim.Render(o.File)
+	head := sDim.Render(relTo(m.app.Spec.Dir, o.File))
 	if svc := t.cachedService(m, o); svc != "" {
 		link := "→ service " + svc + " (v)"
 		st := sAccent
@@ -625,18 +643,22 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 		issH = min(len(mine)+2, 6)
 		iss = panel("issues", t.issueList(mine, rw-4), rw, issH, false)
 	}
-	var buf strings.Builder
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	_ = enc.Encode(masked(o))
-	lines := strings.Split(buf.String(), "\n")
-	off := min(t.yamlOff, max(0, len(lines)-1))
-	yamlBox := panel("yaml", colorYAML(strings.Join(lines[off:], "\n")), rw, h-graphH-issH, false)
+	t.setFields(o)
+	if t.jumpPath != "" {
+		t.fields.selectPath(t.jumpPath)
+		t.jumpPath, t.inFields = "", true
+	}
+	fh := h - graphH - issH
+	ft := "fields · " + t.fields.current().path()
+	if !t.inFields {
+		ft += sDim.Render("  (→ or click: edit fields)")
+	}
+	fieldsBox := panel(ft, t.fields.view(m, lw+1, graphH+issH+1, rw-2, fh-2), rw, fh, t.inFields)
 	parts := []string{top}
 	if issH > 0 {
 		parts = append(parts, iss)
 	}
-	parts = append(parts, yamlBox)
+	parts = append(parts, fieldsBox)
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 

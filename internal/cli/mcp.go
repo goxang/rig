@@ -362,8 +362,8 @@ func mcpTools() []mcpTool {
 				}
 				return append(argv, flag(a, "force", "--force")...), nil
 			}},
-		{Name: "rig_docs", Description: "rig's reference: config (every rig.yaml key: services, environments, components, otel, ui tabs, dashboards and panels, queries, tests, tasks, alerts), design (adapters and what each kind does), manifests",
-			InputSchema: schema(map[string]any{"name": pString("config (default), design or manifests")}),
+		{Name: "rig_docs", Description: "rig's reference: config (every rig.yaml key: services, environments, components, otel, ui tabs, dashboards and panels, queries, tests, tasks, alerts), guide (CLI commands, every TUI screen and its keys, AI, GoLand, MCP tools), design (adapters and what each kind does), manifests",
+			InputSchema: schema(map[string]any{"name": pString("config (default), guide, design or manifests")}),
 			argv: func(a map[string]any) ([]string, error) {
 				if n := str(a, "name"); n != "" {
 					return []string{"docs", n}, nil
