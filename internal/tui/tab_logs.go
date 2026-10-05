@@ -48,7 +48,7 @@ func (t *logsTab) name() string { return "Logs" }
 func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
 	return [][2]string{{"f", "pick services"}, {"i", "pick instance"}, {"/", "grep (regex)"}, {"p", "pause"}, {"↑↓ ←→", "scroll, sideways"},
-		{"drag", "select lines: copied"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear"}, {"M", "mouse off: terminal selection"}}
+		{"drag", "select text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear"}, {"M", "mouse off: terminal selection"}}
 }
 
 func (t *logsTab) interval() time.Duration { return time.Second }

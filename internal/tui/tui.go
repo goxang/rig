@@ -114,6 +114,10 @@ type model struct {
 	lastAt  time.Time
 	// dragZone is the zone a press started a drag on; moves and the release go to its tab
 	dragZone string
+	sel      *selection
+	// frame is the last screen drawn; bodyEnd the first row below the body
+	frame   string
+	bodyEnd int
 }
 
 type confirm struct {
@@ -522,6 +526,12 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	if m.dragZone != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.dragTo(e)
 	}
+	if m.sel != nil && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
+		return m.selectTo(e)
+	}
+	if e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft && e.Y != 1 {
+		m.selectStart(e.X, e.Y)
+	}
 	if e.Action == tea.MouseActionMotion {
 		return nil
 	}
@@ -617,7 +627,7 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		return m.picker.click(m, h)
 	}
 	if d, ok := m.tabs[m.active].(dragger); ok && !h.double && d.drag(m, h, dragPress) {
-		m.dragZone = h.id
+		m.dragZone, m.sel = h.id, nil
 	}
 	if c, ok := m.tabs[m.active].(clicker); ok {
 		return c.click(m, h)
@@ -717,6 +727,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if k.String() == "ctrl+c" {
 		return tea.Quit
 	}
+	m.sel = nil
 	if m.confirm != nil {
 		c := m.confirm
 		m.confirm = nil
@@ -1075,6 +1086,9 @@ func (m *model) View() string {
 	if m.w == 0 {
 		return "loading…"
 	}
+	if m.sel != nil && m.sel.dragged {
+		return m.sel.paint()
+	}
 	m.zones = m.zones[:0]
 	header := m.header()
 	tabs := m.tabBar()
@@ -1100,7 +1114,9 @@ func (m *model) View() string {
 		body = m.tabs[m.active].view(m, m.w, bodyH)
 	}
 	body = lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body)
-	return lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+	m.bodyEnd = m.originY + bodyH
+	m.frame = lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+	return m.frame
 }
 
 func (m *model) overlay(box string, h int) string {

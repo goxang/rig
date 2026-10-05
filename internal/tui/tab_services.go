@@ -130,7 +130,7 @@ func (t *servicesTab) hints() [][2]string {
 	if t.open_ != "" {
 		return [][2]string{{"esc", "back"}, {"enter", "logs of instance"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
-			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log lines: copied"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
+			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"[ ]", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
 		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"< >", "sort"}}

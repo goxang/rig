@@ -14,7 +14,7 @@ import (
 )
 
 // logView is a followed log shared by the Logs screen and a service's page: scroll back (which
-// pauses), scroll sideways, and drag over lines to copy them.
+// pauses), scroll sideways, and drag over text to copy it; dragging past an edge scrolls.
 type logView struct {
 	zone    string
 	cap     int
@@ -24,20 +24,27 @@ type logView struct {
 	paused  bool
 	shown   int
 	visible []core.LogLine
-	// drag selection, as indexes into visible; dragged says the mouse moved since the press
-	selFrom, selTo int
-	selecting      bool
-	dragged        bool
+	start   int // index in lines of visible[0]
+	width   int
+	format  func(core.LogLine) string
+	// drag selection from anchor to head, as positions in lines; dragged says the mouse moved
+	anchor, head lpos
+	selecting    bool
+	dragged      bool
 }
 
+// lpos is a column of a log line's text as drawn, before the sideways scroll.
+type lpos struct{ line, col int }
+
 func newLogView(zone string, capacity int) *logView {
-	return &logView{zone: zone, cap: capacity, selFrom: -1, selTo: -1}
+	return &logView{zone: zone, cap: capacity}
 }
 
 func (v *logView) add(lines []core.LogLine) {
 	v.lines = append(v.lines, lines...)
-	if len(v.lines) > v.cap {
-		v.lines = v.lines[len(v.lines)-v.cap:]
+	if drop := len(v.lines) - v.cap; drop > 0 {
+		v.lines = v.lines[drop:]
+		v.anchor.line, v.head.line = max(0, v.anchor.line-drop), max(0, v.head.line-drop)
 	}
 	if v.paused {
 		v.scroll = min(v.scroll+len(lines), max(0, len(v.lines)-1))
@@ -49,7 +56,7 @@ func (v *logView) reset() {
 	v.clearSel()
 }
 
-func (v *logView) clearSel() { v.selFrom, v.selTo, v.selecting, v.dragged = -1, -1, false, false }
+func (v *logView) clearSel() { v.selecting, v.dragged = false, false }
 
 // key handles the log's own keys; vertical says whether ↑↓ and the page keys are the log's (on a
 // service page they move the instance list, and the shifted ones scroll the log).
@@ -101,31 +108,55 @@ func (v *logView) key(m *model, k tea.KeyMsg, vertical bool) bool {
 // render draws h lines w wide at body cell (x, y), each through line, and registers the zone that
 // takes wheel and drag.
 func (v *logView) render(m *model, x, y, w, h int, line func(core.LogLine) string) string {
-	v.shown = h
+	v.shown, v.width, v.format = h, w, line
 	end := max(0, len(v.lines)-v.scroll)
-	start := max(0, end-h)
-	v.visible = v.lines[start:end]
+	v.start = max(0, end-h)
+	v.visible = v.lines[v.start:end]
 	m.zone(v.zone, x, y, w, h)
 	var b strings.Builder
 	for i, l := range v.visible {
 		s := line(l)
+		if a, z, ok := v.span(v.start + i); ok {
+			p := ansi.Strip(s)
+			s = ansi.Cut(p, 0, a) + sSel.Render(ansi.Cut(p, a, z)) + ansi.Cut(p, z, ansi.StringWidth(p))
+		}
 		if v.hoff > 0 {
 			s = ansi.TruncateLeft(s, v.hoff, "")
-		}
-		if v.selected(i) {
-			s = sTabOn.Padding(0).Render(ansi.Strip(truncate(s, w)))
 		}
 		b.WriteString(s + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (v *logView) selected(i int) bool {
-	if v.selFrom < 0 || !v.dragged {
-		return false
+// span is the columns [a, z) of line i inside the selection.
+func (v *logView) span(i int) (int, int, bool) {
+	if !v.dragged {
+		return 0, 0, false
 	}
-	lo, hi := min(v.selFrom, v.selTo), max(v.selFrom, v.selTo)
-	return i >= lo && i <= hi
+	lo, hi := v.anchor, v.head
+	if hi.line < lo.line || hi.line == lo.line && hi.col < lo.col {
+		lo, hi = hi, lo
+	}
+	if i < lo.line || i > hi.line {
+		return 0, 0, false
+	}
+	a, z := 0, 1<<30
+	if i == lo.line {
+		a = lo.col
+	}
+	if i == hi.line {
+		z = hi.col + 1
+	}
+	return a, z, true
+}
+
+func (v *logView) selection() string {
+	var out []string
+	for i := min(v.anchor.line, v.head.line); i <= max(v.anchor.line, v.head.line) && i < len(v.lines); i++ {
+		a, z, _ := v.span(i)
+		out = append(out, strings.TrimRight(ansi.Cut(ansi.Strip(v.format(v.lines[i])), a, z), " "))
+	}
+	return strings.Join(out, "\n")
 }
 
 // state is the title's "following" / "paused" part, with the sideways offset when there is one.
@@ -149,30 +180,43 @@ func (v *logView) wheel(up bool) {
 	}
 }
 
-// drag selects whole lines between press and release and copies them on release; a plain click
-// copies nothing.
+// drag selects text from the press to the mouse and copies it on release; past the left or right
+// edge it scrolls sideways, past the top or bottom up or down. A plain click copies nothing.
 func (v *logView) drag(m *model, h hit, phase dragPhase) {
-	row := min(max(h.y, 0), len(v.visible)-1)
-	if row < 0 {
+	if len(v.visible) == 0 {
 		return
 	}
+	if phase == dragMove && v.selecting {
+		switch {
+		case h.x >= v.width-1:
+			v.hoff += 4
+		case h.x <= 0 && v.hoff > 0:
+			v.hoff = max(0, v.hoff-4)
+		}
+		switch {
+		case h.y < 0:
+			v.scroll = min(v.scroll+1, max(0, len(v.lines)-1))
+		case h.y >= v.shown && v.scroll > 0:
+			v.scroll--
+		}
+	}
+	at := lpos{v.start + min(max(h.y, 0), len(v.visible)-1), min(max(h.x, 0), v.width-1) + v.hoff}
 	switch phase {
 	case dragPress:
-		v.selFrom, v.selTo, v.selecting, v.dragged = row, row, true, false
+		v.anchor, v.head, v.selecting, v.dragged = at, at, true, false
 	case dragMove:
-		if v.selecting {
-			v.selTo, v.dragged = row, true
+		if v.selecting && at != v.anchor {
+			v.head, v.dragged = at, true
 			v.paused = true // the lines must stay put under the mouse
 		}
 	case dragRelease:
 		if v.selecting && v.dragged {
-			lo, hi := min(v.selFrom, v.selTo), max(v.selFrom, v.selTo)
-			v.copy(m, v.visible[lo:hi+1])
+			if text := v.selection(); text != "" {
+				copyText(text)
+				m.setStatus(fmt.Sprintf("copied %d characters", len([]rune(text))), false)
+			}
 		}
 		v.selecting = false
-		if !v.dragged {
-			v.clearSel()
-		}
 	}
 }
 
