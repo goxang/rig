@@ -1,0 +1,78 @@
+name: release
+
+# Every push to main that passes CI gets the next version: feat commits bump the minor version,
+# anything else the patch. The release carries a binary per platform, checksums and install.sh.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: next version
+        id: version
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -n "$last" ] && [ -z "$(git log --format=%H "$last..HEAD")" ]; then
+            echo "nothing new since $last"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          IFS=. read -r major minor patch <<<"${last#v}"
+          major=${major:-0} minor=${minor:-0} patch=${patch:-0}
+          range=${last:+$last..}HEAD
+          if git log --format=%s "$range" | grep -qE '^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE'; then
+            if [ "$major" = 0 ]; then minor=$((minor + 1)); else major=$((major + 1)); minor=0; fi; patch=0
+          elif git log --format=%s "$range" | grep -qE '^feat(\([^)]*\))?:'; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          [ -n "$last" ] || { major=0; minor=1; patch=0; }
+          echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+
+      - name: build
+        if: steps.version.outputs.skip != '1'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os=${target%/*} arch=${target#*/} bin=rig
+            [ "$os" = windows ] && bin=rig.exe
+            dir=$(mktemp -d)
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$dir/$bin" ./cmd/rig
+            cp README.md "$dir/"
+            if [ "$os" = windows ]; then
+              (cd "$dir" && zip -q "$OLDPWD/dist/rig_${os}_${arch}.zip" "$bin" README.md)
+            else
+              tar -C "$dir" -czf "dist/rig_${os}_${arch}.tar.gz" "$bin" README.md
+            fi
+          done
+          cp install.sh dist/
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: tag and release
+        if: steps.version.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG" "${{ github.event.workflow_run.head_sha }}"
+          git push origin "$TAG"
+          gh release create "$TAG" dist/* --title "rig $TAG" --generate-notes

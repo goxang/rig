@@ -37,7 +37,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestQuoted(t *testing.T) {
-	msg := "Please  STOP all services on loadtest2 now"
+	msg := "Please  STOP all services on staging now"
 	for q, want := range map[string]bool{
 		"stop all services":    true,
 		`"stop all  services"`: true,

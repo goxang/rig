@@ -61,12 +61,12 @@ func TestProtoText(t *testing.T) {
 }
 
 func TestKVHits(t *testing.T) {
-	hits := kvHits("switch_v2/domainsvc", []byte(`{"Server":{"GrpcMaxConcurrentStreams":100,"Tags":["a"]}}`))
+	hits := kvHits("config/orders", []byte(`{"Server":{"GrpcMaxConcurrentStreams":100,"Tags":["a"]}}`))
 	var got []string
 	for _, h := range hits {
 		got = append(got, h.key+"|"+h.path+"|"+h.value)
 	}
-	want := "switch_v2/domainsvc|| switch_v2/domainsvc|$.Server.GrpcMaxConcurrentStreams|100 switch_v2/domainsvc|$.Server.Tags[0]|a"
+	want := "config/orders|| config/orders|$.Server.GrpcMaxConcurrentStreams|100 config/orders|$.Server.Tags[0]|a"
 	if strings.Join(got, " ") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(got, " "), want)
 	}

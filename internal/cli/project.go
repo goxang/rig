@@ -255,9 +255,9 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	vars := &cobra.Command{
 		Use:   "vars [set K=V... | unset K...]",
 		Short: "manifest variables ($MAIN_DB, ...): rig.yaml's, overridden per environment and kept in its state",
-		Example: `  rig -e loadtest2 vars                                  # what manifests get, and where from
-  rig -e loadtest2 vars set MAIN_DB=lt2_Switch HSM_DB=lt2_Hsm   # then rig up / deploy renders with them
-  rig -e loadtest2 vars unset MAIN_DB                    # back to rig.yaml's value`,
+		Example: `  rig -e staging vars                                  # what manifests get, and where from
+  rig -e staging vars set MAIN_DB=staging_app AUDIT_DB=staging_audit   # then rig up / deploy renders with them
+  rig -e staging vars unset MAIN_DB                    # back to rig.yaml's value`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) > 0 {
 				if err := a.Guard(); err != nil {

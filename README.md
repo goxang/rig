@@ -1,5 +1,8 @@
 # rig
 
+[![ci](https://github.com/goxang/rig/actions/workflows/ci.yml/badge.svg)](https://github.com/goxang/rig/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/goxang/rig)](https://github.com/goxang/rig/releases/latest)
+
 One control plane for a project's services and the infrastructure around them, on your machine,
 in docker, or on Kubernetes. Describe services once in `rig.yaml`; run, watch and tune them from one
 CLI and one terminal UI.
@@ -19,15 +22,33 @@ Every part is an adapter behind a small interface, so a new metrics backend, dat
 ## Install
 
 ```bash
-go install github.com/goxang/rig/cmd/rig@latest   # Go 1.23+, lands in $(go env GOPATH)/bin — keep it on PATH
+curl -fsSL https://raw.githubusercontent.com/goxang/rig/main/install.sh | sh
 ```
 
-`kubectl`, `docker`, `kind`, `ssh` and `dlv` are used when the matching adapter is.
+Linux and macOS, amd64 and arm64; it verifies the checksum and installs to `/usr/local/bin` (or
+`~/.local/bin`). Run it again to update; `RIG_VERSION=v0.3.0` pins a release, `RIG_INSTALL_DIR` picks the
+directory. Windows: the `.zip` on the [releases page](https://github.com/goxang/rig/releases), or WSL.
+With Go 1.23+: `go install github.com/goxang/rig/cmd/rig@latest`.
+
+rig calls `docker`, `kubectl`, `kind`, `ssh` and `dlv` only when the project's rig.yaml uses them.
 
 ## Start
 
+On a project that already has a `rig.yaml` (a teammate's branch, say):
+
 ```bash
-cd your-project
+git checkout the-branch        # the one with rig.yaml at its root
+rig env                        # the environments it defines; -e <name> picks one
+rig                            # the terminal UI: ? lists the keys of every screen
+```
+
+Then `rig up` starts what the environment needs, `rig task` lists the project's own recipes (bootstrap,
+clean-ups, deploys) and `ctrl+e` in the UI shows what the environment points at (databases, addresses,
+variables) before you change anything.
+
+On a project without one:
+
+```bash
 rig init                                    # rig.yaml from what is there: compose, manifests, sources
 rig init --with postgres,redis,kafka,otel   # plus infrastructure (--dry-run prints instead of writing)
 rig up                                      # everything, in dependency order
@@ -82,12 +103,12 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | screen | |
 |---|---|
 | Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `o` puts every service into GoLand (below); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
-| Logs | the services you pick, merged, or one instance; `↑` `↓` or a click pick a line, `enter` inspects it as a tree (JSON, console and logfmt lines; JSON, escaped JSON and Go `%v` values inside strings opened up; `w` wrap, `H` `L` sideways, `J` `K` next line); `←` `→` scroll sideways, dragging over text copies it, and past an edge scrolls |
+| Logs | the services you pick, merged, or one instance. JSON, console and logfmt lines read as `LEVEL message key=value`, with JSON, protobuf text and Go `%v` values inside fields shown as compact JSON; `h` hides fields, `s` shows lines raw. `/` filters by text, regex or fields: `output.Transaction.ID=202604 level!=debug msg~timeout` (`=`, `!=`, `~` contains; terms ANDed). `↑` `↓` or a click pick a line, `enter` inspects it as a tree (`f` filters by the selected field, `w` wrap, `J` `K` next line); dragging over text copies it |
 | Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor; drag across a chart zooms to that time range, `Z` (or ⊖) zooms out, `,` `.` (or ‹ ›) shift it, ctrl+wheel zooms around the mouse |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
-| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV |
-| KV | browse, edit and delete keys right in the store; `o` picks the editor (nano, vim, VS Code, the desktop's); `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
-| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand (on a table row: that row by its primary key; on a Redis key: the read for its type); `y`/`Y` copy the row/all as TSV; `/` filters with globs |
+| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV. Writing a query opens a popup: the whole text wrapped, `ctrl+a` selects it, `ctrl+c` / `ctrl+y` copy it |
+| KV | browse, edit and delete keys right in the store; `/` searches every key, field and value as you type and opens the hit with its field selected; `enter` edits a JSON value field by field; `o` picks the editor; `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
+| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand (on a table row: that row by its primary key; on a Redis key: the read for its type); going back (`esc` or ‹ back) lands on the row you opened; `y`/`Y` copy the row/all as TSV; `/` filters with globs |
 | Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report; `z` or a click shows a chart full size, with the Metrics panel view's legend, filter, range and drag to zoom |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`); `e` edits an object in your editor and saves it into its file, `s` writes what the cluster runs into the file (only fields someone set, `$VARS` kept), `L` edits it on the cluster; `d` picks among every manifest folder of the project |
 | Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, a shell (double-click), and `p` the pods on a node, sortable by CPU, memory or age |
@@ -97,7 +118,8 @@ Screens switch with `1`-`0` and `` ` `` (the eleventh), or a click on their name
 (dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
-`T` runs a task from rig.yaml, `N` switches or creates a Kubernetes namespace, and the Metrics screen's
+`T` runs a task from rig.yaml, `ctrl+e` shows the environment (variables with secrets hidden, each
+component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
 the terminal can select text; the header shows alerts (`A`). `q` quits at once unless a test run or an
@@ -105,6 +127,19 @@ operation is still going, or load generators are sending: those stop with rig (t
 forwards) or keep going without it (generators, services), and it asks.
 
 ## AI
+
+Set it up once, in three steps:
+
+1. Install one backend: [opencode](https://opencode.ai) (`curl -fsSL https://opencode.ai/install | bash`) or
+   [Claude Code](https://claude.com/claude-code) (`npm i -g @anthropic-ai/claude-code`), and log in to it.
+   No login: opencode's free models work as they are.
+2. `rig ai check` says what rig found and whether a turn works. To use your own key instead,
+   `rig ai config provider=openai url=https://…/v1 api_key=… model=…` (or `deepseek`, `anthropic`, `9router`).
+3. Press `@` on any screen, or run `rig ai why is api failing?` in the terminal.
+
+For an agent that edits the project (Claude Code, Codex, Cursor, opencode) instead: `rig skill --install`
+teaches it rig.yaml, and the MCP config under [Agents](#agents) gives it rig's tools.
+
 
 `@` on any screen opens a chat about what the screen shows: the selected service, key, table, the log
 lines in view. It runs your own **opencode** or **Claude Code** (whichever is installed) with rig as its
@@ -117,7 +152,7 @@ input: type your own and the AI completes it, `tab` takes the suggestion to edit
 `SELECT * FROM transactions WHERE :?amount above 100k`; the AI's version shows above the input,
 `tab` takes it, `enter` runs it.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
-AI or not. A long query wraps above the input; `ctrl+y` copies it.
+AI or not.
 
 In the chat, `/model` and `/effort` pick the chat's model (opencode's whole list, or opus/sonnet/haiku) and
 reasoning level, `/fast` the completion model, `/autocomplete` switches suggestions. Completions through
@@ -239,3 +274,9 @@ cd examples/kind  && rig do runtime create && rig up --build && rig   # Kubernet
 - [docs/config.md](docs/config.md): every field of `rig.yaml`
 - [docs/design.md](docs/design.md): how rig is built, and how to write an adapter
 - [docs/manifests.md](docs/manifests.md): a manifest layout that works well with rig
+
+## Contributing
+
+`go vet ./... && go test -race ./...` must pass; CI also runs staticcheck and builds every platform.
+Commits follow Conventional Commits: every push to `main` that passes CI is released, `feat:` as a
+minor version, anything else as a patch.
