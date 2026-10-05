@@ -1,0 +1,27 @@
+# The shop's stack as plain docker compose: `docker compose up --build` runs it without rig, and
+# `rig init` reads this file to write a first rig.yaml (the one here is that, tidied up).
+name: shop
+services:
+  api:
+    build: { context: ../.., dockerfile: examples/shop/Dockerfile }
+    environment: { ROLE: api, DATABASE_URL: "postgres://postgres:shop@postgres:5432/shop", REDIS_ADDR: "redis:6379", RABBIT_URL: "http://guest:guest@rabbitmq:15672", ZIPKIN_URL: "http://zipkin:9411" }
+    ports: ["7080:8080", "7081:9090"]
+    depends_on: [postgres, redis, rabbitmq]
+  worker:
+    build: { context: ../.., dockerfile: examples/shop/Dockerfile }
+    environment: { ROLE: worker, DATABASE_URL: "postgres://postgres:shop@postgres:5432/shop", RABBIT_URL: "http://guest:guest@rabbitmq:15672", ZIPKIN_URL: "http://zipkin:9411" }
+    ports: ["7082:9090"]
+    depends_on: [postgres, rabbitmq]
+  postgres:
+    image: postgres:17
+    environment: { POSTGRES_PASSWORD: shop, POSTGRES_DB: shop }
+    ports: ["7432:5432"]
+  redis:
+    image: redis:latest
+    ports: ["7379:6379"]
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["7672:5672", "17672:15672"]
+  zipkin:
+    image: openzipkin/zipkin:2.21.7
+    ports: ["7411:9411"]

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -186,9 +187,9 @@ func observeCommands() []*cobra.Command {
 	profile.Flags().StringVar(&profiler, "profiler", "", "profiler component")
 
 	var dinst string
-	var detach bool
+	var detach, dstart, dstop bool
 	debug := &cobra.Command{
-		Use: "debug <service>", Short: "attach a debugger server to a running service and keep it until Ctrl-C", Args: cobra.ExactArgs(1),
+		Use: "debug <service>", Short: "attach a debugger server to a service (--start starts it first) and keep it until Ctrl-C, or in the background (--detach, --stop)", Args: cobra.ExactArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			d, _, err := engine.Get[core.Debugger](a, core.KindDebugger, "")
 			if err != nil {
@@ -198,31 +199,30 @@ func observeCommands() []*cobra.Command {
 			if err != nil {
 				return err
 			}
+			if dstop {
+				return stopDebugger(a, s.Name)
+			}
+			if dstart {
+				if err := startIfDown(ctx, a, s.Name); err != nil {
+					return err
+				}
+			}
 			if detach {
 				if addr, ok := debuggerUp(s.Name); ok {
 					fmt.Println(green("✓ debugger already on ") + bold(addr))
 					return nil
 				}
-				rt, _, err := a.Owner(s.Name)
-				if err != nil {
-					return err
-				}
-				if _, local := rt.(core.ProcessLocator); !local {
-					return errDetachRemote
-				}
+				return debugInBackground(ctx, a, s.Name, dinst)
 			}
 			sess, err := d.Attach(ctx, s, dinst)
 			if err != nil {
 				return err
 			}
 			fmt.Println(green("✓ debugger on ") + bold(sess.Addr))
-			if detach {
-				return nil
-			}
 			fmt.Println("  " + sess.Hint)
 			fmt.Println(dim("  Ctrl-C detaches"))
 			sig := make(chan os.Signal, 1)
-			signal.Notify(sig, os.Interrupt)
+			signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 			select {
 			case <-sig:
 			case <-ctx.Done():
@@ -234,7 +234,9 @@ func observeCommands() []*cobra.Command {
 		}),
 	}
 	debug.Flags().StringVarP(&dinst, "instance", "i", "", "instance")
-	debug.Flags().BoolVar(&detach, "detach", false, "leave the debugger running and return (local processes); a running one is kept")
+	debug.Flags().BoolVar(&detach, "detach", false, "keep the debugger in the background and return once it listens on the service's stable port (rig ide's configs run this); a running one is kept")
+	debug.Flags().BoolVar(&dstart, "start", false, "start the service first when it is down")
+	debug.Flags().BoolVar(&dstop, "stop", false, "stop a debugger --detach left running")
 
 	alerts := &cobra.Command{
 		Use:   "alerts",

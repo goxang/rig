@@ -62,20 +62,15 @@ func Write(a *engine.App, names []string) (Result, error) {
 		}
 		folders[folder] = true
 		isGo := s.Build != nil && s.Build.Go != ""
-		_, local := runtimeOf(a, n).(core.ProcessLocator)
-		if isGo && !local {
-			attach += " --debug" // the debugger's port-forward lives as long as this
-		}
 		files := map[string]string{n: shConfig(n, folder, attach)}
 		if isGo {
 			goSvcs = append(goSvcs, n)
-			before := ""
-			if local {
-				helper := n + " · dlv"
-				files[helper] = shConfig(helper, "rig · debugger starters", "exec "+rig+" debug --detach "+shellQuote(n))
-				before = helper
-			}
-			files[n+" · debug"] = remoteConfig(n+" · debug", folder, core.DebugPort(n), before)
+			// the Go Remote config runs the starter first: it starts the service when it is down and
+			// leaves its debugger in the background on the stable port, on any runtime
+			helper := n + " · dlv"
+			files[helper] = shConfig(helper, "rig · debugger starters", "exec "+rig+" debug --detach --start "+shellQuote(n))
+			files[n+" · stop debugger"] = shConfig(n+" · stop debugger", "rig · debugger starters", "exec "+rig+" debug --stop "+shellQuote(n))
+			files[n+" · debug"] = remoteConfig(n+" · debug", folder, core.DebugPort(n), helper)
 		}
 		for name, xml := range files {
 			if err := os.WriteFile(filepath.Join(dir, fileName(name)), []byte(xml), 0o644); err != nil {

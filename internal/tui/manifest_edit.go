@@ -131,7 +131,7 @@ func editManifest(m *model, o *manifest.Object, start []byte) tea.Cmd {
 	old := time.Now().Add(-time.Minute)
 	_ = os.Chtimes(file, old, old)
 	c := exec.Command("sh", "-c", editorCmd()+` "$1"`, "rig-edit", file)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return execProcess(c, func(err error) tea.Msg {
 		return manifestEditedMsg{obj: o, file: file, original: original, written: old, err: err}
 	})
 }
@@ -208,7 +208,7 @@ func editLive(m *model, o *manifest.Object) tea.Cmd {
 func runEditLive(k k8sObjects, o *manifest.Object) tea.Cmd {
 	c := exec.Command("kubectl", append(k.KubectlArgs(), "edit", strings.ToLower(o.Kind)+"/"+o.Name)...)
 	c.Env = append(os.Environ(), "KUBE_EDITOR="+editorCmd())
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return execProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			return statusMsg{text: "kubectl edit " + o.ID() + ": " + err.Error(), err: true}
 		}

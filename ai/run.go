@@ -470,10 +470,32 @@ func parseOpencode(line []byte, s *Session, emit func(Event)) {
 // Complete returns what likely follows text, given hint about where it is typed. An API-key
 // provider is asked directly (one request, fast); otherwise the backend runs once without tools.
 func (r *Runner) Complete(ctx context.Context, hint, text string) (string, error) {
+	out, err := r.quick(ctx, CompletePrompt(hint, text))
+	if err != nil {
+		return "", err
+	}
+	return cleanCompletion(text, out), nil
+}
+
+// Describe writes the input asked for in words: before is what is typed ahead of the description
+// (a query's start, or nothing), want the description; it returns the whole input, before included.
+func (r *Runner) Describe(ctx context.Context, hint, before, want string) (string, error) {
+	out, err := r.quick(ctx, DescribePrompt(hint, before, want))
+	if err != nil {
+		return "", err
+	}
+	out = oneLine(out)
+	if b := strings.TrimSpace(before); b != "" && !strings.HasPrefix(out, b) {
+		out = strings.TrimRight(before, " ") + " " + strings.TrimLeft(out, " ")
+	}
+	return out, nil
+}
+
+// quick asks the fast model once, without tools: an API-key provider directly, else the backend.
+func (r *Runner) quick(ctx context.Context, prompt string) (string, error) {
 	if !r.Setup.Enabled() {
 		return "", errors.New("AI is " + r.Setup.Describe())
 	}
-	prompt := CompletePrompt(hint, text)
 	model := r.Setup.FastModel
 	var out string
 	var err error
@@ -520,14 +542,11 @@ func (r *Runner) Complete(ctx context.Context, hint, text string) (string, error
 		}
 		out = strings.Join(texts, "")
 	}
-	if err != nil {
-		return "", err
-	}
-	return cleanCompletion(text, out), nil
+	return out, err
 }
 
-// cleanCompletion keeps one line of new text: no fences, no echo of what was typed.
-func cleanCompletion(typed, out string) string {
+// oneLine is a model's answer without fences, cut to its first line.
+func oneLine(out string) string {
 	out = strings.TrimSpace(out)
 	out = strings.TrimPrefix(out, "```")
 	if i := strings.IndexByte(out, '\n'); i >= 0 && !strings.Contains(out[:i], " ") && len(out[:i]) < 12 {
@@ -537,7 +556,12 @@ func cleanCompletion(typed, out string) string {
 	if i := strings.IndexByte(out, '\n'); i >= 0 {
 		out = out[:i]
 	}
-	out = strings.TrimRight(out, " ")
+	return strings.TrimRight(out, " ")
+}
+
+// cleanCompletion keeps one line of new text: no fences, no echo of what was typed.
+func cleanCompletion(typed, out string) string {
+	out = oneLine(out)
 	if t := strings.TrimSpace(typed); t != "" && strings.HasPrefix(out, t) {
 		out = out[len(t):]
 	} else if strings.HasSuffix(typed, " ") {

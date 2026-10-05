@@ -28,7 +28,7 @@ func TestSelectionStaysInItsBox(t *testing.T) {
 }
 
 func TestLogDragCopiesPartOfLinesAndScrollsSideways(t *testing.T) {
-	v := newLogView("log", 100)
+	v := newLogView("log", 100, nil)
 	v.add([]core.LogLine{{Text: "first line here"}, {Text: "second line"}})
 	m := &model{}
 	v.render(m, 0, 0, 8, 2, func(l core.LogLine) string { return l.Text })

@@ -116,11 +116,13 @@ func (t *servicesTab) open(m *model) tea.Cmd {
 	t.list = newGrid("svc", col("", 1), col("", 1), col("SERVICE", 48), col("SECTION", 12), col("GROUPS", 16), rcol("READY", 13), rcol("RESTARTS", 8),
 		rcol("CPU", 6), rcol("MEMORY", 7), col("IMAGE", 28), col("MESSAGE", 0))
 	t.list.sortBy = 3
+	t.list.simple = []int{0, 1, 2, 5, 10}
 	t.sections = m.app.Spec.SectionMap()
 	t.pods = newGrid("pods", col("", 1), col("INSTANCE", 0), col("HOST", 18), rcol("READY", 5), rcol("RESTARTS", 8), rcol("AGE", 8), rcol("CPU", 6), rcol("MEMORY", 7))
+	t.pods.simple = []int{0, 1, 3, 5}
 	t.marked = map[string]bool{}
 	t.debug = map[string]core.DebugSession{}
-	t.log = newLogView("svc:log", 2000)
+	t.log = newLogView("svc:log", 2000, logsUI(m))
 	return nil
 }
 
@@ -552,7 +554,7 @@ func (t *servicesTab) shell(m *model, svc, instance string) tea.Cmd {
 	if instance != "" {
 		args = append(args, "-i", instance)
 	}
-	return tea.ExecProcess(exec.Command(self, args...), func(err error) tea.Msg {
+	return execProcess(exec.Command(self, args...), func(err error) tea.Msg {
 		if err != nil {
 			return statusMsg{text: "shell: " + err.Error(), err: true}
 		}
@@ -650,7 +652,7 @@ func (t *servicesTab) rows(m *model) []grow {
 		}
 		rows = append(rows, grow{id: st.Service,
 			cells: []string{mark, stateDot(st.State), name, sec, sDim.Render(groups), fmt.Sprintf("%d/%d", st.Ready, st.Desired) + arrow + hpaNote(st), rs, cpuText(cpu), bytesText(mem), tagOf(st.Image), msg},
-			keys:  []any{nil, string(st.State), st.Service, t.sectionRank(m, sec, st.Service), groups, float64(st.Ready), float64(restarts), cpu, float64(mem), nil, nil}})
+			keys:  []any{nil, stateRank(st.State), st.Service, t.sectionRank(m, sec, st.Service), groups, float64(st.Ready), float64(restarts), cpu, float64(mem), nil, nil}})
 	}
 	return rows
 }
@@ -741,7 +743,7 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 			id = sAccent.Render("▸ ") + id
 		}
 		rows = append(rows, grow{id: in.ID, cells: []string{stateDot(in.State), id, in.Host, fmt.Sprint(in.Ready), fmt.Sprint(in.Restarts), age, cpuText(in.CPU), bytesText(in.Memory)},
-			keys: []any{nil, in.ID, in.Host, nil, float64(in.Restarts), float64(-in.Started.Unix()), in.CPU, float64(in.Memory)}})
+			keys: []any{stateRank(in.State), in.ID, in.Host, nil, float64(in.Restarts), float64(-in.Started.Unix()), in.CPU, float64(in.Memory)}})
 	}
 	t.pods.set(rows)
 	podsH := min(len(rows)+3, max(5, (h-headH)/3))
@@ -770,7 +772,7 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 			if t.logFor == "" && len(st.Instances) > 1 && l.Instance != "" {
 				inst = lipgloss.NewStyle().Foreground(colorFor(l.Instance)).Render(shortInstance(l.Instance)) + " "
 			}
-			return sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + pretty(l.Text)
+			return sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + t.log.fmt.render(l.Text)
 		})
 	}
 	logs := panel(title, body, w, logH, t.prof != nil && t.prof.svc == name)

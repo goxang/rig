@@ -11,22 +11,31 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 // logView is a followed log shared by the Logs screen and a service's page: scroll back (which
 // pauses), scroll sideways, and drag over text to copy it; dragging past an edge scrolls.
 type logView struct {
-	zone    string
-	cap     int
-	lines   []core.LogLine
-	scroll  int // lines up from the newest
-	hoff    int // columns hidden on the left
-	paused  bool
-	shown   int
+	zone   string
+	cap    int
+	lines  []core.LogLine
+	scroll int // lines up from the newest
+	cur    int // the line picked with the keys or a click, -1 for none
+	hoff   int // columns hidden on the left
+	paused bool
+	shown  int
+	// visible is the line drawn on each row; rowLine and rowCol are its index in lines and, when
+	// wrapped, the column the row starts at
 	visible []core.LogLine
-	start   int // index in lines of visible[0]
+	rows    []string
+	rowLine []int
+	rowCol  []int
 	width   int
-	format  func(core.LogLine) string
+	wrap    bool
+	// fmt is how JSON lines read (structured, fields hidden); it starts from ui.logs
+	fmt    logFormat
+	format func(core.LogLine) string
 	// drag selection from anchor to head, as positions in lines; dragged says the mouse moved
 	anchor, head lpos
 	selecting    bool
@@ -37,8 +46,10 @@ type logView struct {
 // lpos is a column of a log line's text as drawn, before the sideways scroll.
 type lpos struct{ line, col int }
 
-func newLogView(zone string, capacity int) *logView {
-	return &logView{zone: zone, cap: capacity}
+func newLogView(zone string, capacity int, ui *spec.LogsUI) *logView {
+	v := &logView{zone: zone, cap: capacity, fmt: newLogFormat(ui), cur: -1}
+	v.wrap = ui != nil && ui.Wrap
+	return v
 }
 
 func (v *logView) add(lines []core.LogLine) {
@@ -46,6 +57,9 @@ func (v *logView) add(lines []core.LogLine) {
 	if drop := len(v.lines) - v.cap; drop > 0 {
 		v.lines = v.lines[drop:]
 		v.anchor.line, v.head.line = max(0, v.anchor.line-drop), max(0, v.head.line-drop)
+		if v.cur >= 0 {
+			v.cur = max(-1, v.cur-drop)
+		}
 	}
 	if v.paused {
 		v.scroll = min(v.scroll+len(lines), max(0, len(v.lines)-1))
@@ -53,7 +67,7 @@ func (v *logView) add(lines []core.LogLine) {
 }
 
 func (v *logView) reset() {
-	v.lines, v.scroll, v.hoff, v.paused = nil, 0, 0, false
+	v.lines, v.scroll, v.hoff, v.paused, v.cur = nil, 0, 0, false, -1
 	v.clearSel()
 }
 
@@ -70,6 +84,10 @@ func (v *logView) key(m *model, k tea.KeyMsg, vertical bool) bool {
 		}
 		s = strings.TrimPrefix(s, "shift+")
 	}
+	if vertical && v.moveCursor(s) {
+		v.clearSel()
+		return true
+	}
 	switch s {
 	case "up", "k":
 		v.paused = true
@@ -82,8 +100,11 @@ func (v *logView) key(m *model, k tea.KeyMsg, vertical bool) bool {
 	case "pgdown":
 		v.scroll = max(0, v.scroll-20)
 	case "G", "end":
-		v.scroll, v.paused = 0, false
+		v.scroll, v.paused, v.cur = 0, false, -1
 	case "right", "L":
+		if v.wrap {
+			return true
+		}
 		v.hoff += 8
 	case "left", "H":
 		v.hoff = max(0, v.hoff-8)
@@ -93,7 +114,7 @@ func (v *logView) key(m *model, k tea.KeyMsg, vertical bool) bool {
 			v.scroll = 0
 		}
 	case "c":
-		v.lines, v.scroll = nil, 0
+		v.lines, v.scroll, v.cur = nil, 0, -1
 	case "y":
 		end := len(v.lines) - v.scroll
 		v.copy(m, v.lines[max(0, end-v.shown):end])
@@ -106,27 +127,95 @@ func (v *logView) key(m *model, k tea.KeyMsg, vertical bool) bool {
 	return true
 }
 
-// render draws h lines w wide at body cell (x, y), each through line, and registers the zone that
-// takes wheel and drag.
+// moveCursor walks the picked line with the arrow and page keys; the first press picks the newest
+// line on screen and pauses.
+func (v *logView) moveCursor(s string) bool {
+	if len(v.lines) == 0 {
+		return false
+	}
+	step := map[string]int{"up": -1, "k": -1, "down": 1, "j": 1, "pgup": -20, "pgdown": 20, "home": -1 << 30}[s]
+	if step == 0 {
+		return false
+	}
+	if v.cur < 0 {
+		v.cur = len(v.lines) - 1 - v.scroll
+		if step < 0 {
+			step = 0
+		}
+	}
+	v.paused = true
+	v.cur = min(max(0, v.cur+step), len(v.lines)-1)
+	return true
+}
+
+// picked is the line under the cursor.
+func (v *logView) picked() (core.LogLine, bool) {
+	if v.cur < 0 || v.cur >= len(v.lines) {
+		return core.LogLine{}, false
+	}
+	return v.lines[v.cur], true
+}
+
+// render draws h rows w wide at body cell (x, y), each line through line (wrapped over several rows
+// when wrap is on), and registers the zone that takes wheel and drag.
 func (v *logView) render(m *model, x, y, w, h int, line func(core.LogLine) string) string {
 	v.shown, v.width, v.format = h, w, line
-	end := max(0, len(v.lines)-v.scroll)
-	v.start = max(0, end-h)
-	v.visible = v.lines[v.start:end]
-	m.zone(v.zone, x, y, w, h)
-	var b strings.Builder
-	for i, l := range v.visible {
-		s := line(l)
-		if a, z, ok := v.span(v.start + i); ok {
-			p := ansi.Strip(s)
-			s = ansi.Cut(p, 0, a) + sSel.Render(ansi.Cut(p, a, z)) + ansi.Cut(p, z, ansi.StringWidth(p))
+	if v.wrap {
+		v.hoff = 0
+	}
+	if v.cur >= len(v.lines) {
+		v.cur = -1
+	}
+	if v.cur >= 0 && v.cur > len(v.lines)-1-v.scroll {
+		v.scroll = len(v.lines) - 1 - v.cur
+	}
+	for range 50 {
+		v.layout(m, x, y, w, h, line)
+		if v.cur < 0 || len(v.rowLine) == 0 || v.rowLine[0] < v.cur || v.rowLine[0] == v.cur && v.rowCol[0] == 0 {
+			break
 		}
+		v.scroll++
+	}
+	var b strings.Builder
+	for i, s := range v.rows {
+		v.visible = append(v.visible, v.lines[v.rowLine[i]])
 		if v.hoff > 0 {
 			s = ansi.TruncateLeft(s, v.hoff, "")
+		}
+		if v.rowLine[i] == v.cur {
+			s = highlight(sCursor, ansi.Truncate(s, w, ""), w)
 		}
 		b.WriteString(s + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// layout lays the lines out on h rows of w, from the scroll position up.
+func (v *logView) layout(m *model, x, y, w, h int, line func(core.LogLine) string) {
+	v.visible, v.rowLine, v.rowCol = v.visible[:0], v.rowLine[:0], v.rowCol[:0]
+	m.zone(v.zone, x, y, w, h)
+	var rows []string
+	for i := len(v.lines) - v.scroll - 1; i >= 0 && len(rows) < h; i-- {
+		s := line(v.lines[i])
+		if a, z, ok := v.span(i); ok {
+			p := ansi.Strip(s)
+			s = ansi.Cut(p, 0, a) + sSel.Render(ansi.Cut(p, a, z)) + ansi.Cut(p, z, ansi.StringWidth(p))
+		}
+		parts := []string{s}
+		if v.wrap && w > 0 {
+			parts = strings.Split(ansi.Hardwrap(s, w, true), "\n")
+		}
+		rows = append(parts, rows...)
+		lines, cols := make([]int, len(parts)), make([]int, len(parts))
+		for k := range parts {
+			lines[k], cols[k] = i, k*w
+		}
+		v.rowLine, v.rowCol = append(lines, v.rowLine...), append(cols, v.rowCol...)
+	}
+	if extra := len(rows) - h; extra > 0 {
+		rows, v.rowLine, v.rowCol = rows[extra:], v.rowLine[extra:], v.rowCol[extra:]
+	}
+	v.rows = rows
 }
 
 // span is the columns [a, z) of line i inside the selection.
@@ -169,6 +258,12 @@ func (v *logView) state() string {
 	if v.hoff > 0 {
 		s += sDim.Render(fmt.Sprintf(" ⇢%d", v.hoff))
 	}
+	if v.wrap {
+		s += sDim.Render(" ⏎wrap")
+	}
+	if v.fmt.raw {
+		s += sDim.Render(" raw")
+	}
 	return s
 }
 
@@ -201,7 +296,8 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 			v.scroll--
 		}
 	}
-	at := lpos{v.start + min(max(h.y, 0), len(v.visible)-1), min(max(h.x, 0), v.width-1) + v.hoff}
+	row := min(max(h.y, 0), len(v.visible)-1)
+	at := lpos{v.rowLine[row], v.rowCol[row] + min(max(h.x, 0), v.width-1) + v.hoff}
 	switch phase {
 	case dragPress:
 		// the lines must stay put under the mouse; a plain click lets them go again
@@ -218,8 +314,8 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 			}
 		}
 		v.selecting = false
-		if !v.dragged && !v.wasPaused {
-			v.paused, v.scroll = false, 0
+		if !v.dragged {
+			v.cur = at.line
 		}
 	}
 }

@@ -26,7 +26,9 @@ type Options struct {
 	Field    string   `yaml:"field"` // JSON field holding the rate, dotted for nested (a.b); empty: the whole value is the number
 	Services []string `yaml:"services"`
 	Replicas int      `yaml:"replicas"`
-	Metrics  struct {
+	// RestartOnRate restarts running instances after a rate change, for generators that read it only at start
+	RestartOnRate bool `yaml:"restart_on_rate"`
+	Metrics       struct {
 		Source  string `yaml:"source"`
 		Sent    string `yaml:"sent"`
 		Failed  string `yaml:"failed"`
@@ -141,7 +143,10 @@ func (g *Gen) SetRate(ctx context.Context, rps float64) error {
 		return err
 	}
 	if g.opt.Field == "" {
-		return kv.Put(ctx, g.opt.Key, []byte(strconv.FormatFloat(rps, 'f', -1, 64)))
+		if err := kv.Put(ctx, g.opt.Key, []byte(strconv.FormatFloat(rps, 'f', -1, 64))); err != nil {
+			return err
+		}
+		return g.restartRunning(ctx)
 	}
 	doc, _, err := g.read(ctx)
 	if err != nil {
@@ -153,7 +158,29 @@ func (g *Gen) SetRate(ctx context.Context, rps float64) error {
 	parent, leaf := fieldParent(doc, g.opt.Field, true)
 	parent[leaf] = rps
 	raw, _ := json.MarshalIndent(doc, "", "  ")
-	return kv.Put(ctx, g.opt.Key, raw)
+	if err := kv.Put(ctx, g.opt.Key, raw); err != nil {
+		return err
+	}
+	return g.restartRunning(ctx)
+}
+
+func (g *Gen) restartRunning(ctx context.Context) error {
+	if !g.opt.RestartOnRate {
+		return nil
+	}
+	for _, name := range g.opt.Services {
+		rt, s, err := g.env.Owner(name)
+		if err != nil {
+			return err
+		}
+		if st, err := rt.Status(ctx, s); err != nil || st.Desired == 0 {
+			continue
+		}
+		if err := rt.Restart(ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (g *Gen) Status(ctx context.Context) (core.LoadStatus, error) {

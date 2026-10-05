@@ -39,7 +39,9 @@ type Options struct {
 	Env             map[string]string `yaml:"env"`
 	CreateNamespace bool              `yaml:"create_namespace"`
 	StateConfigMap  string            `yaml:"state_configmap"`
-	NodeShellImage  string            `yaml:"node_shell_image"`
+	// Debug gives service containers SYS_PTRACE, so dlv in the image (the go builder's debug) can attach.
+	Debug          bool   `yaml:"debug"`
+	NodeShellImage string `yaml:"node_shell_image"`
 }
 
 // Section is a service's k8s: block.
@@ -681,7 +683,7 @@ func (r *Runtime) render(ctx context.Context, s *spec.Service, rel core.Release,
 		if rel.Replicas > 0 {
 			n = rel.Replicas
 		}
-		return generate(s, r.section(s), img, env, n)
+		return generate(s, r.section(s), img, env, n, r.caps())
 	}
 	var rep *int
 	cur, deployed, _ := r.workload(ctx, s)
@@ -700,7 +702,7 @@ func (r *Runtime) render(ctx context.Context, s *spec.Service, rel core.Release,
 	}
 	return manifest.Render(objs, w, manifest.RenderOptions{
 		NodePorts: r.nodePorts(ctx, objs), FreeNodePorts: freeNodePorts,
-		Vars: r.vars(ctx), Image: rel.Image, Container: r.section(s).Container, Env: env, Replicas: rep,
+		Vars: r.vars(ctx), Image: rel.Image, Container: r.section(s).Container, Env: env, Replicas: rep, Capabilities: r.caps(),
 		Labels: map[string]string{"app.kubernetes.io/managed-by": "rig"},
 	})
 }
@@ -888,7 +890,14 @@ func (r *Runtime) SaveState(ctx context.Context, m map[string]string) error {
 
 // ---- generated manifests ----
 
-func generate(s *spec.Service, sec Section, image string, env map[string]string, replicas int) ([]byte, error) {
+func (r *Runtime) caps() []string {
+	if r.Opt.Debug {
+		return []string{"SYS_PTRACE"}
+	}
+	return nil
+}
+
+func generate(s *spec.Service, sec Section, image string, env map[string]string, replicas int, caps []string) ([]byte, error) {
 	labels := map[string]string{"app.kubernetes.io/name": s.Name, "app.kubernetes.io/managed-by": "rig"}
 	sel := map[string]string{"app.kubernetes.io/name": s.Name}
 	var envList []map[string]string
@@ -915,6 +924,9 @@ func generate(s *spec.Service, sec Section, image string, env map[string]string,
 	}
 	if len(ports) > 0 {
 		container["ports"] = ports
+	}
+	if len(caps) > 0 {
+		container["securityContext"] = map[string]any{"capabilities": map[string]any{"add": caps}}
 	}
 	if s.Health != nil {
 		port := s.PortNumber(s.Health.Port)

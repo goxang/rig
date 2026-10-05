@@ -69,7 +69,10 @@ type model struct {
 	app    *engine.App
 	gen    int
 	tabs   []tab
+	all    map[string]tab
 	active int
+	// simple is the newcomer's view: fewer screens, columns and keys (V)
+	simple bool
 	opened map[int]bool
 	w, h   int
 
@@ -138,6 +141,8 @@ type prompt struct {
 	// template is offered while the input is empty: tab fills it in, enter runs it as is
 	template string
 	took     time.Duration
+	// described is what the AI wrote for the ":?description" in describedFor, the input it saw
+	described, describedFor string
 }
 
 type (
@@ -161,11 +166,18 @@ type (
 	}
 )
 
-// newTabs builds the screens ui.tabs lists, else every screen the project gives something to show.
-func newTabs(a *engine.App) []tab {
-	all := map[string]tab{"services": &servicesTab{}, "logs": &logsTab{}, "metrics": &metricsTab{}, "traces": &tracesTab{},
+func allTabs() map[string]tab {
+	return map[string]tab{"services": &servicesTab{}, "logs": &logsTab{}, "metrics": &metricsTab{}, "traces": &tracesTab{},
 		"queries": &queriesTab{}, "kv": &kvTab{}, "data": &dataTab{}, "load": &loadTab{}, "manifests": &manifestsTab{},
 		"hosts": &hostsTab{}, "tests": &testsTab{}}
+}
+
+// advanced are the screens the simple view leaves out (unless ui.tabs names them).
+var advanced = map[string]bool{"queries": true, "load": true, "manifests": true, "hosts": true}
+
+// newTabs picks from all the screens ui.tabs lists, else every screen the project gives something
+// to show, minus the advanced ones in the simple view.
+func newTabs(a *engine.App, all map[string]tab, simple bool) []tab {
 	if ui := a.Spec.UI; ui != nil && len(ui.Tabs) > 0 {
 		var out []tab
 		for _, n := range ui.Tabs {
@@ -175,11 +187,45 @@ func newTabs(a *engine.App) []tab {
 	}
 	var out []tab
 	for _, n := range spec.Screens {
-		if configured(a, n) {
+		if configured(a, n) && !(simple && advanced[n]) {
 			out = append(out, all[n])
 		}
 	}
 	return out
+}
+
+func modeFile(a *engine.App) string { return filepath.Join(a.Spec.Dir, ".rig", "ui-mode") }
+
+// startSimple is the view V last chose in this project, else ui.mode.
+func startSimple(a *engine.App) bool {
+	if raw, err := os.ReadFile(modeFile(a)); err == nil {
+		return strings.TrimSpace(string(raw)) == "simple"
+	}
+	return a.Spec.UI != nil && a.Spec.UI.Mode == "simple"
+}
+
+// toggleMode switches between the simple and the detailed view, keeping each screen's state.
+func (m *model) toggleMode() tea.Cmd {
+	m.simple = !m.simple
+	mode := map[bool]string{true: "simple", false: "detailed"}[m.simple]
+	if err := os.MkdirAll(filepath.Dir(modeFile(m.app)), 0o755); err == nil {
+		_ = os.WriteFile(modeFile(m.app), []byte(mode+"\n"), 0o644)
+	}
+	cur := m.tabs[m.active]
+	opened := map[tab]bool{}
+	for i, t := range m.tabs {
+		opened[t] = m.opened[i]
+	}
+	m.tabs = newTabs(m.app, m.all, m.simple)
+	m.opened, m.active = map[int]bool{}, 0
+	for i, t := range m.tabs {
+		m.opened[i] = opened[t]
+		if t == cur {
+			m.active = i
+		}
+	}
+	m.setStatus(mode+" view (V switches)", false)
+	return m.openTab(m.active)
 }
 
 // configured says whether the project has anything for screen n to show.
@@ -253,7 +299,8 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
+	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
+	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
 	if s != nil {
 		m.restore(s)
@@ -310,6 +357,14 @@ func batch(cmds ...tea.Cmd) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// execDoneMsg carries an exec callback's message: bubbletea's RestoreTerminal brings back the alt
+// screen but not the mouse, so Update turns it on again.
+type execDoneMsg struct{ msg tea.Msg }
+
+func execProcess(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
+	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{fn(err)} })
 }
 
 func tick() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
@@ -481,6 +536,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		return m, nil
+	case execDoneMsg:
+		inner := func() tea.Msg { return msg.msg }
+		if m.mouseOff {
+			return m, inner
+		}
+		return m, batch(tea.EnableMouseAllMotion, inner)
 	case tickMsg:
 		cmds := []tea.Cmd{tick(), m.sched.due(m)}
 		if time.Since(m.svcAt) >= 3*time.Second {
@@ -536,6 +597,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completeMsg:
 		m.completed(msg)
 		return m, nil
+	case describeMsg:
+		m.describedMsg(msg)
+		return m, nil
 	case namespacesMsg:
 		return m, m.showNamespaces(msg)
 	case manifestEditedMsg:
@@ -554,7 +618,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		go old.Close()
 		m.services, m.svcBusy = nil, false
 		m.opened, m.refreshed = map[int]bool{}, map[int]time.Time{}
-		m.tabs = newTabs(m.app)
+		m.all = allTabs()
+		m.tabs = newTabs(m.app, m.all, m.simple)
 		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
 		m.ai = nil
@@ -655,6 +720,7 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		}
 		if wh, ok := m.tabs[m.active].(wheeler); ok && !m.help && !m.showAlerts {
 			if z, ok := m.zoneAt(e.X, e.Y); ok {
+				z.mod = e.Ctrl || e.Alt || e.Shift
 				if cmd, done := wh.wheel(m, z, up); done {
 					return cmd
 				}
@@ -713,6 +779,9 @@ func (m *model) dragTo(e tea.MouseMsg) tea.Cmd {
 	for _, z := range m.zones {
 		if z.id == id {
 			d.drag(m, hit{id: id, x: e.X - z.x, y: e.Y - z.y}, phase)
+			if c, ok := d.(interface{ dragCmd() tea.Cmd }); ok {
+				return c.dragCmd()
+			}
 			return nil
 		}
 	}
@@ -727,6 +796,18 @@ func (m *model) showMetrics(service string) tea.Cmd {
 			return batch(open, mt.jump(m, service))
 		}
 	}
+	return nil
+}
+
+// showService opens the Services screen on one service's page.
+func (m *model) showService(name string) tea.Cmd {
+	for i, t := range m.tabs {
+		if st, ok := t.(*servicesTab); ok {
+			open := m.openTab(i)
+			return batch(open, st.openService(m, name, ""))
+		}
+	}
+	m.setStatus("the Services screen is not in ui.tabs", true)
 	return nil
 }
 
@@ -810,13 +891,26 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		case "enter":
 			p := m.prompt
-			m.prompt = nil
 			v := p.input.Value()
 			if v == "" {
 				v = p.template
 			}
+			if _, _, ok := describing(v); ok && p.hint != "" {
+				if p.describedFor != v || p.described == "" {
+					m.setStatus("waiting for the AI to write what :? describes (tab takes it)", false)
+					return m.completeDue(completeTickMsg{seq: p.seq})
+				}
+				v = p.described
+			}
+			m.prompt = nil
 			return p.submit(v)
 		case "tab":
+			if p := m.prompt; p.described != "" && p.describedFor == p.input.Value() {
+				p.input.SetValue(p.described)
+				p.input.CursorEnd()
+				p.described, p.describedFor = "", ""
+				return nil
+			}
 			if p := m.prompt; p.input.Value() == "" && p.template != "" {
 				p.input.SetValue(p.template)
 				p.input.CursorEnd()
@@ -861,7 +955,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if !t.typing() {
 		switch s := k.String(); s {
 		case "@":
-			m.chatOpen()
+			if m.chat != nil && m.chat.open {
+				m.chat.open, m.chat.focus = false, false
+			} else {
+				m.chatOpen()
+			}
 			return nil
 		case "q":
 			return m.quit()
@@ -887,6 +985,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		case "N":
 			return m.pickNamespace()
+		case "V":
+			return m.toggleMode()
 		case "M":
 			m.mouseOff = !m.mouseOff
 			if m.mouseOff {
@@ -1025,7 +1125,7 @@ func (m *model) pickTask(prefix string) {
 			}
 			script := `"$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
 			cmd := exec.Command("sh", "-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name)
-			return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return execProcess(cmd, func(err error) tea.Msg {
 				if err != nil {
 					return statusMsg{text: "task " + name + ": " + err.Error(), err: true}
 				}
@@ -1194,6 +1294,9 @@ func (m *model) header() string {
 	if a.Env.Protected {
 		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
 	}
+	if m.simple {
+		left += sDim.Render("  simple view")
+	}
 	if b := m.alertBadge(); b != "" {
 		left += " " + b
 	}
@@ -1283,17 +1386,27 @@ func (m *model) footer() string {
 	default:
 		// the first few keys of the screen only: ? lists them all, so the footer stays readable
 		var hs []string
+		n := footerHints
+		if m.simple {
+			n = 3
+		}
 		for i, h := range m.tabs[m.active].hints() {
-			if i == footerHints {
+			if i == n {
 				break
 			}
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
-		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("@")+" "+sDim.Render("AI"), sKey.Render("E")+" "+sDim.Render("env"))
-		if m.app.Namespace() != "" && !m.app.Env.Protected {
-			hs = append(hs, sKey.Render("N")+" "+sDim.Render("namespace"))
+		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("@")+" "+sDim.Render("AI"))
+		if m.simple {
+			hs = append(hs, sKey.Render("V")+" "+sDim.Render("detailed view"))
+		} else {
+			hs = append(hs, sKey.Render("E")+" "+sDim.Render("env"))
+			if m.app.Namespace() != "" && !m.app.Env.Protected {
+				hs = append(hs, sKey.Render("N")+" "+sDim.Render("namespace"))
+			}
+			hs = append(hs, sKey.Render("T")+" "+sDim.Render("tasks"))
 		}
-		hs = append(hs, sKey.Render("T")+" "+sDim.Render("tasks"), sKey.Render("q")+" "+sDim.Render("quit"))
+		hs = append(hs, sKey.Render("q")+" "+sDim.Render("quit"))
 		line = " " + strings.Join(hs, "  ")
 	}
 	status := ""
@@ -1336,10 +1449,16 @@ func (m *model) promptView() string {
 	if text == "" {
 		text = p.template
 	}
+	above := ""
+	if p.described != "" && p.describedFor == p.input.Value() {
+		above = truncate(sAccent.Render(" ✦ ")+sTitle.Render(p.described)+sDim.Render("   tab takes it, enter runs it"), m.w) + "\n"
+	} else if _, _, ok := describing(p.input.Value()); ok && p.hint != "" && !p.waiting {
+		above = sDim.Render(" ✦ describe what you want after :? — the AI writes it here") + "\n"
+	}
 	if room := m.w - lipgloss.Width(head) - 3 - buttonsW; lipgloss.Width(text)+2 <= room {
 		p.input.Width = room
 		head += p.input.View()
-		return head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-2)
+		return above + head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-2)
 	}
 	p.input.Width = m.w - 4
 	var preview []string
@@ -1350,7 +1469,7 @@ func (m *model) promptView() string {
 		preview = preview[max(0, len(preview)-8):]
 	}
 	top := head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-3-len(preview))
-	return strings.Join(append(append([]string{top}, preview...), " "+p.input.View()), "\n")
+	return above + strings.Join(append(append([]string{top}, preview...), " "+p.input.View()), "\n")
 }
 
 const footerHints = 5
@@ -1374,7 +1493,7 @@ func (m *model) helpView() string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

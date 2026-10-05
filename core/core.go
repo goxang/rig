@@ -359,6 +359,14 @@ type Messaging interface {
 	Publish(ctx context.Context, target string, body []byte) error
 }
 
+// QueueInspector shows one queue in depth on the Data screen: its settings, bindings and consumers
+// as field/value rows, a peek at its messages (they stay queued), and deleting it.
+type QueueInspector interface {
+	QueueInfo(ctx context.Context, queue string) (Table, error)
+	Peek(ctx context.Context, queue string, n int) (Table, error)
+	DeleteQueue(ctx context.Context, queue string) error
+}
+
 type KV interface {
 	Get(ctx context.Context, key string) ([]byte, bool, error)
 	Put(ctx context.Context, key string, value []byte) error
@@ -408,6 +416,16 @@ type Host struct {
 	DiskUsed  int64
 	Load1     float64
 	Labels    map[string]string
+	// Pods are what runs on the host, when the adapter knows (Kubernetes nodes).
+	Pods []HostPod
+}
+
+type HostPod struct {
+	Namespace string
+	Name      string
+	CPU       float64 // cores
+	Mem       int64
+	Started   time.Time
 }
 
 type Hosts interface {

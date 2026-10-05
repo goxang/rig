@@ -13,6 +13,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,7 +45,14 @@ type Options struct {
 	Ldflags  string   `yaml:"ldflags"`
 	Tags     []string `yaml:"tags"`
 	Insecure bool     `yaml:"insecure"`
+	// Debug builds for a debugger (no optimisation, symbols kept, source paths as on this machine)
+	// and puts a static dlv at /usr/local/bin/dlv: `rig debug` and GoLand attach to it in the pod.
+	Debug bool `yaml:"debug"`
+	// Dlv is the dlv binary to put in debug images; empty builds one (CGO off) and caches it.
+	Dlv string `yaml:"dlv"`
 }
+
+const dlvVersion = "v1.25.2"
 
 type Builder struct {
 	opt Options
@@ -78,6 +87,9 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 	goos, goarch, _ := strings.Cut(b.opt.Platform, "/")
 	bin := filepath.Join(tmp, s.Name)
 	args := []string{"build", "-trimpath", "-o", bin}
+	if b.opt.Debug {
+		args = []string{"build", "-gcflags", "all=-N -l", "-o", bin}
+	}
 	tags := append([]string{"timetzdata"}, b.opt.Tags...)
 	args = append(args, "-tags", strings.Join(tags, ","))
 	if lf := b.ldflags(ctx, o.Tag); lf != "" {
@@ -102,7 +114,19 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 	if err != nil {
 		return "", err
 	}
-	img, err := mutate.AppendLayers(base, layer)
+	layers := []v1.Layer{layer}
+	if b.opt.Debug {
+		dlv, err := b.dlv(ctx, goos, goarch)
+		if err != nil {
+			return "", fmt.Errorf("dlv for the debug image: %w", err)
+		}
+		dl, err := binaryLayer(dlv, "usr/local/bin/dlv")
+		if err != nil {
+			return "", err
+		}
+		layers = append(layers, dl)
+	}
+	img, err := mutate.AppendLayers(base, layers...)
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +189,41 @@ func (b *Builder) base(ctx context.Context, dir string) (v1.Image, error) {
 	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}))
 }
 
+// dlv is a static dlv for goos/goarch: Options.Dlv, or one built once into the user cache.
+func (b *Builder) dlv(ctx context.Context, goos, goarch string) (string, error) {
+	if b.opt.Dlv != "" {
+		return b.opt.Dlv, nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cache, "rig", "dlv-"+dlvVersion+"-"+goos+"-"+goarch)
+	bin := filepath.Join(dir, "dlv")
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+	if goos != runtime.GOOS || goarch != runtime.GOARCH {
+		return "", fmt.Errorf("cannot build dlv for %s/%s here: set the builder's dlv to a static dlv for it", goos, goarch)
+	}
+	cmd := sh.New("go", "install", "github.com/go-delve/delve/cmd/dlv@"+dlvVersion)
+	cmd.Env = []string{"CGO_ENABLED=0", "GOBIN=" + dir}
+	if err := cmd.Run(ctx); err != nil {
+		return "", err
+	}
+	return bin, nil
+}
+
 func (b *Builder) ldflags(ctx context.Context, tag string) string {
+	if b.opt.Debug {
+		// symbols stay for the debugger
+		f := strings.Fields(b.opt.Ldflags)
+		f = slices.DeleteFunc(f, func(s string) bool { return s == "-s" || s == "-w" })
+		b.opt.Ldflags = strings.Join(f, " ")
+		if b.opt.Ldflags == "" {
+			return ""
+		}
+	}
 	if b.opt.Ldflags == "" {
 		return "-s -w"
 	}

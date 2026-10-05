@@ -82,15 +82,15 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | screen | |
 |---|---|
 | Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `o` puts every service into GoLand (below); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
-| Logs | the services you pick, merged, or one instance; `←` `→` scroll sideways, dragging over text copies it, and past an edge scrolls |
-| Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor |
+| Logs | the services you pick, merged, or one instance; `↑` `↓` or a click pick a line, `enter` inspects it as a tree (JSON, console and logfmt lines; JSON, escaped JSON and Go `%v` values inside strings opened up; `w` wrap, `H` `L` sideways, `J` `K` next line); `←` `→` scroll sideways, dragging over text copies it, and past an edge scrolls |
+| Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor; drag across a chart zooms to that time range, `Z` (or ⊖) zooms out, `,` `.` (or ‹ ›) shift it, ctrl+wheel zooms around the mouse |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV |
 | KV | browse, edit and delete keys right in the store; `o` picks the editor (nano, vim, VS Code, the desktop's); `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
 | Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand (on a table row: that row by its primary key; on a Redis key: the read for its type); `y`/`Y` copy the row/all as TSV; `/` filters with globs |
-| Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report |
+| Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report; `z` or a click shows a chart full size, with the Metrics panel view's legend, filter, range and drag to zoom |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`); `e` edits an object in your editor and saves it into its file, `s` writes what the cluster runs into the file (only fields someone set, `$VARS` kept), `L` edits it on the cluster; `d` picks among every manifest folder of the project |
-| Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell (double-click) |
+| Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, a shell (double-click), and `p` the pods on a node, sortable by CPU, memory or age |
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
 Screens switch with `1`-`0` and `` ` `` (the eleventh), or a click on their name; tabs inside a screen
@@ -113,6 +113,9 @@ open screens, explain logs against the code, suggest `rig profile` / `go tool pp
 Query prompts (Data `Q`, Queries, Metrics, Logs grep, KV values) get inline completions: `tab` takes them,
 `ctrl+t` turns them off or on for good. A suggested query (Data `Q`, a new query) waits behind the empty
 input: type your own and the AI completes it, `tab` takes the suggestion to edit, `enter` runs it as is.
+`:?` then words asks for the rest in plain language: `:?logs slower than 1s`, or
+`SELECT * FROM transactions WHERE :?amount above 100k`; the AI's version shows above the input,
+`tab` takes it, `enter` runs it.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
 AI or not. A long query wraps above the input; `ctrl+y` copies it.
 
@@ -151,7 +154,10 @@ Services view (`alt+8`), one folder per `sections:` entry plus `rig · infra`:
 
 - `<service>` runs `rig attach`: starts it if it is down and shows its live log; stop stops it (infrastructure
   only stops following). Started or stopped in rig, GoLand follows: the config ends when the service does.
-- `<service> · debug` (Go services) brings its debugger up (`rig debug --detach`, on the port `D` uses) and attaches.
+- `<service> · debug` (Go services): press Debug on it and GoLand starts the service if it is down, brings its
+  debugger up in the background (`rig debug --detach --start`, on the service's stable port) and attaches;
+  breakpoints work from there, on local processes, docker, kind and Kubernetes alike.
+  `<service> · stop debugger` ends it (or `rig debug --stop <service>`).
 
 They are rig commands on the same environment, so the TUI and GoLand show the same processes. GoLand
 rewrites `.idea/workspace.xml` when it closes: if the Services view does not list them, add Shell Script
@@ -220,12 +226,12 @@ published port on docker, localhost locally). Full reference: [docs/config.md](d
 
 ## Try it
 
-[`examples/kind`](examples/kind) is a complete project (api, worker, load generator, Prometheus, Zipkin,
-Consul, Postgres, Redis, RabbitMQ) that runs on kind, docker or locally:
+Three [examples](examples), smallest first:
 
 ```bash
-cd examples/kind
-rig do runtime create && rig up --build && rig
+cd examples/hello && rig up && rig                           # one service, local process
+cd examples/shop  && rig up --build && rig                   # api + worker over Postgres, Redis, RabbitMQ (docker)
+cd examples/kind  && rig do runtime create && rig up --build && rig   # Kubernetes manifests on kind
 ```
 
 ## Docs

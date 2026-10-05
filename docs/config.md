@@ -26,8 +26,8 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
 | `reports` | metrics a run is measured by, saved as markdown: `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
 | `otel` | OpenTelemetry for every app and load service (see below) |
-| `ui` | `{tabs: [services, logs, ...]}`: the screens and their order; left out, every screen the project configures something for |
-| `ai` | `{deny: [globs], instructions: text}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), and notes it gets with every turn |
+| `ui` | `{tabs, mode, logs}`: the screens and their order (left out, every screen the project configures something for); `mode: simple` starts newcomers on fewer screens, columns and keys (`V` switches); `logs` (see below) |
+| `ai` | `{deny: [globs], instructions: text, ideas: {screen: [questions]}}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), notes it gets with every turn, and the questions tab offers in an empty chat per screen (`all` for every screen) |
 
 ## services.<name>
 
@@ -74,7 +74,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 |---|---|
 | `local` | `env`, `stop_timeout` |
 | `docker` | `network`, `registry`, `env`, `publish` (default true) |
-| `kubernetes` | `context` (required), `namespace`, `registry`, `pull_registry` (the registry as nodes name it, when it differs from where builds push), `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image` |
+| `kubernetes` | `context` (required), `namespace`, `registry`, `pull_registry` (the registry as nodes name it, when it differs from where builds push), `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image`, `debug` (adds SYS_PTRACE to service containers, for dlv) |
 | `kind` | the kubernetes options plus `cluster`, `node_image`, `workers`, `registry_port`, `preload` |
 
 ## components.<name>
@@ -102,7 +102,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99, per_instance}` (`per_instance`: a sent counter labelled `pod` or `instance`, charted per instance on the Load screen) |
 | `command` (loadgen) | `start`, `stop`, `rate` (with `{rate}`), `status` |
 | `ssh` | `defaults`, `hosts: [{name, addr, user, port, key, jump, roles, labels}]` |
-| `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure` |
+| `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure`, `debug` (no optimisation, symbols kept, a static dlv at /usr/local/bin/dlv: `rig debug` attaches in the pod), `dlv` (the dlv to put in, else built once) |
 | `docker` (builder) | `platform`, `args` |
 | `http` (query) | `addr` |
 
@@ -309,6 +309,25 @@ app and load service: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (`service.
 `OTEL_PROPAGATORS=tracecontext,baggage`. A variable the service sets itself wins. `svc://` addresses are the
 service's name inside docker or Kubernetes and a forwarded port for local processes. Read the traces back with
 a `jaeger` or `tempo` component, the metrics with `prometheus`, the logs with `loki`.
+
+## ui.logs
+
+How the Logs screen and service pages read JSON log lines. Every key is optional.
+
+```yaml
+ui:
+  logs:
+    wrap: true                 # w switches
+    raw: false                 # show lines as written; s switches
+    time: [ts]                 # JSON keys of the time, level and message, first match wins
+    level: [level]
+    message: [msg]
+    fields: [service, path, code, error]   # only these other keys, in this order
+    hide: [trace, caller, stack]           # left out until h shows them
+```
+
+On the Logs screen `h` picks the fields shown, `v` opens the clicked line field by field (folds, `y`
+copies a value), `w` wraps long lines.
 
 ## run state an environment keeps
 

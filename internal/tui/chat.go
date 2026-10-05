@@ -67,6 +67,16 @@ var screenStarters = map[string][]string{
 	"Hosts":     {"which host is under pressure and why?"},
 }
 
+// ideas are the project's ai.ideas for this screen and for "all", then rig's own.
+func (m *model) ideas() []string {
+	name := m.tabs[m.active].name()
+	var out []string
+	if a := m.app.Spec.AI; a != nil {
+		out = append(append(out, a.Ideas[strings.ToLower(name)]...), a.Ideas["all"]...)
+	}
+	return append(out, screenStarters[name]...)
+}
+
 func (m *model) chatOpen() *chat {
 	if m.chat == nil {
 		in := textinput.New()
@@ -121,6 +131,11 @@ func (c *chat) reset() {
 func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 	c := m.chat
 	switch k.String() {
+	case "@":
+		if c.input.Value() != "" {
+			break
+		}
+		fallthrough
 	case "esc":
 		c.open, c.focus = false, false
 		return nil
@@ -145,7 +160,7 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "tab":
 		v := c.input.Value()
-		ideas := screenStarters[m.tabs[m.active].name()]
+		ideas := m.ideas()
 		if len(ideas) > 0 && (v == "" || contains(ideas, v)) {
 			c.input.SetValue(ideas[c.starter%len(ideas)])
 			c.input.CursorEnd()
@@ -517,7 +532,7 @@ func (c *chat) view(m *model, x, w, h int) string {
 		add(sDim.Render(wordWrap("Ask about what this screen shows, or to do anything you can do in rig. It works on "+m.app.Env.Name+" only; the project directory is its only workspace.", iw)))
 		add("")
 		add(sTitle.Render("ideas (tab)"))
-		for _, s := range screenStarters[m.tabs[m.active].name()] {
+		for _, s := range m.ideas() {
 			add(sDim.Render(wordWrap("· "+s, iw)))
 		}
 	}
@@ -846,10 +861,27 @@ func (m *model) toggleAutocomplete() {
 	}
 }
 
-// completeLater asks for a completion once typing pauses.
+// describing splits an input at ":?": the input before it and the words after it, which say what
+// the AI should write in their place.
+func describing(v string) (before, want string, ok bool) {
+	before, want, ok = strings.Cut(v, ":?")
+	return before, strings.TrimSpace(want), ok && strings.TrimSpace(want) != ""
+}
+
+type describeMsg struct {
+	seq         int
+	value, text string
+	err         error
+	took        time.Duration
+}
+
+// completeLater asks for a completion, or for what ":?" describes, once typing pauses.
 func (m *model) completeLater() tea.Cmd {
 	p := m.prompt
-	if p == nil || p.hint == "" || !m.ai.Setup.AutocompleteOn() {
+	if p == nil || p.hint == "" || m.ai == nil {
+		return nil
+	}
+	if _, _, ok := describing(p.input.Value()); !ok && !m.ai.Setup.AutocompleteOn() {
 		return nil
 	}
 	p.seq++
@@ -863,7 +895,8 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 		return nil
 	}
 	v := p.input.Value()
-	if strings.TrimSpace(v) == "" || len(p.input.MatchedSuggestions()) > 0 {
+	before, want, describe := describing(v)
+	if strings.TrimSpace(v) == "" || !describe && len(p.input.MatchedSuggestions()) > 0 {
 		return nil
 	}
 	if m.completeCancel != nil {
@@ -876,11 +909,40 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 	if p.template != "" {
 		hint += "; the screen offered this as a starting point: " + p.template
 	}
+	if describe {
+		p.input.SetSuggestions(nil)
+		return func() tea.Msg {
+			defer cancel()
+			start := time.Now()
+			text, err := r.Describe(ctx, hint, before, want)
+			return describeMsg{seq: seq, value: v, text: text, err: err, took: time.Since(start)}
+		}
+	}
 	return func() tea.Msg {
 		defer cancel()
 		start := time.Now()
 		text, err := r.Complete(ctx, hint, v)
 		return completeMsg{seq: seq, value: v, text: text, err: err, took: time.Since(start)}
+	}
+}
+
+func (m *model) describedMsg(msg describeMsg) {
+	p := m.prompt
+	if p == nil {
+		return
+	}
+	if p.seq == msg.seq {
+		p.waiting = false
+	}
+	if msg.err != nil {
+		if !errors.Is(msg.err, context.Canceled) && p.seq == msg.seq {
+			m.setStatus("AI: "+msg.err.Error(), true)
+		}
+		return
+	}
+	p.took = msg.took
+	if msg.value == p.input.Value() && msg.text != "" {
+		p.described, p.describedFor = msg.text, msg.value
 	}
 }
 

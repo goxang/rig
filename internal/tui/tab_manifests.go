@@ -33,6 +33,8 @@ type manifestsTab struct {
 	tree bool   // folders and files instead of every object
 	cwd  string // the folder the tree shows
 	file string // in the tree: the file whose objects are listed
+	// svcOf caches serviceOf per object, until the next scan
+	svcOf map[*manifest.Object]string
 }
 
 type manifestFoldersMsg struct {
@@ -87,7 +89,7 @@ type applier interface {
 func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
-	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
 		{"a", "apply"}, {"/", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"J/K", "yaml"}, {"o", "editor"}}
 }
 
@@ -272,7 +274,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		t.pickFolders(m, msg)
 	case manifestsMsg:
 		if msg.gen == m.gen {
-			t.set, t.err = msg.set, ""
+			t.set, t.err, t.svcOf = msg.set, "", nil
 			if msg.err != nil {
 				t.err = msg.err.Error()
 			}
@@ -296,8 +298,13 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			})
 		case "t":
 			t.tree, t.sel, t.offset, t.file = !t.tree, 0, 0, ""
+		case "v":
+			return t.gotoService(m)
 		case "enter", "right", "l":
 			e, ok := t.current()
+			if ok && e.obj != nil && msg.String() == "enter" {
+				return t.gotoService(m)
+			}
 			if !ok || !t.tree {
 				return nil
 			}
@@ -489,6 +496,9 @@ func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
 		}
 		return nil
 	}
+	if h.id == "mf:svc" {
+		return t.gotoService(m)
+	}
 	if h.id == "mf:rows" && t.issues == "" {
 		if i := t.offset + h.y; i < len(t.entries()) {
 			t.sel = i
@@ -596,7 +606,17 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 			mine = append(mine, i)
 		}
 	}
-	top := panel("relations · "+summary, sDim.Render(o.File)+"\n"+graph, rw, graphH, false)
+	head := sDim.Render(o.File)
+	if svc := t.cachedService(m, o); svc != "" {
+		link := "→ service " + svc + " (v)"
+		st := sAccent
+		if m.hovering(lw+1+lipgloss.Width(head)+2, 1, lipgloss.Width(link), 1) {
+			st = sAccent.Underline(true)
+		}
+		m.zone("mf:svc", lw+1+lipgloss.Width(head)+2, 1, lipgloss.Width(link), 1)
+		head += "  " + st.Render(link)
+	}
+	top := panel("relations · "+summary, head+"\n"+graph, rw, graphH, false)
 	issH := 0
 	var iss string
 	if len(mine) > 0 {
@@ -712,7 +732,7 @@ func masked(o *manifest.Object) any {
 func (t *manifestsTab) serviceOf(m *model, o *manifest.Object) string {
 	k, ok := m.k8s()
 	if !ok {
-		return ""
+		return t.serviceByName(m, o)
 	}
 	for _, n := range m.app.Spec.ServiceNames() {
 		objs, _, err := k.Objects(m.app.Spec.Services[n])
@@ -725,5 +745,67 @@ func (t *manifestsTab) serviceOf(m *model, o *manifest.Object) string {
 			}
 		}
 	}
+	return t.serviceByName(m, o)
+}
+
+// serviceByName finds the service of o's workload (o itself, or the workload whose bundle holds o)
+// by its k8s.workload, else by the service's name, for environments that are not on Kubernetes.
+func (t *manifestsTab) serviceByName(m *model, o *manifest.Object) string {
+	ws := []*manifest.Object{o}
+	if !manifest.IsWorkload(o.Kind) && t.set != nil {
+		ws = nil
+		for _, w := range t.set.Workloads() {
+			for _, x := range t.set.Bundle(w) {
+				if x == o {
+					ws = append(ws, w)
+				}
+			}
+		}
+	}
+	for _, w := range ws {
+		for _, n := range m.app.Spec.ServiceNames() {
+			var sec struct {
+				Workload string `yaml:"workload"`
+			}
+			_, _ = m.app.Spec.Services[n].Section("k8s", &sec)
+			kind, name, ok := strings.Cut(sec.Workload, "/")
+			if !ok {
+				kind, name = "deployment", sec.Workload
+			}
+			if name == "" {
+				name = n
+			}
+			if strings.EqualFold(kind, w.Kind) && name == w.Name || sec.Workload == "" && n == w.Name {
+				return n
+			}
+		}
+	}
 	return ""
+}
+
+func (t *manifestsTab) cachedService(m *model, o *manifest.Object) string {
+	if t.svcOf == nil {
+		t.svcOf = map[*manifest.Object]string{}
+	}
+	svc, ok := t.svcOf[o]
+	if !ok {
+		svc = t.serviceOf(m, o)
+		t.svcOf[o] = svc
+	}
+	return svc
+}
+
+// gotoService opens the Services screen on the service the selected object belongs to.
+func (t *manifestsTab) gotoService(m *model) tea.Cmd {
+	e, ok := t.current()
+	if !ok || e.obj == nil {
+		m.setStatus("select an object (t shows objects)", true)
+		return nil
+	}
+	svc := t.cachedService(m, e.obj)
+	if svc == "" {
+		m.setStatus(e.obj.ID()+" belongs to no service in "+filepath.Base(m.app.Spec.File)+" (n makes one)", true)
+		return nil
+	}
+	return m.showService(svc)
 }

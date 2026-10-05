@@ -26,6 +26,7 @@ var (
 	sGreen     = lipgloss.NewStyle().Foreground(cGreen)
 	sAmber     = lipgloss.NewStyle().Foreground(cAmber)
 	sRed       = lipgloss.NewStyle().Foreground(cRed)
+	sCursor    = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#B4CCF5", Dark: "#2F5A9E"}).Bold(true)
 	sSelected  = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#DCE7FB", Dark: "#22344F"}).Bold(true)
 	sHover     = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#EEF2F8", Dark: "#1C2430"})
 	sUnderline = lipgloss.NewStyle().Underline(true)
@@ -105,6 +106,23 @@ func stateDot(s core.State) string {
 		return sDim.Render("○")
 	}
 	return sDim.Render("?")
+}
+
+// stateRank sorts the active states first.
+func stateRank(s core.State) float64 {
+	switch s {
+	case core.StateRunning:
+		return 0
+	case core.StateStarting, core.StateDegraded:
+		return 1
+	case core.StateFailed:
+		return 2
+	case core.StateStopped:
+		return 3
+	case core.StateAbsent:
+		return 4
+	}
+	return 5
 }
 
 func stateText(s core.State) string {

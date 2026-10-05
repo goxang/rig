@@ -31,6 +31,12 @@ type kvTab struct {
 	related  []string
 	filter   string
 	scroll   int
+	// tree is a JSON value field by field; focused, the keys edit it and every change saves
+	tree    *jsonTree
+	treeFor string
+	inTree  bool
+	// treeNext walks into the tree once the value being fetched arrives (enter on a key)
+	treeNext bool
 }
 
 type kvKeysMsg struct {
@@ -58,7 +64,10 @@ type kvEditedMsg struct {
 func (t *kvTab) name() string { return "KV" }
 func (t *kvTab) typing() bool { return false }
 func (t *kvTab) hints() [][2]string {
-	h := [][2]string{{"enter", "open"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "filter"}, {"J/K", "scroll value"}}
+	if t.inTree {
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"esc", "back to keys"}}
+	}
+	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "filter"}, {"J/K", "scroll value"}}
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
@@ -205,6 +214,9 @@ func (t *kvTab) save(m *model, key string, value []byte) tea.Cmd {
 func (t *kvTab) saveIn(m *model, comp, key string, value []byte) tea.Cmd {
 	t.related = relatedServices(m, key)
 	t.value, t.valueFor = value, key
+	if !t.inTree {
+		t.setTree()
+	}
 	a := m.app
 	return m.act("save "+key, true, func(ctx context.Context) error {
 		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
@@ -230,7 +242,7 @@ func editKV(m *model, comp, key string, value []byte) tea.Cmd {
 	f.Close()
 	file := f.Name()
 	c := exec.Command("sh", "-c", editorCmd()+` "$1"`, "rig-edit", file)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return execProcess(c, func(err error) tea.Msg {
 		return kvEditedMsg{comp: comp, key: key, file: file, original: value, err: err}
 	})
 }
@@ -343,6 +355,11 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		t.value, t.valueFor = msg.value, msg.key
+		t.setTree()
+		if t.treeNext && t.tree != nil {
+			t.inTree = true
+		}
+		t.treeNext = false
 	case kvEditedMsg:
 		defer os.Remove(msg.file)
 		if msg.err != nil {
@@ -364,6 +381,9 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		return t.saveIn(m, msg.comp, msg.key, raw)
 	case tea.KeyMsg:
+		if t.inTree {
+			return t.treeKey(m, msg)
+		}
 		if t.list.key(msg) {
 			if r, ok := t.list.current(); ok && !strings.HasSuffix(r.id, "/") {
 				t.scroll = 0
@@ -374,9 +394,17 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		r, ok := t.list.current()
 		switch msg.String() {
 		case "enter", "right":
-			if ok {
-				return t.enter(m, r.id)
+			if !ok {
+				return nil
 			}
+			if !strings.HasSuffix(r.id, "/") {
+				if t.tree != nil && t.treeFor == r.id {
+					t.inTree = true
+					return nil
+				}
+				t.treeNext = msg.String() == "enter"
+			}
+			return t.enter(m, r.id)
 		case "left", "backspace", "esc":
 			return t.up(m)
 		case "e":
@@ -446,6 +474,12 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.comp, t.prefix = c[0], ""
 				return t.load(m)
 			})
+		case "t":
+			if t.tree != nil && ok && t.treeFor == r.id {
+				t.inTree = true
+			} else {
+				m.setStatus("not a JSON value: e edits it as text", true)
+			}
 		case "J":
 			t.scroll += 10
 		case "K":
@@ -456,6 +490,14 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 }
 
 func (t *kvTab) click(m *model, h hit) tea.Cmd {
+	if t.tree != nil && t.tree.click(h) {
+		t.inTree = true
+		if h.double && !t.tree.current().container() {
+			return t.editField(m)
+		}
+		return nil
+	}
+	t.inTree = false
 	if h.id == "kv:up" {
 		return t.up(m)
 	}
@@ -498,6 +540,17 @@ func (t *kvTab) view(m *model, w, h int) string {
 	var body string
 	r, _ := t.list.current()
 	switch {
+	case t.tree != nil && t.treeFor == r.id:
+		vt = t.valueFor + " · " + t.tree.current().path()
+		if !t.inTree {
+			vt += sDim.Render("  (enter or click: edit fields)")
+		} else {
+			vt += sDim.Render("  z fold/expand all")
+		}
+		body = t.tree.view(m, lw+1, 1, w-lw-2, h-2-lipgloss.Height(t.relatedNote()))
+		if rel := relatedServices(m, t.valueFor); len(rel) > 0 {
+			vt += "  ·  read by " + strings.Join(rel, ", ")
+		}
 	case t.valueFor != "" && t.valueFor == r.id:
 		vt = t.valueFor
 		lines := strings.Split(string(pretty2(t.value)), "\n")
@@ -511,8 +564,117 @@ func (t *kvTab) view(m *model, w, h int) string {
 	default:
 		body = sDim.Render("select a key")
 	}
-	if len(t.related) > 0 {
-		body = sAmber.Render("saved: press R to restart "+strings.Join(t.related, ", ")+" so they read it") + "\n\n" + body
+	if n := t.relatedNote(); n != "" {
+		body = n + "\n" + body
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(vt, body, w-lw, h, false))
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(vt, body, w-lw, h, t.inTree))
+}
+
+func (t *kvTab) relatedNote() string {
+	if len(t.related) == 0 {
+		return ""
+	}
+	return sAmber.Render("saved: press R to restart "+strings.Join(t.related, ", ")+" so they read it") + "\n"
+}
+
+// setTree shows a JSON object or array value field by field, keeping the folds and the place of
+// the key it showed before.
+func (t *kvTab) setTree() {
+	v := bytes.TrimSpace(t.value)
+	if len(v) == 0 || v[0] != '{' && v[0] != '[' {
+		t.tree, t.treeFor, t.inTree = nil, "", false
+		return
+	}
+	tree, err := newJSONTree("kv:tree", v)
+	if err != nil {
+		t.tree, t.treeFor, t.inTree = nil, "", false
+		return
+	}
+	if t.tree != nil && t.treeFor == t.valueFor {
+		tree.sel = t.tree.sel
+		tree.flatten()
+	} else {
+		t.inTree = false
+	}
+	t.tree, t.treeFor = tree, t.valueFor
+}
+
+func (t *kvTab) treeKey(m *model, k tea.KeyMsg) tea.Cmd {
+	n := t.tree.current()
+	switch k.String() {
+	case "esc", "q":
+		t.inTree = false
+	case "enter", "e":
+		if n.container() {
+			n.closed = !n.closed
+			t.tree.flatten()
+			return nil
+		}
+		return t.editField(m)
+	case "a":
+		parent := n
+		if !n.container() {
+			parent = n.parent
+		}
+		if parent == nil {
+			return nil
+		}
+		value := func(key string) {
+			at := parent.path() + "." + key
+			if parent.kind == 'a' {
+				at = parent.path() + "[+]"
+			}
+			m.ask("value of "+at+" (JSON, or text)", "", func(v string) tea.Cmd {
+				kid := &jnode{key: key, parent: parent}
+				kid.set(v)
+				parent.kids = append(parent.kids, kid)
+				parent.closed = false
+				t.tree.flatten()
+				return t.saveTree(m, "add "+kid.path())
+			})
+		}
+		if parent.kind == 'a' {
+			value("")
+			return nil
+		}
+		m.ask("new field in "+parent.path(), "", func(key string) tea.Cmd {
+			if key = strings.TrimSpace(key); key != "" {
+				value(key)
+			}
+			return nil
+		})
+	case "D", "delete":
+		if n.parent == nil {
+			return nil
+		}
+		path := n.path()
+		n.remove()
+		t.tree.flatten()
+		return t.saveTree(m, "delete "+path)
+	case "y":
+		copyText(n.text())
+		m.setStatus("copied "+n.path(), false)
+	default:
+		t.tree.key(k)
+	}
+	return nil
+}
+
+func (t *kvTab) editField(m *model) tea.Cmd {
+	n := t.tree.current()
+	m.askAI(n.path(), n.text(), "the new value of field "+n.path()+" of configuration key "+t.treeFor+", same type as now", func(v string) tea.Cmd {
+		if v == n.text() {
+			return nil
+		}
+		n.set(v)
+		t.tree.flatten()
+		return t.saveTree(m, "set "+n.path())
+	})
+	return nil
+}
+
+// saveTree writes the edited value back to the key it came from.
+func (t *kvTab) saveTree(m *model, what string) tea.Cmd {
+	m.setStatus(what, false)
+	return t.save(m, t.treeFor, t.tree.root.bytes())
 }

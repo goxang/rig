@@ -1,0 +1,37 @@
+# A Python service run as a local process: rig starts it, tails its JSON logs, reads /metrics itself,
+# sends load and runs unittest. No build step and no dependencies beyond python3.
+#
+#   rig up       start it
+#   rig          the control plane: Services, Logs, Metrics, Load, Tests
+version: 1
+project: pyhello
+default: local
+
+services:
+  pyhello:
+    run: { command: [python3, app.py] }
+    ports: { http: 7080 }
+    health: { port: http, path: /healthz }
+    metrics: { port: http }
+    env: { PORT: "7080", PYTHONUNBUFFERED: "1" }
+
+environments:
+  local:
+    description: pyhello as a local process
+    runtime: { type: local }
+
+components:
+  prom: { type: scrape }
+  load: { kind: loadgen, type: http, target: "svc://pyhello:7080/hello?name=load", rate: 10, max: 200, step: 10 }
+
+dashboards:
+  main:
+    - { title: requests/s, query: 'sum(rate(pyhello_requests_total[1m]))', unit: /s }
+    - { title: failures/s, query: 'sum(rate(pyhello_failures_total[1m]))', unit: /s }
+    - { title: latency (avg), query: '1000 * sum(rate(pyhello_latency_seconds_sum[1m])) / sum(rate(pyhello_latency_seconds_count[1m]))', unit: ms }
+
+tests:
+  unit: { command: 'python3 test_app.py' }
+
+ui:
+  mode: simple

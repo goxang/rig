@@ -85,7 +85,32 @@ func Open(file, env string) (*App, error) {
 		return nil, err
 	}
 	a.runtime = v.(core.Runtime)
+	// `rig vars set` lives in the environment's state, which needs the runtime; values in rig.yaml
+	// (queries, tasks, components) were expanded without it, so expand again with the overrides
+	if over := a.varOverrides(); len(over) > 0 {
+		if p, e, err = spec.LoadWith(file, env, over); err != nil {
+			return nil, err
+		}
+		a.Spec, a.Env = p, e
+		if err := a.pickNamespace(); err != nil {
+			return nil, err
+		}
+	}
 	return a, nil
+}
+
+func (a *App) varOverrides() map[string]string {
+	state, err := a.LoadState(context.Background())
+	if err != nil {
+		return nil
+	}
+	over := map[string]string{}
+	for k, v := range state {
+		if n, ok := strings.CutPrefix(k, "var."); ok {
+			over[n] = v
+		}
+	}
+	return over
 }
 
 func (a *App) Close() error {

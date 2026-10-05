@@ -45,6 +45,42 @@ type dataTab struct {
 	// whose status reloads the walk
 	marked   map[string]bool
 	changing string
+
+	// qmarked are the queues space marked, for P and D; qview is the messaging strip's list (0 the
+	// queues, else brokerViews[qview-1]) and qtable what it lists
+	qmarked map[string]bool
+	qview   int
+	qtable  core.Table
+	// detail is the selected queue's settings or peeked messages (focus 2); payload one message's
+	// body field by field
+	detail      *grid
+	detailFor   string
+	detailKind  string
+	detailTable core.Table
+	payload     *jsonTree
+}
+
+// brokerViews are the other lists of a RabbitMQ component, as management API queries.
+var brokerViews = [][2]string{
+	{"exchanges", "exchanges name type durable auto_delete internal message_stats.publish_in_details.rate message_stats.publish_out_details.rate"},
+	{"bindings", "bindings source destination destination_type routing_key"},
+	{"connections", "connections name user state channels client_properties.connection_name recv_oct_details.rate send_oct_details.rate"},
+	{"channels", "channels name user state consumer_count prefetch_count messages_unacknowledged"},
+	{"consumers", "consumers queue.name consumer_tag channel_details.connection_name prefetch_count ack_required active"},
+}
+
+type queueDetailMsg struct {
+	gen   int
+	queue string
+	kind  string
+	t     core.Table
+	err   error
+}
+
+type brokerViewMsg struct {
+	gen, view int
+	t         core.Table
+	err       error
 }
 
 type dataComp struct {
@@ -77,8 +113,15 @@ func (t *dataTab) hints() [][2]string {
 	switch {
 	case t.focus == 0:
 		return [][2]string{{"↑↓", "component"}, {"enter →", "open"}}
+	case t.focus == 2 && t.payload != nil:
+		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"y", "copy value"}, {"esc", "back to messages"}}
+	case t.focus == 2:
+		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
+	case c.kind == string(core.KindMessaging) && t.qview > 0:
+		return [][2]string{{"[ ]", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"esc ←", "components"}}
 	case c.kind == string(core.KindMessaging):
-		return [][2]string{{"/", "filter (*word*)"}, {"P", "purge queue"}, {"< >", "sort"}, {"esc ←", "components"}}
+		return [][2]string{{"enter", "queue details"}, {"m", "peek messages"}, {"space a", "mark, mark all"}, {"P", "purge marked/selected"}, {"X", "purge every queue shown"},
+			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"[ ]", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"< >", "sort"}, {"esc ←", "components"}}
 	}
 	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
 	if t.editable(c) {
@@ -232,6 +275,8 @@ func (t *dataTab) current() dataComp {
 func (t *dataTab) refresh(m *model) tea.Cmd {
 	c := t.current()
 	switch {
+	case c.kind == string(core.KindMessaging) && t.qview > 0:
+		return t.loadView(m)
 	case c.kind == string(core.KindMessaging):
 		return t.loadQueues(m)
 	case t.leaf && len(t.paths[c.name]) > 0 && t.paths[c.name][len(t.paths[c.name])-1] == "running":
@@ -255,6 +300,94 @@ func (t *dataTab) loadQueues(m *model) tea.Cmd {
 		}
 		return queuesMsg{gen: gen, queues: out, errs: errs}
 	}
+}
+
+func (t *dataTab) loadView(m *model) tea.Cmd {
+	a, gen, ctx, comp, view := m.app, m.gen, m.ctx, t.current().name, t.qview
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		v, err := a.Component(comp)
+		if err != nil {
+			return brokerViewMsg{gen: gen, view: view, err: err}
+		}
+		q, ok := v.(core.Querier)
+		if !ok {
+			return brokerViewMsg{gen: gen, view: view, err: fmt.Errorf("%s has no other lists", comp)}
+		}
+		tb, err := q.RunQuery(c, brokerViews[view-1][1])
+		return brokerViewMsg{gen: gen, view: view, t: tb, err: err}
+	}
+}
+
+// inspector is the selected messaging component when it can show a queue in depth.
+func (t *dataTab) inspector(m *model) (core.QueueInspector, bool) {
+	v, err := m.app.Component(t.current().name)
+	if err != nil {
+		return nil, false
+	}
+	qi, ok := v.(core.QueueInspector)
+	return qi, ok
+}
+
+func (t *dataTab) loadDetail(m *model, queue, kind string) tea.Cmd {
+	qi, ok := t.inspector(m)
+	if !ok {
+		m.setStatus(t.current().adapter+" cannot show a queue in depth", true)
+		return nil
+	}
+	if t.detailFor != queue || t.detailKind != kind {
+		t.detail, t.payload = nil, nil
+	}
+	t.detailFor, t.detailKind, t.focus = queue, kind, 2
+	gen, ctx := m.gen, m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		var tb core.Table
+		var err error
+		if kind == "messages" {
+			tb, err = qi.Peek(c, queue, 20)
+		} else {
+			tb, err = qi.QueueInfo(c, queue)
+		}
+		return queueDetailMsg{gen: gen, queue: queue, kind: kind, t: tb, err: err}
+	}
+}
+
+// queueTargets are the marked queues, else the selected one.
+func (t *dataTab) queueTargets() []string {
+	var out []string
+	for _, r := range t.right.rows {
+		if t.qmarked[r.id] {
+			out = append(out, r.id)
+		}
+	}
+	if len(out) == 0 {
+		if r, ok := t.right.current(); ok {
+			out = []string{r.id}
+		}
+	}
+	return out
+}
+
+func (t *dataTab) queueAct(m *model, verb string, names []string, f func(ctx context.Context, mq core.Messaging, q string) error) tea.Cmd {
+	if len(names) == 0 {
+		return nil
+	}
+	a, comp := m.app, t.current().name
+	what := names[0]
+	if len(names) > 1 {
+		what = fmt.Sprintf("%d queues", len(names))
+	}
+	t.qmarked = nil
+	return m.act(verb+" "+what, true, func(ctx context.Context) error {
+		mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
+		if err != nil {
+			return err
+		}
+		return each(names, func(q string) error { return f(ctx, mq, q) })
+	})
 }
 
 // load walks the selected component to its current path.
@@ -314,6 +447,33 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if t.current().kind == string(core.KindMessaging) {
 			t.fill()
 		}
+	case brokerViewMsg:
+		if msg.gen != m.gen || msg.view != t.qview {
+			return nil
+		}
+		t.qtable, t.err = msg.t, msg.err
+		t.fill()
+	case queueDetailMsg:
+		if msg.gen != m.gen || msg.queue != t.detailFor || msg.kind != t.detailKind {
+			return nil
+		}
+		if msg.err != nil {
+			m.setStatus(msg.queue+": "+msg.err.Error(), true)
+			return nil
+		}
+		t.detailTable = msg.t
+		cols := []gcol{col("FIELD", 34), col("VALUE", 0)}
+		if msg.kind == "messages" {
+			cols = []gcol{rcol("#", 3), col("EXCHANGE", 16), col("ROUTING KEY", 24), col("REDELIV", 7), col("PROPERTIES", 24), col("PAYLOAD", 0)}
+		}
+		if t.detail == nil {
+			t.detail = newGrid("dqd", cols...)
+		}
+		var rows []grow
+		for i, r := range msg.t.Rows {
+			rows = append(rows, grow{id: strconv.Itoa(i), cells: r})
+		}
+		t.detail.set(rows)
 	case suggestMsg:
 		if msg.gen == m.gen && m.prompt == nil && msg.comp == t.current().name {
 			m.setStatus("", false)
@@ -335,9 +495,15 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 func (t *dataTab) show(m *model) tea.Cmd {
 	t.table, t.err, t.leaf, t.loading, t.query = core.Table{}, nil, false, false, ""
 	t.right = newGrid("dright")
+	t.detail, t.detailFor, t.payload, t.qmarked, t.qtable = nil, "", nil, nil, core.Table{}
+	if t.current().kind == string(core.KindMessaging) && t.qview > 0 {
+		t.fill()
+		return t.loadView(m)
+	}
 	if t.current().kind == string(core.KindMessaging) {
 		t.right = newGrid("dright", col("QUEUE", 0), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
 		t.right.sortBy, t.right.desc = 1, true
+		t.right.simple = []int{0, 1, 4}
 		t.fill()
 		return t.loadQueues(m)
 	}
@@ -348,11 +514,19 @@ func (t *dataTab) show(m *model) tea.Cmd {
 func (t *dataTab) fill() {
 	c := t.current()
 	match := globMatcher(t.filter)
-	if c.kind == string(core.KindMessaging) {
+	tbl := t.table
+	if c.kind == string(core.KindMessaging) && t.qview > 0 {
+		tbl = t.qtable
+	}
+	if c.kind == string(core.KindMessaging) && t.qview == 0 {
 		var rows []grow
 		for _, q := range t.queues[c.name] {
 			if !match(q.Name) {
 				continue
+			}
+			name := q.Name
+			if t.qmarked[q.Name] {
+				name = sGreen.Render("● ") + name
 			}
 			depth := strconv.Itoa(q.Messages)
 			if q.Messages > 0 {
@@ -362,15 +536,15 @@ func (t *dataTab) fill() {
 			if q.Consumers == 0 {
 				cons = sRed.Render("0")
 			}
-			rows = append(rows, grow{id: q.Name, cells: []string{q.Name, depth, viz.Sparkline(t.depth[c.name+"/"+q.Name], 16, viz.Palette[1]), strconv.Itoa(q.Unacked), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")},
+			rows = append(rows, grow{id: q.Name, cells: []string{name, depth, viz.Sparkline(t.depth[c.name+"/"+q.Name], 16, viz.Palette[1]), strconv.Itoa(q.Unacked), cons, viz.Human(q.InRate, "/s"), viz.Human(q.OutRate, "/s")},
 				keys: []any{q.Name, float64(q.Messages), float64(q.Messages), float64(q.Unacked), float64(q.Consumers), q.InRate, q.OutRate}})
 		}
 		t.right.set(rows)
 		return
 	}
-	ws := colWidths(t.table, 0)
+	ws := colWidths(tbl, 0)
 	var cols []gcol
-	for i, name := range t.table.Columns {
+	for i, name := range tbl.Columns {
 		cols = append(cols, col(name, min(max(ws[i], 4), 60)))
 	}
 	if len(cols) > 0 {
@@ -382,7 +556,7 @@ func (t *dataTab) fill() {
 		t.right.cols = cols
 	}
 	var rows []grow
-	for i, r := range t.table.Rows {
+	for i, r := range tbl.Rows {
 		if len(r) == 0 || !match(r[0]) {
 			continue
 		}
@@ -411,8 +585,16 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
+	if t.focus == 2 {
+		return t.detailKey(m, k)
+	}
 	if t.right.key(k) {
 		return nil
+	}
+	if c.kind == string(core.KindMessaging) {
+		if cmd, ok := t.queueKey(m, k); ok {
+			return cmd
+		}
 	}
 	switch k.String() {
 	case "/":
@@ -493,14 +675,18 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			return suggestMsg{gen: gen, comp: c.name, at: at, text: pq.SuggestQuery(c2, at)}
 		}
 	case "y", "Y":
+		tbl := t.table
 		if c.kind == string(core.KindMessaging) {
-			return nil
+			if t.qview == 0 {
+				return nil
+			}
+			tbl = t.qtable
 		}
-		rows := t.table.Rows
+		rows := tbl.Rows
 		if r, ok := t.right.current(); ok && k.String() == "y" {
-			rows = [][]string{t.table.Rows[rowIndex(r.id)]}
+			rows = [][]string{tbl.Rows[rowIndex(r.id)]}
 		}
-		copyText(tsv(t.table.Columns, rows))
+		copyText(tsv(tbl.Columns, rows))
 		m.setStatus(fmt.Sprintf("copied %d rows (tab-separated, with the header)", len(rows)), false)
 	case " ":
 		if r, ok := t.right.current(); ok && t.editable(c) {
@@ -522,19 +708,152 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if t.editable(c) {
 			t.edit(m, c)
 		}
-	case "P":
-		r, ok := t.right.current()
-		if !ok || c.kind != string(core.KindMessaging) {
-			return nil
+	}
+	return nil
+}
+
+// queueKey handles the messaging keys: the strip of lists, and on the queue list details, peek,
+// marks, purge, delete and publish.
+func (t *dataTab) queueKey(m *model, k tea.KeyMsg) (tea.Cmd, bool) {
+	switch k.String() {
+	case "[", "]":
+		if t.current().adapter != "rabbitmq" {
+			return nil, true
 		}
-		a, comp, q := m.app, c.name, r.id
-		return m.act("purge queue "+q, true, func(ctx context.Context) error {
-			mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
-			if err != nil {
-				return err
+		n := len(brokerViews) + 1
+		if k.String() == "]" {
+			t.qview = (t.qview + 1) % n
+		} else {
+			t.qview = (t.qview + n - 1) % n
+		}
+		return t.switchView(m), true
+	}
+	if t.qview > 0 {
+		return nil, false
+	}
+	r, ok := t.right.current()
+	switch k.String() {
+	case "enter", "right", "l", "i":
+		if ok {
+			return t.loadDetail(m, r.id, "info"), true
+		}
+	case "m":
+		if ok {
+			return t.loadDetail(m, r.id, "messages"), true
+		}
+	case " ":
+		if ok {
+			if t.qmarked == nil {
+				t.qmarked = map[string]bool{}
 			}
-			return mq.Purge(ctx, q)
+			t.qmarked[r.id] = !t.qmarked[r.id]
+			t.fill()
+			t.right.key(tea.KeyMsg{Type: tea.KeyDown})
+		}
+	case "a":
+		all := len(t.qmarked) < len(t.right.rows)
+		t.qmarked = map[string]bool{}
+		for _, r := range t.right.rows {
+			t.qmarked[r.id] = all
+		}
+		t.fill()
+	case "P":
+		return t.queueAct(m, "purge", t.queueTargets(), func(ctx context.Context, mq core.Messaging, q string) error { return mq.Purge(ctx, q) }), true
+	case "X":
+		var names []string
+		for _, q := range t.queues[t.current().name] {
+			if q.Messages > 0 && globMatcher(t.filter)(q.Name) {
+				names = append(names, q.Name)
+			}
+		}
+		if len(names) == 0 {
+			m.setStatus("no queue shown has messages", false)
+			return nil, true
+		}
+		return t.queueAct(m, "purge", names, func(ctx context.Context, mq core.Messaging, q string) error { return mq.Purge(ctx, q) }), true
+	case "D":
+		if _, ok := t.inspector(m); !ok {
+			m.setStatus(t.current().adapter+" cannot delete queues", true)
+			return nil, true
+		}
+		return t.queueAct(m, "delete queue", t.queueTargets(), func(ctx context.Context, mq core.Messaging, q string) error {
+			return mq.(core.QueueInspector).DeleteQueue(ctx, q)
+		}), true
+	case "p":
+		if !ok {
+			return nil, true
+		}
+		q, a, comp := r.id, m.app, t.current().name
+		m.ask("publish to "+q+" (body)", "", func(body string) tea.Cmd {
+			return m.act("publish to "+q, false, func(ctx context.Context) error {
+				mq, _, err := engine.Get[core.Messaging](a, core.KindMessaging, comp)
+				if err != nil {
+					return err
+				}
+				return mq.Publish(ctx, q, []byte(body))
+			})
 		})
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+func (t *dataTab) switchView(m *model) tea.Cmd {
+	t.filter, t.err = "", nil
+	t.detail, t.detailFor, t.payload = nil, "", nil
+	if t.qview == 0 {
+		return t.show(m)
+	}
+	t.right, t.qtable = newGrid("dright"), core.Table{}
+	return t.loadView(m)
+}
+
+func (t *dataTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
+	if t.payload != nil {
+		switch k.String() {
+		case "esc", "q":
+			t.payload = nil
+		case "y":
+			copyText(t.payload.current().text())
+			m.setStatus("copied "+t.payload.current().path(), false)
+		default:
+			t.payload.key(k)
+		}
+		return nil
+	}
+	if t.detail == nil {
+		t.focus = 1
+		return nil
+	}
+	if t.detail.key(k) {
+		return nil
+	}
+	r, ok := t.detail.current()
+	switch k.String() {
+	case "esc", "left", "h":
+		t.focus = 1
+	case "m":
+		return t.loadDetail(m, t.detailFor, "messages")
+	case "i":
+		return t.loadDetail(m, t.detailFor, "info")
+	case "r":
+		return t.loadDetail(m, t.detailFor, t.detailKind)
+	case "y":
+		if ok {
+			copyText(tsv(t.detailTable.Columns, [][]string{t.detailTable.Rows[rowIndex(r.id)]}))
+			m.setStatus("copied the row", false)
+		}
+	case "enter":
+		if ok && t.detailKind == "messages" {
+			row := t.detailTable.Rows[rowIndex(r.id)]
+			tree, err := newJSONTree("dqd:payload", []byte(row[len(row)-1]))
+			if err != nil {
+				m.setStatus("that body is not JSON; y copies it", true)
+				return nil
+			}
+			t.payload = tree
+		}
 	}
 	return nil
 }
@@ -577,6 +896,24 @@ func (t *dataTab) askQuery(m *model, c dataComp, at []string, value, template st
 }
 
 func (t *dataTab) click(m *model, h hit) tea.Cmd {
+	if i, ok := stripHit(h, "dq:view"); ok {
+		if i != t.qview {
+			t.qview = i
+			return t.switchView(m)
+		}
+		return nil
+	}
+	if t.payload != nil && t.payload.click(h) {
+		t.focus = 2
+		return nil
+	}
+	if t.detail != nil && strings.HasPrefix(h.id, "dqd:") {
+		t.focus = 2
+		if t.detail.click(h) && h.double {
+			return t.detailKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+		}
+		return nil
+	}
 	if strings.HasPrefix(h.id, "dcomp:") {
 		before := t.current().name
 		t.left.click(h)
@@ -630,12 +967,65 @@ func (t *dataTab) view(m *model, w, h int) string {
 		hh = lipgloss.Height(head)
 		head += "\n"
 	}
-	noteH := boolInt(t.table.Note != "" && c.kind != string(core.KindMessaging))
+	if c.kind == string(core.KindMessaging) {
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, t.brokerView(m, c, title, head, hh, lw, w-lw, h))
+	}
+	noteH := boolInt(t.table.Note != "")
 	body := head + t.right.view(m, lw+1, 1+hh, w-lw-2, h-2-hh-noteH, t.focus == 1)
 	if noteH > 0 {
 		body += "\n" + sDim.Render(t.table.Note)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(title, body, w-lw, h, t.focus == 1))
+}
+
+// brokerView is a messaging component: the strip of its lists (RabbitMQ), the list, and under it
+// the selected queue's details or messages.
+func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w, h int) string {
+	stripH := 0
+	var strip string
+	if c.adapter == "rabbitmq" {
+		labels := []string{"queues"}
+		for _, v := range brokerViews {
+			labels = append(labels, v[0])
+		}
+		strip = m.strip("dq:view", x+1, 1, labels, t.qview) + "\n"
+		stripH = 1
+	}
+	if n := len(t.qmarked); n > 0 {
+		marked := 0
+		for _, on := range t.qmarked {
+			marked += boolInt(on)
+		}
+		if marked > 0 {
+			title += fmt.Sprintf(" · %d marked", marked)
+		}
+	}
+	listH := h
+	if t.detailFor != "" && t.qview == 0 {
+		listH = max(8, h*2/5)
+	}
+	body := strip + head + t.right.view(m, x+1, 1+stripH+hh, w-2, listH-2-stripH-hh, t.focus == 1)
+	list := panel(title, body, w, listH, t.focus == 1)
+	if listH == h {
+		return list
+	}
+	dh := h - listH
+	dt := t.detailFor + " · " + map[string]string{"info": "settings, consumers, bindings · m messages", "messages": "peeked (requeued) · enter: body as JSON · i settings"}[t.detailKind]
+	var db string
+	switch {
+	case t.payload != nil:
+		dt = t.detailFor + " · message · " + t.payload.current().path()
+		db = t.payload.view(m, x+1, listH+1, w-2, dh-2)
+	case t.detail == nil:
+		db = sDim.Render("loading…")
+	default:
+		noteH := boolInt(t.detailTable.Note != "")
+		db = t.detail.view(m, x+1, listH+1, w-2, dh-2-noteH, t.focus == 2)
+		if noteH > 0 {
+			db += "\n" + sDim.Render(t.detailTable.Note)
+		}
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, list, panel(dt, db, w, dh, t.focus == 2))
 }
 
 // globMatcher matches names case-insensitively: plain text anywhere in the name, or a glob

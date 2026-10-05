@@ -98,6 +98,8 @@ type Opts struct {
 	Highlight int
 	Cursor    float64
 	Stack     bool
+	// Band shades the columns between two fractions of the time axis (a range being dragged); off when Band[1] <= Band[0]
+	Band [2]float64
 }
 
 // Span is the time range the lines cover.
@@ -246,6 +248,14 @@ func Plot(lines []Line, w, h int, o Opts) string {
 		cursorCol = int(math.Round(math.Min(o.Cursor, 1) * float64(cw-1)))
 	}
 	faded := lipgloss.AdaptiveColor{Light: "#C4C4C4", Dark: "#3A3F44"}
+	bandBg := lipgloss.AdaptiveColor{Light: "#D6E4FF", Dark: "#24395C"}
+	inBand := func(c int) bool {
+		if o.Band[1] <= o.Band[0] || cw <= 1 {
+			return false
+		}
+		f := float64(c) / float64(cw-1)
+		return f >= o.Band[0] && f <= o.Band[1]
+	}
 
 	var b strings.Builder
 	for r := 0; r < plotH; r++ {
@@ -264,8 +274,9 @@ func Plot(lines []Line, w, h int, o Opts) string {
 			}
 			// group runs of one colour into one styled string
 			col := colors[r][c]
+			band := inBand(c)
 			var run strings.Builder
-			for c < cw && colors[r][c] == col && !(c == cursorCol && cells[r][c] == 0) {
+			for c < cw && colors[r][c] == col && inBand(c) == band && !(c == cursorCol && cells[r][c] == 0) {
 				if cells[r][c] == 0 {
 					run.WriteRune(' ')
 				} else {
@@ -273,14 +284,18 @@ func Plot(lines []Line, w, h int, o Opts) string {
 				}
 				c++
 			}
+			st := lipgloss.NewStyle()
+			if band {
+				st = st.Background(bandBg)
+			}
 			switch {
 			case col < 0:
-				b.WriteString(run.String())
 			case o.Highlight >= 0 && col != o.Highlight:
-				b.WriteString(lipgloss.NewStyle().Foreground(faded).Render(run.String()))
+				st = st.Foreground(faded)
 			default:
-				b.WriteString(lipgloss.NewStyle().Foreground(colorOf(lines, col)).Render(run.String()))
+				st = st.Foreground(colorOf(lines, col))
 			}
+			b.WriteString(st.Render(run.String()))
 		}
 		b.WriteByte('\n')
 	}
@@ -679,6 +694,23 @@ func Waterfall(spans []core.Span, w int) string {
 	if len(spans) == 0 {
 		return faint.Render("no spans")
 	}
+	wf := Waterfalls(spans, w)
+	return wf.Header + "\n" + strings.Join(wf.Rows, "\n") + "\n" + wf.Footer
+}
+
+// WaterfallView is a waterfall split in rows, so a screen can scroll it and select a span: Order[i]
+// is the index in spans of Rows[i].
+type WaterfallView struct {
+	Header, Footer string
+	Rows           []string
+	Order          []int
+}
+
+func Waterfalls(spans []core.Span, w int) WaterfallView {
+	var out WaterfallView
+	if len(spans) == 0 {
+		return out
+	}
 	children := map[string][]int{}
 	ids := map[string]bool{}
 	for _, s := range spans {
@@ -705,9 +737,8 @@ func Waterfall(spans []core.Span, w int) string {
 	}
 	colors := map[string]lipgloss.Color{}
 	nameW := min(46, w/2)
-	barW := w - nameW - 12
-	var b strings.Builder
-	b.WriteString(label.Render(fmt.Sprintf("%-*s %s %s", nameW, "span", strings.Repeat(" ", barW), "duration")) + "\n")
+	barW := max(1, w-nameW-12)
+	out.Header = label.Render(fmt.Sprintf("%-*s %s %s", nameW, "span", strings.Repeat(" ", barW), "duration"))
 	var walk func(i, depth int)
 	walk = func(i, depth int) {
 		s := spans[i]
@@ -730,7 +761,8 @@ func Waterfall(spans []core.Span, w int) string {
 			style = style.Foreground(lipgloss.Color("#F2495C"))
 		}
 		bar := strings.Repeat(" ", off) + style.Render(strings.Repeat("━", max(ln, 1))) + strings.Repeat(" ", max(0, barW-off-ln))
-		b.WriteString(fmt.Sprintf("%s %s %8s\n", style.Render(fmt.Sprintf("%-*s", nameW, name)), bar, s.Duration.Round(time.Microsecond)))
+		out.Rows = append(out.Rows, fmt.Sprintf("%s %s %8s", style.Render(fmt.Sprintf("%-*s", nameW, name)), bar, s.Duration.Round(time.Microsecond)))
+		out.Order = append(out.Order, i)
 		for _, ch := range children[s.ID] {
 			walk(ch, depth+1)
 		}
@@ -738,6 +770,6 @@ func Waterfall(spans []core.Span, w int) string {
 	for _, r := range roots {
 		walk(r, 0)
 	}
-	b.WriteString(faint.Render(fmt.Sprintf("%d spans, %s, %d services", len(spans), total.Round(time.Microsecond), len(colors))))
-	return b.String()
+	out.Footer = faint.Render(fmt.Sprintf("%d spans, %s, %d services", len(spans), total.Round(time.Microsecond), len(colors)))
+	return out
 }
