@@ -30,7 +30,24 @@ func Classify(argv []string) Risk {
 		sub = argv[1]
 	}
 	switch argv[0] {
-	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "data", "source":
+	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "data", "source", "docs":
+		return Read
+	case "init":
+		for _, a := range argv[1:] {
+			if a == "--force" {
+				return Danger
+			}
+		}
+		for _, a := range argv[1:] {
+			if a == "--dry-run" {
+				return Read
+			}
+		}
+		return Change
+	case "skill":
+		if len(argv) > 1 {
+			return Change
+		}
 		return Read
 	case "query", "cache":
 		if len(argv) <= 2 {
@@ -108,7 +125,7 @@ func Classify(argv []string) Risk {
 			return Read
 		}
 		return Danger
-	case "secret", "mcp", "debug", "init", "ide", "resume", "ai", "completion", "help":
+	case "secret", "mcp", "debug", "ide", "resume", "ai", "completion", "help":
 		return Refused
 	}
 	return Change
