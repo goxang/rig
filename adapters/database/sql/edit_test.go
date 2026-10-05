@@ -35,6 +35,9 @@ func TestEditByPrimaryKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if q := d.SuggestRowQuery(ctx, path, tb, 1); q != "SELECT * FROM [dbo].[t] WHERE [id] = 2" {
+		t.Fatalf("row query %q", q)
+	}
 	if err := d.Set(ctx, path, tb, 1, 1, "bee"); err != nil {
 		t.Fatal(err)
 	}
@@ -48,5 +51,13 @@ func TestEditByPrimaryKey(t *testing.T) {
 	nk := []string{"rig_edit_test", "tables", "dbo.nokey"}
 	if err := d.Delete(ctx, nk, core.Table{Columns: []string{"x"}, Rows: [][]string{{"1"}}}, []int{0}); err == nil {
 		t.Fatal("deleted from a table without a primary key")
+	}
+}
+
+func TestSQLEquals(t *testing.T) {
+	for in, want := range map[string]string{"NULL": " IS NULL", "42": " = 42", "-1.5": " = -1.5", "it's": " = 'it''s'", "2026-10-05": " = '2026-10-05'"} {
+		if got := sqlEquals(in); got != want {
+			t.Errorf("sqlEquals(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

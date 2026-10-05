@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,6 +45,10 @@ type Runner struct {
 	// Sock is the bridge for approvals and UI actions; empty when nothing can answer.
 	Sock string
 	Kube bool
+
+	clientOnce sync.Once
+	client     *http.Client
+	clientErr  error
 }
 
 // LastPrompt is the user's latest message, which tools check "user_request" quotes against.
@@ -197,6 +204,9 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 		if r.Setup.Model != "" {
 			args = append(args, "--model", r.Setup.Model)
 		}
+		if r.Setup.Effort != "" {
+			args = append(args, "--effort", r.Setup.Effort)
+		}
 		if s.BackendID != "" {
 			args = append(args, "--resume", s.BackendID)
 		}
@@ -209,6 +219,9 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 		if model != "" {
 			args = append(args, "-m", model)
 		}
+		if r.Setup.Effort != "" {
+			args = append(args, "--variant", r.Setup.Effort)
+		}
 		if s.BackendID != "" {
 			args = append(args, "--session", s.BackendID)
 		} else {
@@ -219,6 +232,33 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 	cmd.Dir, cmd.Env = r.Scope.Dir, env
 	cmd.WaitDelay = 3 * time.Second
 	return cmd, nil
+}
+
+var userMCPs struct {
+	sync.Once
+	names []string
+}
+
+// userMCPs are the MCP servers the user's opencode config (global and project) declares.
+func (r *Runner) userMCPs() []string {
+	userMCPs.Do(func() {
+		cmd := exec.Command(r.Setup.Bin, "debug", "config")
+		cmd.Dir = r.Scope.Dir
+		raw, err := cmd.Output()
+		if err != nil {
+			return
+		}
+		var c struct{ MCP map[string]json.RawMessage }
+		if json.Unmarshal(raw, &c) != nil {
+			return
+		}
+		for name := range c.MCP {
+			if name != "rig" {
+				userMCPs.names = append(userMCPs.names, name)
+			}
+		}
+	})
+	return userMCPs.names
 }
 
 // opencodeConfig is laid over the user's opencode config. Tools are set to "ask" rather than
@@ -233,9 +273,15 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 		"instructions": []string{rules},
 		"permission":   map[string]any{"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "deny", "read": read},
 	}
-	if mcpArgv != nil {
-		cfg["mcp"] = map[string]any{"rig": map[string]any{"type": "local", "command": mcpArgv, "environment": mcpEnv, "enabled": true}}
+	// The user's own MCP servers would be extra tools, and a dead one stalls every start by ~30s.
+	mcp := map[string]any{}
+	for _, name := range r.userMCPs() {
+		mcp[name] = map[string]any{"enabled": false}
 	}
+	if mcpArgv != nil {
+		mcp["rig"] = map[string]any{"type": "local", "command": mcpArgv, "environment": mcpEnv, "enabled": true}
+	}
+	cfg["mcp"] = mcp
 	model := r.Setup.Model
 	switch r.Setup.Provider {
 	case "openai", "9router", "deepseek":
@@ -432,11 +478,13 @@ func (r *Runner) Complete(ctx context.Context, hint, text string) (string, error
 	var out string
 	var err error
 	switch {
+	case r.Setup.FastURL != "":
+		out, err = r.chatCompletion(ctx, r.Setup.FastURL, r.Setup.FastAPIKey, model, prompt)
 	case (r.Setup.Provider == "openai" || r.Setup.Provider == "9router" || r.Setup.Provider == "deepseek") && r.Setup.URL != "":
 		if model == "" {
 			model = r.Setup.Model
 		}
-		out, err = r.chatCompletion(ctx, model, prompt)
+		out, err = r.chatCompletion(ctx, r.Setup.URL, r.Setup.APIKey, model, prompt)
 	case r.Setup.Backend == BackendClaude:
 		if model == "" {
 			model = "haiku"
@@ -498,27 +546,22 @@ func cleanCompletion(typed, out string) string {
 	return out
 }
 
-func (r *Runner) chatCompletion(ctx context.Context, model, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]any{"model": model, "max_tokens": 120, "temperature": 0,
+func (r *Runner) chatCompletion(ctx context.Context, endpoint, apiKey, model, prompt string) (string, error) {
+	body, _ := json.Marshal(map[string]any{"model": model, "max_tokens": 120, "temperature": 0, "stream": false,
 		"messages": []map[string]string{{"role": "user", "content": prompt}}})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(r.Setup.URL, "/")+"/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if r.Setup.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+r.Setup.APIKey)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.Proxy = nil
-	if p := r.proxyURL(); p != "" {
-		u, err := url.Parse(p)
-		if err != nil {
-			return "", fmt.Errorf("proxy %q: %w", p, err)
-		}
-		tr.Proxy = http.ProxyURL(u)
+	c, err := r.httpClient()
+	if err != nil {
+		return "", err
 	}
-	resp, err := (&http.Client{Transport: tr, Timeout: 60 * time.Second}).Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -538,4 +581,92 @@ func (r *Runner) chatCompletion(ctx context.Context, model, prompt string) (stri
 		return "", fmt.Errorf("unexpected reply: %s", tail(string(raw), 300))
 	}
 	return r2.Choices[0].Message.Content, nil
+}
+
+// httpClient is kept for the runner's life: completions reuse its connection instead of a TLS
+// handshake (through the proxy) per keystroke pause.
+func (r *Runner) httpClient() (*http.Client, error) {
+	r.clientOnce.Do(func() {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.Proxy = nil
+		// Same extra CAs as opencode trusts, e.g. a self-signed router the chat already reaches.
+		if f := os.Getenv("NODE_EXTRA_CA_CERTS"); f != "" {
+			if pem, err := os.ReadFile(f); err == nil {
+				pool, err := x509.SystemCertPool()
+				if err != nil {
+					pool = x509.NewCertPool()
+				}
+				pool.AppendCertsFromPEM(pem)
+				tr.TLSClientConfig = &tls.Config{RootCAs: pool}
+			}
+		}
+		if p := r.proxyURL(); p != "" {
+			u, err := url.Parse(p)
+			if err != nil {
+				r.clientErr = fmt.Errorf("proxy %q: %w", p, err)
+				return
+			}
+			tr.Proxy = http.ProxyURL(u)
+		}
+		r.client = &http.Client{Transport: tr, Timeout: 60 * time.Second}
+	})
+	return r.client, r.clientErr
+}
+
+// Models lists what "model" can be set to, or with fast "fast_model": the endpoint's own list when
+// one is set, else the backend's.
+func (r *Runner) Models(ctx context.Context, fast bool) ([]string, error) {
+	switch {
+	case fast && r.Setup.FastURL != "":
+		return r.endpointModels(ctx, r.Setup.FastURL, r.Setup.FastAPIKey)
+	case (r.Setup.Provider == "openai" || r.Setup.Provider == "9router" || r.Setup.Provider == "deepseek") && r.Setup.URL != "":
+		return r.endpointModels(ctx, r.Setup.URL, r.Setup.APIKey)
+	case r.Setup.Backend == BackendClaude:
+		return []string{"opus", "sonnet", "haiku"}, nil
+	case !r.Setup.Enabled():
+		return nil, errors.New("AI is " + r.Setup.Describe())
+	}
+	cmd := exec.CommandContext(ctx, r.Setup.Bin, "models")
+	cmd.Dir, cmd.Env = r.Scope.Dir, r.env()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("opencode models: %w", err)
+	}
+	return strings.Fields(string(out)), nil
+}
+
+func (r *Runner) endpointModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	c, err := r.httpClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("%s: %s", resp.Status, tail(string(raw), 300))
+	}
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("unexpected model list: %s", tail(string(raw), 300))
+	}
+	var out []string
+	for _, m := range list.Data {
+		out = append(out, m.ID)
+	}
+	return out, nil
 }

@@ -444,6 +444,12 @@ type PathQuerier interface {
 	SuggestQuery(ctx context.Context, path []string) string
 }
 
+// RowQuerier suggests a query that reads one row of what a Browse of path returned (Q on a row of the
+// Data screen), e.g. a SELECT by its primary key.
+type RowQuerier interface {
+	SuggestRowQuery(ctx context.Context, path []string, t Table, row int) string
+}
+
 // Editor changes what a Browse of path returned in t: Delete removes rows (indexes into t.Rows), Set
 // writes one cell. Each refuses a level it cannot change safely.
 type Editor interface {

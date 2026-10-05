@@ -257,12 +257,12 @@ func (t *queriesTab) name() string { return "Queries" }
 func (t *queriesTab) typing() bool { return false }
 func (t *queriesTab) hints() [][2]string {
 	if t.focusRes {
-		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"< >", "sort"}, {"I", "invert"}}
+		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"I", "invert"}}
 	}
 	if t.history {
 		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H", "back to queries"}}
 	}
-	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"a", "schedule on/off"}, {"H", "history"}, {"→", "result"}, {"< >", "sort"}}
+	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H", "history"}, {"→", "result"}, {"< >", "sort"}}
 }
 
 func (t *queriesTab) interval() time.Duration { return time.Second }
@@ -333,7 +333,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 
 func (t *queriesTab) newQuery(m *model, comp string) {
 	lang := t.langs[comp]
-	m.askAI(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, func(v string) tea.Cmd {
+	m.askTemplate(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, func(v string) tea.Cmd {
 		if strings.TrimSpace(v) == "" {
 			return nil
 		}
@@ -368,7 +368,9 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.focusRes = false
 				return nil
 			}
-			t.result.key(msg)
+			if !t.result.key(msg) {
+				t.copyResult(m, msg.String())
+			}
 			return nil
 		}
 		if msg.String() == "H" {
@@ -392,6 +394,13 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		switch msg.String() {
 		case "right", "l":
 			t.focusRes = true
+		case "y":
+			if q != nil {
+				osc52(q.Query)
+				m.setStatus("copied "+name+"'s query", false)
+			}
+		case "Y":
+			t.copyResult(m, "Y")
 		case "enter":
 			if q != nil {
 				return t.runSelected(m, name, q)
@@ -599,13 +608,18 @@ func (t *queriesTab) savedView(m *model, w, h int) string {
 	case q == nil:
 		body, title = sDim.Render("press n to write a query"), "result"
 	case r == nil:
-		body, title = sDim.Render(strings.TrimSpace(q.Query)+"\n\nenter runs it"), name
+		body, title = sDim.Render(wordWrap(strings.TrimSpace(q.Query), w-4)+"\n\nenter runs it · y copies it"), name
 	case r.err != nil:
-		body, title = sRed.Render(wrap(r.err.Error(), w-4)), name
+		body, title = sDim.Render(wordWrap("› "+strings.Join(strings.Fields(q.Query), " "), w-4))+"\n\n"+sRed.Render(wrap(r.err.Error(), w-4)), name
 	default:
 		t.setResult(name, r.table)
 		title = fmt.Sprintf("%s · %d rows · %s · %s ago", name, len(r.table.Rows), r.took.Round(time.Millisecond), shortAge(time.Since(r.at)))
-		body = t.result.view(m, 1, listH+1, w-2, resH-2-boolInt(r.table.Note != ""), t.focusRes)
+		lines := strings.Split(wordWrap("› "+strings.Join(strings.Fields(q.Query), " "), w-4), "\n")
+		if len(lines) > 3 {
+			lines = append(lines[:2], truncate(lines[2], w-6)+"…")
+		}
+		head := sDim.Render(strings.Join(lines, "\n"))
+		body = head + "\n" + t.result.view(m, 1, listH+1+len(lines), w-2, resH-2-len(lines)-boolInt(r.table.Note != ""), t.focusRes)
 		if r.table.Note != "" {
 			body += "\n" + sDim.Render(r.table.Note)
 		}
@@ -643,6 +657,50 @@ func (t *queriesTab) setResult(name string, tb core.Table) {
 		rows[i] = grow{id: strconv.Itoa(i) + "|" + strings.Join(r, "|"), cells: r}
 	}
 	t.result.set(rows)
+}
+
+// copyResult puts the shown result on the clipboard: y the selected row, Y every row.
+func (t *queriesTab) copyResult(m *model, key string) {
+	if key != "y" && key != "Y" {
+		return
+	}
+	var tb core.Table
+	if t.history {
+		m.sched.mu.Lock()
+		if cur, ok := t.hist.current(); ok {
+			if i, err := strconv.Atoi(cur.id); err == nil && i < len(m.sched.runs) {
+				tb = m.sched.runs[i].Table
+			}
+		}
+		m.sched.mu.Unlock()
+	} else {
+		name := t.shownFor
+		if name == "" {
+			name, _ = t.selected(m)
+		}
+		if r := m.sched.result(name); r != nil {
+			tb = r.table
+		}
+	}
+	rows := tb.Rows
+	if r, ok := t.result.current(); ok && key == "y" {
+		rows = [][]string{r.cells}
+	}
+	if len(tb.Columns) == 0 {
+		m.setStatus("no result to copy", true)
+		return
+	}
+	osc52(tsv(tb.Columns, rows))
+	m.setStatus(fmt.Sprintf("copied %d rows (tab-separated, with the header)", len(rows)), false)
+}
+
+func tsv(cols []string, rows [][]string) string {
+	var b strings.Builder
+	b.WriteString(strings.Join(cols, "\t") + "\n")
+	for _, r := range rows {
+		b.WriteString(strings.Join(r, "\t") + "\n")
+	}
+	return b.String()
 }
 
 // colWidths sizes columns to their content.

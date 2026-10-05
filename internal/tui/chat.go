@@ -50,7 +50,7 @@ type (
 	}
 )
 
-var slashCommands = []string{"/new", "/sessions", "/close", "/stop", "/help"}
+var slashCommands = []string{"/new", "/sessions", "/close", "/stop", "/model", "/effort", "/fast", "/autocomplete", "/help"}
 
 // screenStarters are offered (tab) in an empty chat, per screen.
 var screenStarters = map[string][]string{
@@ -202,10 +202,92 @@ func (m *model) chatCommand(v string) tea.Cmd {
 		m.setStatus("conversation closed", false)
 	case "/sessions":
 		m.pickChatSession()
+	case "/model", "/fast":
+		return m.pickModel(strings.Fields(v)[0] == "/fast")
+	case "/effort":
+		if c.runner == nil {
+			return nil
+		}
+		levels := append([]string{"(default)"}, c.runner.Setup.Efforts()...)
+		m.pick("effort of chat turns ("+c.runner.Setup.Backend+")", levels, nil, max(0, indexOf(levels, c.runner.Setup.Effort)), false, func(l []string) tea.Cmd {
+			if len(l) > 0 {
+				m.setAI("effort", strings.TrimPrefix(l[0], "(default)"))
+			}
+			return nil
+		})
+	case "/autocomplete":
+		m.toggleAutocomplete()
 	default:
-		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
 	}
 	return nil
+}
+
+func indexOf(list []string, s string) int {
+	for i, x := range list {
+		if x == s {
+			return i
+		}
+	}
+	return -1
+}
+
+type aiModelsMsg struct {
+	fast   bool
+	models []string
+	err    error
+}
+
+// pickModel lists the models the backend (or, for /fast, the completion endpoint) offers.
+func (m *model) pickModel(fast bool) tea.Cmd {
+	r := m.aiRunner()
+	if r == nil {
+		return nil
+	}
+	m.setStatus("listing models…", false)
+	ctx := m.ctx
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		ms, err := r.Models(c, fast)
+		return aiModelsMsg{fast: fast, models: ms, err: err}
+	}
+}
+
+func (m *model) modelsListed(msg aiModelsMsg) {
+	if msg.err != nil {
+		m.setStatus("models: "+msg.err.Error(), true)
+		return
+	}
+	m.setStatus("", false)
+	key, cur, title := "model", m.ai.Setup.Model, "chat model ("+m.ai.Setup.Backend+") · type to filter"
+	if msg.fast {
+		key, cur, title = "fast_model", m.ai.Setup.FastModel, "completion model · type to filter · the fastest flash/mini one is best"
+	}
+	items := append([]string{"(default)"}, msg.models...)
+	m.pick(title, items, nil, max(0, indexOf(items, cur)), false, func(c []string) tea.Cmd {
+		if len(c) > 0 {
+			m.setAI(key, strings.TrimPrefix(c[0], "(default)"))
+		}
+		return nil
+	})
+}
+
+// setAI saves one AI setting and applies it to the next turn and completion.
+func (m *model) setAI(key, value string) {
+	if err := ai.ChangeConfig(key, value); err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	m.ai = nil
+	if c := m.chat; c != nil {
+		c.runner = m.aiRunner()
+	}
+	shown := value
+	if shown == "" {
+		shown = "default"
+	}
+	m.setStatus("AI "+key+": "+shown, false)
 }
 
 // pickChatSession lists this environment's conversations: enter continues one, d closes it.
@@ -297,6 +379,9 @@ func (m *model) chatUpdate(msg tea.Msg) (tea.Cmd, bool) {
 		return m.tabs[m.active].refresh(m), true
 	case bridgeMsg:
 		return m.bridge(msg), true
+	case aiModelsMsg:
+		m.modelsListed(msg)
+		return nil, true
 	}
 	return nil, false
 }
@@ -452,7 +537,7 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sDim.Render(wordWrap("  → "+t, iw)))
 		}
 	}
-	status := sDim.Render("enter send · tab ideas · /sessions /new · esc hide")
+	status := sDim.Render("enter send · tab ideas · /model /effort /sessions /new · esc hide")
 	if c.busy {
 		status = sAmber.Render(fmt.Sprintf("⟳ working %s", time.Since(c.started).Round(time.Second))) + sDim.Render(" · ctrl+x stops")
 	} else if m.confirm != nil {
@@ -697,6 +782,7 @@ type (
 		seq         int
 		value, text string
 		err         error
+		took        time.Duration
 	}
 )
 
@@ -716,21 +802,59 @@ func (m *model) aiRunner() *ai.Runner {
 // what is typed: the language, where it runs, names in reach.
 func (m *model) askAI(label, value, hint string, submit func(string) tea.Cmd) {
 	m.ask(label, value, submit)
-	if r := m.aiRunner(); r != nil && r.Setup.AutocompleteOn() {
+	if r := m.aiRunner(); r != nil && r.Setup.Enabled() {
 		m.prompt.hint = hint
-		m.prompt.input.ShowSuggestions = true
+		m.prompt.input.ShowSuggestions = r.Setup.AutocompleteOn()
+	}
+}
+
+// askTemplate is askAI on an empty input with template behind it: typing starts fresh with the AI
+// completing, tab takes the template to edit, enter runs it as is.
+func (m *model) askTemplate(label, template, hint string, submit func(string) tea.Cmd) {
+	m.askAI(label, "", hint, submit)
+	m.prompt.template = template
+	m.prompt.input.Placeholder = template
+}
+
+// toggleAutocomplete switches AI suggestions while typing, for good (ai.json autocomplete).
+func (m *model) toggleAutocomplete() {
+	r := m.aiRunner()
+	if r == nil || !r.Setup.Enabled() {
+		m.setStatus("AI is off: rig ai config", true)
+		return
+	}
+	on := !r.Setup.AutocompleteOn()
+	if err := ai.ChangeConfig("autocomplete", fmt.Sprint(on)); err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	r.Setup.Autocomplete = &on
+	if p := m.prompt; p != nil {
+		p.input.ShowSuggestions = on
+		if !on {
+			p.input.SetSuggestions(nil)
+			p.waiting = false
+			if m.completeCancel != nil {
+				m.completeCancel()
+			}
+		}
+	}
+	if on {
+		m.setStatus("AI autocomplete on", false)
+	} else {
+		m.setStatus("AI autocomplete off (ctrl+t or /autocomplete turns it back on)", false)
 	}
 }
 
 // completeLater asks for a completion once typing pauses.
 func (m *model) completeLater() tea.Cmd {
 	p := m.prompt
-	if p == nil || p.hint == "" {
+	if p == nil || p.hint == "" || !m.ai.Setup.AutocompleteOn() {
 		return nil
 	}
 	p.seq++
 	seq := p.seq
-	return tea.Tick(700*time.Millisecond, func(time.Time) tea.Msg { return completeTickMsg{seq: seq} })
+	return tea.Tick(350*time.Millisecond, func(time.Time) tea.Msg { return completeTickMsg{seq: seq} })
 }
 
 func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
@@ -749,10 +873,14 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 	m.completeCancel = cancel
 	p.waiting = true
 	r, hint, seq := m.aiRunner(), p.hint, p.seq
+	if p.template != "" {
+		hint += "; the screen offered this as a starting point: " + p.template
+	}
 	return func() tea.Msg {
 		defer cancel()
+		start := time.Now()
 		text, err := r.Complete(ctx, hint, v)
-		return completeMsg{seq: seq, value: v, text: text, err: err}
+		return completeMsg{seq: seq, value: v, text: text, err: err, took: time.Since(start)}
 	}
 }
 
@@ -763,6 +891,9 @@ func (m *model) completed(msg completeMsg) {
 	}
 	if p.seq == msg.seq {
 		p.waiting = false
+	}
+	if msg.err == nil {
+		p.took = msg.took
 	}
 	if msg.err != nil {
 		if !errors.Is(msg.err, context.Canceled) && p.seq == msg.seq {

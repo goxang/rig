@@ -4,6 +4,7 @@ import (
 	"context"
 	gosql "database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/goxang/rig/core"
@@ -103,6 +104,35 @@ func (d *DB) change(ctx context.Context, path []string, t core.Table, rows []int
 		}
 	}
 	return tx.Commit()
+}
+
+// SuggestRowQuery reads the row back by its primary key, or by its first column when it has none.
+func (d *DB) SuggestRowQuery(ctx context.Context, path []string, t core.Table, row int) string {
+	table, err := d.table(path)
+	if err != nil || row < 0 || row >= len(t.Rows) {
+		return ""
+	}
+	keys, err := d.primaryKey(ctx, path, table, t)
+	if err != nil {
+		keys = []int{0}
+	}
+	b := browsers[d.opt.Driver]
+	var where []string
+	for _, k := range keys {
+		where = append(where, b.quote(t.Columns[k])+sqlEquals(t.Rows[row][k]))
+	}
+	return "SELECT * FROM " + table + " WHERE " + strings.Join(where, " AND ")
+}
+
+// sqlEquals compares with a cell as the Data screen shows it: NULL, a number, else a string.
+func sqlEquals(v string) string {
+	if v == "NULL" {
+		return " IS NULL"
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return " = " + v
+	}
+	return " = '" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 func one(res gosql.Result, err error) error {

@@ -129,6 +129,9 @@ type prompt struct {
 	hint    string
 	seq     int
 	waiting bool
+	// template is offered while the input is empty: tab fills it in, enter runs it as is
+	template string
+	took     time.Duration
 }
 
 type (
@@ -388,8 +391,8 @@ func (m *model) hovering(x, y, w, h int) bool {
 }
 
 // buttons draws clickable yes/no buttons on the footer's first line, starting at column x.
-func (m *model) buttons(yes, no string, x int) string {
-	y := m.h - 2
+// buttons draws them on screen row y.
+func (m *model) buttons(yes, no string, x, y int) string {
 	by := sTabOn.Render(yes)
 	bn := sTabOff.Render(no)
 	if m.hy == y && m.hx >= x+lipgloss.Width(by)+1 && m.hx < x+lipgloss.Width(by)+1+lipgloss.Width(bn) {
@@ -733,7 +736,28 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "enter":
 			p := m.prompt
 			m.prompt = nil
-			return p.submit(p.input.Value())
+			v := p.input.Value()
+			if v == "" {
+				v = p.template
+			}
+			return p.submit(v)
+		case "tab":
+			if p := m.prompt; p.input.Value() == "" && p.template != "" {
+				p.input.SetValue(p.template)
+				p.input.CursorEnd()
+				return nil
+			}
+		case "ctrl+t":
+			m.toggleAutocomplete()
+			return nil
+		case "ctrl+y":
+			v := m.prompt.input.Value()
+			if v == "" {
+				v = m.prompt.template
+			}
+			osc52(v)
+			m.setStatus("copied the query", false)
+			return nil
 		}
 		before := m.prompt.input.Value()
 		var cmd tea.Cmd
@@ -1165,17 +1189,9 @@ func (m *model) footer() string {
 	var line string
 	switch {
 	case m.confirm != nil:
-		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3)
+		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3, m.h-2)
 	case m.prompt != nil:
-		label := m.prompt.label
-		switch {
-		case m.prompt.waiting:
-			label += sDim.Render(" ⋯ai")
-		case m.prompt.hint != "" && m.prompt.input.ShowSuggestions && len(m.prompt.input.MatchedSuggestions()) > 0:
-			label += sDim.Render(" (tab accepts)")
-		}
-		head := sAccent.Render(" "+label+": ") + m.prompt.input.View()
-		line = head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3)
+		line = m.promptView()
 	case m.picker != nil:
 		line = " " + m.picker.hints()
 	case m.chat != nil && m.chat.open && m.chat.focus:
@@ -1208,7 +1224,53 @@ func (m *model) footer() string {
 		}
 		status = " " + st.Render(truncate(m.status, m.w-2))
 	}
-	return truncate(line, m.w) + "\n" + status
+	return clip(line, m.w, m.h/2) + "\n" + status
+}
+
+// promptView is the footer's input: one line while it fits, else the label above a full-width input
+// with the whole text wrapped over it, so a long query stays readable while the cursor scrolls.
+func (m *model) promptView() string {
+	p := m.prompt
+	label := p.label
+	switch {
+	case p.waiting:
+		label += sDim.Render(" ⋯ai")
+	case p.hint != "" && p.input.ShowSuggestions && len(p.input.MatchedSuggestions()) > 0:
+		label += sDim.Render(" (tab accepts)")
+	case p.input.Value() == "" && p.template != "":
+		label += sDim.Render(" (tab fills, enter runs)")
+	}
+	if p.hint != "" && m.ai != nil {
+		state := "ai off · ctrl+t"
+		if m.ai.Setup.AutocompleteOn() {
+			state = "ai on · ctrl+t"
+			if p.took > 0 {
+				state = fmt.Sprintf("ai on %.1fs · ctrl+t", p.took.Seconds())
+			}
+		}
+		label += sDim.Render("  " + state)
+	}
+	head := sAccent.Render(" " + label + ": ")
+	const buttonsW = 28
+	text := p.input.Value()
+	if text == "" {
+		text = p.template
+	}
+	if room := m.w - lipgloss.Width(head) - 3 - buttonsW; lipgloss.Width(text)+2 <= room {
+		p.input.Width = room
+		head += p.input.View()
+		return head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-2)
+	}
+	p.input.Width = m.w - 4
+	var preview []string
+	if lipgloss.Width(p.input.Value()) > p.input.Width {
+		for _, l := range strings.Split(wordWrap(p.input.Value(), m.w-2), "\n") {
+			preview = append(preview, " "+sDim.Render(l))
+		}
+		preview = preview[max(0, len(preview)-8):]
+	}
+	top := head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-3-len(preview))
+	return strings.Join(append(append([]string{top}, preview...), " "+p.input.View()), "\n")
 }
 
 const footerHints = 5

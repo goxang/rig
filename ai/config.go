@@ -37,16 +37,22 @@ type Config struct {
 	Provider  string `json:"provider,omitempty"`
 	Model     string `json:"model,omitempty"`
 	FastModel string `json:"fast_model,omitempty"`
-	URL       string `json:"url,omitempty"`
-	APIKey    string `json:"api_key,omitempty"`
-	Proxy     string `json:"proxy,omitempty"`
+	// Effort is the reasoning level of chat turns: Claude Code's --effort, opencode's --variant.
+	Effort string `json:"effort,omitempty"`
+	// FastURL and FastAPIKey point completions at an OpenAI-compatible endpoint of their own,
+	// one direct request instead of a backend run, whatever the chat goes through.
+	FastURL    string `json:"fast_url,omitempty"`
+	FastAPIKey string `json:"fast_api_key,omitempty"`
+	URL        string `json:"url,omitempty"`
+	APIKey     string `json:"api_key,omitempty"`
+	Proxy      string `json:"proxy,omitempty"`
 	// Autocomplete suggests the rest of a query while it is typed; off by default only when set false.
 	Autocomplete *bool `json:"autocomplete,omitempty"`
 	Disabled     bool  `json:"disabled,omitempty"`
 }
 
 // Keys are the settings `rig ai config key=value` takes, in the order it prints them.
-var Keys = []string{"backend", "provider", "model", "fast_model", "url", "api_key", "proxy", "autocomplete", "disabled"}
+var Keys = []string{"backend", "provider", "model", "effort", "fast_model", "fast_url", "fast_api_key", "url", "api_key", "proxy", "autocomplete", "disabled"}
 
 func ConfigFile() (string, error) {
 	dir, err := os.UserConfigDir()
@@ -58,6 +64,20 @@ func ConfigFile() (string, error) {
 
 // LoadConfig reads the saved setup; RIG_AI_* variables override it for one run.
 func LoadConfig() (Config, error) {
+	c, err := readConfig()
+	if err != nil {
+		return c, err
+	}
+	for k, p := range map[string]*string{"BACKEND": &c.Backend, "PROVIDER": &c.Provider, "MODEL": &c.Model, "EFFORT": &c.Effort,
+		"FAST_MODEL": &c.FastModel, "FAST_URL": &c.FastURL, "FAST_API_KEY": &c.FastAPIKey, "URL": &c.URL, "API_KEY": &c.APIKey, "PROXY": &c.Proxy} {
+		if v := os.Getenv("RIG_AI_" + k); v != "" {
+			*p = v
+		}
+	}
+	return c, nil
+}
+
+func readConfig() (Config, error) {
 	var c Config
 	f, err := ConfigFile()
 	if err != nil {
@@ -73,13 +93,19 @@ func LoadConfig() (Config, error) {
 			return c, fmt.Errorf("%s: %w", f, err)
 		}
 	}
-	for k, p := range map[string]*string{"BACKEND": &c.Backend, "PROVIDER": &c.Provider, "MODEL": &c.Model,
-		"FAST_MODEL": &c.FastModel, "URL": &c.URL, "API_KEY": &c.APIKey, "PROXY": &c.Proxy} {
-		if v := os.Getenv("RIG_AI_" + k); v != "" {
-			*p = v
-		}
-	}
 	return c, nil
+}
+
+// ChangeConfig sets one key in the saved setup, leaving RIG_AI_* overrides out of the file.
+func ChangeConfig(key, value string) error {
+	c, err := readConfig()
+	if err != nil {
+		return err
+	}
+	if err := c.Set(key, value); err != nil {
+		return err
+	}
+	return SaveConfig(c)
 }
 
 func SaveConfig(c Config) error {
@@ -115,6 +141,12 @@ func (c *Config) Set(key, value string) error {
 		c.Model = value
 	case "fast_model":
 		c.FastModel = value
+	case "effort":
+		c.Effort = value
+	case "fast_url":
+		c.FastURL = value
+	case "fast_api_key":
+		c.FastAPIKey = value
 	case "url":
 		c.URL = value
 	case "api_key":
@@ -147,15 +179,16 @@ func (c Config) Get(key string) string {
 		return c.Model
 	case "fast_model":
 		return c.FastModel
+	case "effort":
+		return c.Effort
 	case "url":
 		return c.URL
+	case "fast_url":
+		return c.FastURL
 	case "api_key":
-		if len(c.APIKey) > 8 {
-			return c.APIKey[:4] + "…" + c.APIKey[len(c.APIKey)-4:]
-		}
-		if c.APIKey != "" {
-			return "set"
-		}
+		return mask(c.APIKey)
+	case "fast_api_key":
+		return mask(c.FastAPIKey)
 	case "proxy":
 		return c.Proxy
 	case "autocomplete":
@@ -166,6 +199,16 @@ func (c Config) Get(key string) string {
 		if c.Disabled {
 			return "true"
 		}
+	}
+	return ""
+}
+
+func mask(key string) string {
+	if len(key) > 8 {
+		return key[:4] + "…" + key[len(key)-4:]
+	}
+	if key != "" {
+		return "set"
 	}
 	return ""
 }
@@ -188,6 +231,14 @@ type Setup struct {
 }
 
 func (s Setup) Enabled() bool { return s.Bin != "" }
+
+// Efforts are the levels Effort takes on this backend.
+func (s Setup) Efforts() []string {
+	if s.Backend == BackendClaude {
+		return []string{"low", "medium", "high", "xhigh", "max"}
+	}
+	return []string{"minimal", "low", "medium", "high", "max"}
+}
 
 func (s Setup) AutocompleteOn() bool {
 	return s.Enabled() && (s.Autocomplete == nil || *s.Autocomplete)
@@ -305,6 +356,9 @@ func (s Setup) Describe() string {
 	d := s.Backend + " · " + s.Provider
 	if s.Model != "" {
 		d += " · " + s.Model
+	}
+	if s.Effort != "" {
+		d += " · " + s.Effort
 	}
 	if s.Proxy != "" {
 		d += " · proxy " + s.Proxy

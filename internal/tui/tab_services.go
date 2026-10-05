@@ -15,6 +15,7 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/ide"
 	"github.com/goxang/rig/spec"
 )
 
@@ -132,7 +133,7 @@ func (t *servicesTab) hints() [][2]string {
 			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log lines: copied"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"[ ]", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"/", "filter"}, {"< >", "sort"}}
+		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"< >", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -241,6 +242,20 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case "m":
 		if r, ok := t.list.current(); ok {
 			return m.showMetrics(r.id)
+		}
+	case "o":
+		a := m.app
+		m.setStatus("writing the services into GoLand…", false)
+		return func() tea.Msg {
+			r, err := ide.Write(a, a.Spec.ServiceNames())
+			if err != nil {
+				return statusMsg{text: "GoLand: " + err.Error(), err: true}
+			}
+			text := fmt.Sprintf("GoLand: %d services in %d folders (Services view, alt+8): run one for its live logs, stop stops it, · debug attaches", r.Services, len(r.Folders))
+			if err := ide.Open(a.Spec.Dir); err != nil {
+				text += " · " + err.Error()
+			}
+			return statusMsg{text: text}
 		}
 	case "i":
 		if t.section == "infra" {

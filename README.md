@@ -49,7 +49,8 @@ rig report load --since 20m   # metrics of a load test (reports: in rig.yaml) as
 rig ns --create me            # Kubernetes: switch the environment to a new namespace (rig ns lists them)
 rig metrics targets -o f.json # services as Prometheus file_sd targets, for a local Prometheus
 rig resume last               # the TUI as a saved session (S) left it
-rig ide                       # GoLand / VS Code "rig: <service>" remote-debug configs; D in the TUI, then run one
+rig ide --open                # every service into GoLand's Services view by section: live logs, stop, debug
+rig attach api                # start it if down, follow its logs; Ctrl-C stops it (what GoLand's configs run)
 rig mcp                       # MCP server for AI agents
 ```
 
@@ -65,13 +66,13 @@ and kind never ask. `?` shows the keys of the current screen.
 
 | screen | |
 |---|---|
-| Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
+| Services | your services by section (`sections:`; `[` `]` or a click, `i` infrastructure); mark with `space`, a whole section with `a` or a double-click on it, then start (in dependency order)/stop/restart/scale/deploy them together; `h` edits a Kubernetes autoscaler (or creates one), and scaling past one asks whether to move it; `R` changes requests and limits; `F` lists the service's manifests to edit, sync from what runs, or apply; replica changes (an autoscaler's too) show for a while; `D` attaches a debugger (debug build, a stable port per service); `o` puts every service into GoLand (below); `p` takes a profile (the picker says what each kind shows) as a sortable table, `W` saves it as a report; `enter` opens one: instances and its live log, which scrolls like the Logs screen, `l` moves it there |
 | Logs | the services you pick, merged, or one instance; `←` `→` scroll sideways, dragging over lines copies them |
 | Metrics | dashboards as tabs, `$variables` and time range in the header (click them), foldable rows; click a legend entry for only that series, ctrl-click to hide it; `v` opens a panel with a sortable legend table and a cursor |
 | Traces | filter by service, operation, minimum duration, time window, text, errors |
-| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session |
+| Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV |
 | KV | browse, edit and delete keys right in the store; `o` picks the editor (nano, vim, VS Code, the desktop's); `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
-| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand; `/` filters with globs |
+| Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand (on a table row: that row by its primary key; on a Redis key: the read for its type); `y`/`Y` copy the row/all as TSV; `/` filters with globs |
 | Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`); `e` edits an object in your editor and saves it into its file, `s` writes what the cluster runs into the file (only fields someone set, `$VARS` kept), `L` edits it on the cluster; `d` picks among every manifest folder of the project |
 | Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, and a shell (double-click) |
@@ -92,9 +93,16 @@ forwards) or keep going without it (generators, services), and it asks.
 lines in view. It runs your own **opencode** or **Claude Code** (whichever is installed) with rig as its
 only tools, so it can do anything you can: change a KV key, restart services, run and schedule queries,
 open screens, explain logs against the code, suggest `rig profile` / `go tool pprof` commands.
-Query prompts (Data `Q`, Queries, Metrics, Logs grep, KV values) get inline completions: `tab` takes them.
+Query prompts (Data `Q`, Queries, Metrics, Logs grep, KV values) get inline completions: `tab` takes them,
+`ctrl+t` turns them off or on for good. A suggested query (Data `Q`, a new query) waits behind the empty
+input: type your own and the AI completes it, `tab` takes the suggestion to edit, `enter` runs it as is.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
-AI or not.
+AI or not. A long query wraps above the input; `ctrl+y` copies it.
+
+In the chat, `/model` and `/effort` pick the chat's model (opencode's whole list, or opus/sonnet/haiku) and
+reasoning level, `/fast` the completion model, `/autocomplete` switches suggestions. Completions through
+the backend start it every time (seconds); `fast_url` + `fast_api_key` (any OpenAI-compatible endpoint, e.g.
+`https://api.anthropic.com/v1` or a router) make them one HTTP request on a kept-alive connection.
 
 ```
 rig ai                                 the UI with the chat open
@@ -104,6 +112,7 @@ rig ai config                          the setup; rig ai check tests it
 rig ai config provider=deepseek api_key=sk-…
 rig ai config provider=openai url=https://…/v1 api_key=… model=…
 rig ai config proxy=localhost:10808    every AI request goes through it
+rig ai config fast_url=https://…/v1 fast_api_key=… fast_model=…   completions as one direct request
 ```
 
 No setup is needed: an opencode or Claude Code login is used as it is, and without one opencode's free
@@ -112,10 +121,24 @@ models are. Providers: `own`, `opencode`, `openai` (any compatible endpoint), `9
 
 Guard rails, enforced by rig's MCP server rather than the prompt: a conversation is bound to the
 environment it started on (other `env`s are refused); the project directory is the only workspace, with
-credentials and `ai.deny` paths unreadable; no file edits or shell. On a protected or Kubernetes
+credentials, `ai.deny` paths and `.git` out of reach; files change only through `rig_file` (create, edit, move;
+deleting asks you), never a shell. On a protected or Kubernetes
 environment a dangerous step (stop, scale down, deploy, delete, DROP/DELETE without WHERE, tasks,
 infrastructure) runs only when your message asked for it in so many words, else rig asks you first;
 on a protected one every change needs that. Secrets and `rig mcp`/`debug` are out of reach.
+
+## GoLand
+
+`o` on the Services screen (or `rig ide --open`) writes each service of the environment into GoLand's
+Services view (`alt+8`), one folder per `sections:` entry plus `rig · infra`:
+
+- `<service>` runs `rig attach`: starts it if it is down and shows its live log; stop stops it (infrastructure
+  only stops following). Started or stopped in rig, GoLand follows: the config ends when the service does.
+- `<service> · debug` (Go services) brings its debugger up (`rig debug --detach`, on the port `D` uses) and attaches.
+
+They are rig commands on the same environment, so the TUI and GoLand show the same processes. GoLand
+rewrites `.idea/workspace.xml` when it closes: if the Services view does not list them, add Shell Script
+and Go Remote there (`+` › Run Configuration Type).
 
 ## Agents
 
@@ -129,7 +152,8 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 
 Tools: `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
 `rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, `rig_ui` (acts in a rig UI that
-started the agent), and `rig` for any other command.
+started the agent), `rig_file` (list, read, write, edit, move, delete inside the project; credentials and `.git`
+refused, delete needs `"confirm": true`), and `rig` for any other command.
 Each runs the CLI, so protections apply: changes to a protected environment need `"confirm": true`.
 
 ## rig.yaml

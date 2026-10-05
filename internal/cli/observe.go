@@ -186,6 +186,7 @@ func observeCommands() []*cobra.Command {
 	profile.Flags().StringVar(&profiler, "profiler", "", "profiler component")
 
 	var dinst string
+	var detach bool
 	debug := &cobra.Command{
 		Use: "debug <service>", Short: "attach a debugger server to a running service and keep it until Ctrl-C", Args: cobra.ExactArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
@@ -197,11 +198,27 @@ func observeCommands() []*cobra.Command {
 			if err != nil {
 				return err
 			}
+			if detach {
+				if addr, ok := debuggerUp(s.Name); ok {
+					fmt.Println(green("✓ debugger already on ") + bold(addr))
+					return nil
+				}
+				rt, _, err := a.Owner(s.Name)
+				if err != nil {
+					return err
+				}
+				if _, local := rt.(core.ProcessLocator); !local {
+					return errDetachRemote
+				}
+			}
 			sess, err := d.Attach(ctx, s, dinst)
 			if err != nil {
 				return err
 			}
 			fmt.Println(green("✓ debugger on ") + bold(sess.Addr))
+			if detach {
+				return nil
+			}
 			fmt.Println("  " + sess.Hint)
 			fmt.Println(dim("  Ctrl-C detaches"))
 			sig := make(chan os.Signal, 1)
@@ -217,6 +234,7 @@ func observeCommands() []*cobra.Command {
 		}),
 	}
 	debug.Flags().StringVarP(&dinst, "instance", "i", "", "instance")
+	debug.Flags().BoolVar(&detach, "detach", false, "leave the debugger running and return (local processes); a running one is kept")
 
 	alerts := &cobra.Command{
 		Use:   "alerts",
@@ -245,7 +263,7 @@ func observeCommands() []*cobra.Command {
 			return nil
 		}),
 	}
-	return []*cobra.Command{metrics, traces, profile, debug, ideCommand(), alerts}
+	return []*cobra.Command{metrics, traces, profile, debug, ideCommand(), attachCommand(), alerts}
 }
 
 type panel struct{ title, query, unit string }

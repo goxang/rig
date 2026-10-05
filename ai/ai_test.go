@@ -77,3 +77,14 @@ func TestResolveProviders(t *testing.T) {
 		t.Error("openai without a model is not usable")
 	}
 }
+
+func TestDeniedPath(t *testing.T) {
+	for rel, want := range map[string]bool{
+		".env": true, "svc/.env": true, ".env.local": true, "certs/server.pem": true, "a/b/secrets/x.json": true,
+		"configs/kube/app.json": true, "configs": true, "main.go": false, "envs/readme.md": false, "pkg/key.go": false,
+	} {
+		if got := DeniedPath(rel, []string{"configs/**"}); got != want {
+			t.Errorf("DeniedPath(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
