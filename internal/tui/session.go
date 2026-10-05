@@ -26,6 +26,7 @@ type Session struct {
 	Created time.Time `json:"created"`
 	Saved   time.Time `json:"saved"`
 	Tab     int       `json:"tab"`
+	TabName string    `json:"tab_name,omitempty"`
 
 	LogServices []string `json:"log_services,omitempty"`
 	LogInstance string   `json:"log_instance,omitempty"`
@@ -75,7 +76,7 @@ func (m *model) snapshot() *Session {
 	if s == nil {
 		s = &Session{ID: time.Now().Format("20060102-150405"), Created: time.Now()}
 	}
-	s.Env, s.Saved, s.Tab = m.app.Env.Name, time.Now(), m.active
+	s.Env, s.Saved, s.Tab, s.TabName = m.app.Env.Name, time.Now(), m.active, m.tabs[m.active].name()
 	for _, t := range m.tabs {
 		switch t := t.(type) {
 		case *logsTab:
@@ -130,6 +131,11 @@ func (m *model) restore(s *Session) {
 	m.session = s
 	if s.Tab >= 0 && s.Tab < len(m.tabs) {
 		m.active = s.Tab
+	}
+	for i, t := range m.tabs {
+		if t.name() == s.TabName {
+			m.active = i
+		}
 	}
 	sc := m.sched
 	sc.mu.Lock()

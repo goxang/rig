@@ -22,6 +22,7 @@ import (
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 // tab is one screen. Messages a tab sends itself must carry gen so results that arrive after an
@@ -160,8 +161,68 @@ type (
 	}
 )
 
-func newTabs() []tab {
-	return []tab{&servicesTab{}, &logsTab{}, &metricsTab{}, &tracesTab{}, &queriesTab{}, &kvTab{}, &dataTab{}, &loadTab{}, &manifestsTab{}, &hostsTab{}, &testsTab{}}
+// newTabs builds the screens ui.tabs lists, else every screen the project gives something to show.
+func newTabs(a *engine.App) []tab {
+	all := map[string]tab{"services": &servicesTab{}, "logs": &logsTab{}, "metrics": &metricsTab{}, "traces": &tracesTab{},
+		"queries": &queriesTab{}, "kv": &kvTab{}, "data": &dataTab{}, "load": &loadTab{}, "manifests": &manifestsTab{},
+		"hosts": &hostsTab{}, "tests": &testsTab{}}
+	if ui := a.Spec.UI; ui != nil && len(ui.Tabs) > 0 {
+		var out []tab
+		for _, n := range ui.Tabs {
+			out = append(out, all[n])
+		}
+		return out
+	}
+	var out []tab
+	for _, n := range spec.Screens {
+		if configured(a, n) {
+			out = append(out, all[n])
+		}
+	}
+	return out
+}
+
+// configured says whether the project has anything for screen n to show.
+func configured(a *engine.App, n string) bool {
+	has := func(kinds ...core.Kind) bool {
+		for _, k := range kinds {
+			if len(a.Names(k)) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	rt := a.Env.Runtime.Type
+	switch n {
+	case "metrics":
+		if len(a.Spec.Dashboards) > 0 || has(core.KindMetrics) {
+			return true
+		}
+		for _, s := range a.Spec.Services {
+			if s.Metrics != nil {
+				return true
+			}
+		}
+		return false
+	case "traces":
+		return has(core.KindTracing)
+	case "queries":
+		return len(a.Queries()) > 0 || len(a.Queriers()) > 0
+	case "kv":
+		return has(core.KindKV)
+	case "data":
+		return has(core.KindDatabase, core.KindCache, core.KindMessaging)
+	case "load":
+		return has(core.KindLoad)
+	case "manifests":
+		return rt == "kubernetes" || rt == "kind" || len(a.Spec.Manifests) > 0
+	case "hosts":
+		_, ok := a.Runtime().(core.Hosts)
+		return ok || has(core.KindHosts)
+	case "tests":
+		return len(a.SuiteNames()) > 0
+	}
+	return true
 }
 
 func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil, nil) }
@@ -192,7 +253,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default:")
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
+	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, tabs: newTabs(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
 	m.sched = newScheduler(a)
 	if s != nil {
 		m.restore(s)
@@ -493,7 +554,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		go old.Close()
 		m.services, m.svcBusy = nil, false
 		m.opened, m.refreshed = map[int]bool{}, map[int]time.Time{}
-		m.tabs = newTabs()
+		m.tabs = newTabs(m.app)
 		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
 		m.ai = nil
