@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/goxang/rig/core"
@@ -74,7 +73,7 @@ func (r *Runtime) read(svc string) (pidFile, bool) {
 }
 
 func alive(pid int) bool {
-	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+	if !sh.Alive(pid) {
 		return false
 	}
 	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
@@ -160,7 +159,7 @@ func (r *Runtime) start(ctx context.Context, s *spec.Service, wrap func([]string
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = r.dir(s)
 	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sh.Detach(cmd)
 	cmd.Env = os.Environ()
 	for _, m := range []map[string]string{r.opt.Env, s.Env} {
 		for k, v := range m {
@@ -185,7 +184,7 @@ func (r *Runtime) Stop(ctx context.Context, s *spec.Service) error {
 		_ = os.Remove(r.path("run", s.Name, ".json"))
 		return nil
 	}
-	_ = syscall.Kill(-p.PID, syscall.SIGTERM)
+	sh.StopGroup(p.PID, false)
 	deadline := time.Now().Add(r.opt.StopTimeout)
 	for alive(p.PID) && time.Now().Before(deadline) {
 		select {
@@ -195,7 +194,7 @@ func (r *Runtime) Stop(ctx context.Context, s *spec.Service) error {
 		}
 	}
 	if alive(p.PID) {
-		_ = syscall.Kill(-p.PID, syscall.SIGKILL)
+		sh.StopGroup(p.PID, true)
 	}
 	return os.Remove(r.path("run", s.Name, ".json"))
 }

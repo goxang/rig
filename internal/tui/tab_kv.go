@@ -102,11 +102,6 @@ func (t *kvTab) open(m *model) tea.Cmd {
 
 func (t *kvTab) refresh(m *model) tea.Cmd { return nil }
 
-func (t *kvTab) store(m *model) (core.KV, error) {
-	kv, _, err := engine.Get[core.KV](m.app, core.KindKV, t.comp)
-	return kv, err
-}
-
 func (t *kvTab) load(m *model) tea.Cmd {
 	if t.comp == "" {
 		t.err = "no kv component in this environment (add one: type: consul)"

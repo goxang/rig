@@ -9,10 +9,10 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/plugin"
 	"github.com/goxang/rig/spec"
 )
@@ -133,14 +133,14 @@ func (d *Debugger) local(svc string, pid int) (core.DebugSession, error) {
 		return core.DebugSession{}, err
 	}
 	cmd := exec.Command(d.opt.Dlv, "attach", strconv.Itoa(pid), "--headless", "--listen="+addr, "--api-version=2", "--accept-multiclient", "--continue")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sh.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return core.DebugSession{}, err
 	}
 	for i := 0; i < 50; i++ {
 		if c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
 			c.Close()
-			return core.DebugSession{Addr: addr, Hint: hint(addr), Close: func() error { return cmd.Process.Signal(syscall.SIGINT) }}, nil
+			return core.DebugSession{Addr: addr, Hint: hint(addr), Close: func() error { return sh.Interrupt(cmd.Process.Pid) }}, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

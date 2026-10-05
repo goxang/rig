@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,6 +16,7 @@ import (
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/internal/ide"
+	"github.com/goxang/rig/internal/sh"
 )
 
 func ideCommand() *cobra.Command {
@@ -230,7 +230,7 @@ func debugInBackground(ctx context.Context, a *engine.App, svc, instance string)
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Stdout, cmd.Stderr = out, out
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	sh.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -269,10 +269,10 @@ func stopDebugger(a *engine.App, svc string) error {
 	if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && !strings.Contains(string(cmdline), "debug\x00"+svc) {
 		return fmt.Errorf("the debugger of %s was not running", svc)
 	}
-	if pid <= 0 || syscall.Kill(pid, syscall.SIGINT) != nil {
+	if pid <= 0 || sh.Interrupt(pid) != nil {
 		return fmt.Errorf("the debugger of %s was not running", svc)
 	}
-	for i := 0; i < 50 && syscall.Kill(pid, 0) == nil; i++ {
+	for i := 0; i < 50 && sh.Alive(pid); i++ {
 		time.Sleep(100 * time.Millisecond)
 	}
 	fmt.Println(green("✓ stopped the debugger of " + svc))

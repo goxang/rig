@@ -272,11 +272,11 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 					case args[0] == "unset" && !ok:
 						kv["var."+k] = ""
 					default:
-						return fmt.Errorf("usage: rig vars set K=V... | rig vars unset K...")
+						return fmt.Errorf("usage: rig vars set K=V [K=V ...] | rig vars unset K [K ...]")
 					}
 				}
 				if len(kv) == 0 {
-					return fmt.Errorf("usage: rig vars set K=V... | rig vars unset K...")
+					return fmt.Errorf("usage: rig vars set K=V [K=V ...] | rig vars unset K [K ...]")
 				}
 				if err := a.SetState(ctx, kv); err != nil {
 					return err
