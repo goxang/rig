@@ -176,7 +176,7 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 	}
 }
 
-// copy puts lines on the clipboard (OSC 52, which most terminals and tmux honour) and in a file
+// copy puts lines on the clipboard (copyText) and in a file
 // under the environment's state directory, for terminals that ignore it.
 func (v *logView) copy(m *model, lines []core.LogLine) {
 	if len(lines) == 0 {
@@ -192,7 +192,7 @@ func (v *logView) copy(m *model, lines []core.LogLine) {
 	if err := os.MkdirAll(dir, 0o755); err == nil {
 		_ = os.WriteFile(file, []byte(text), 0o644)
 	}
-	osc52(text)
+	copyText(text)
 	m.setStatus(fmt.Sprintf("copied %d lines (also in %s)", len(lines), file), false)
 }
 

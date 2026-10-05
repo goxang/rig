@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -225,8 +226,10 @@ func (m *model) Init() tea.Cmd {
 
 var program *tea.Program
 
-// osc52 puts text on the terminal's clipboard.
-func osc52(text string) {
+// copyText puts text on the system clipboard (wl-copy, xclip or xsel) and also sends OSC 52, which
+// reaches the local clipboard over SSH; VTE terminals such as GNOME Terminal ignore OSC 52.
+func copyText(text string) {
+	_ = clipboard.WriteAll(text)
 	fmt.Fprint(os.Stdout, "\x1b]52;c;"+base64.StdEncoding.EncodeToString([]byte(text))+"\a")
 }
 
@@ -755,7 +758,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			if v == "" {
 				v = m.prompt.template
 			}
-			osc52(v)
+			copyText(v)
 			m.setStatus("copied the query", false)
 			return nil
 		}

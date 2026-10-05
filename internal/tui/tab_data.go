@@ -500,7 +500,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if r, ok := t.right.current(); ok && k.String() == "y" {
 			rows = [][]string{t.table.Rows[rowIndex(r.id)]}
 		}
-		osc52(tsv(t.table.Columns, rows))
+		copyText(tsv(t.table.Columns, rows))
 		m.setStatus(fmt.Sprintf("copied %d rows (tab-separated, with the header)", len(rows)), false)
 	case " ":
 		if r, ok := t.right.current(); ok && t.editable(c) {
