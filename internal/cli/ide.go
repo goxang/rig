@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,7 +28,9 @@ func ideCommand() *cobra.Command {
 section of rig.yaml ("rig · <section>"):
 
   <service>          rig attach: starts it if it is down, shows its live logs; stop stops it
-  <service> · debug  Go services: brings up its debugger (rig debug --detach), then attaches GoLand
+  <service> · debug  Go services: starts it when it is down, brings up its debugger in the
+                     background (rig debug --detach --start), then attaches GoLand; breakpoints work
+                     from there. "<service> · stop debugger" ends the background debugger
 
 They run rig on this environment, so rig and GoLand see the same processes: what one starts or
 stops, the other shows. VS Code gets "rig: <service>" attach configs in .vscode/launch.json.`,
@@ -186,4 +191,90 @@ func debuggerUp(svc string) (string, bool) {
 	return addr, true
 }
 
-var errDetachRemote = errors.New("--detach keeps a debugger only for local processes; for this runtime run rig attach --debug (or rig debug) and keep it open")
+func startIfDown(ctx context.Context, a *engine.App, name string) error {
+	st, err := a.Status(ctx, name)
+	if err != nil || up(st.State) {
+		return err
+	}
+	if err := a.Guard(); err != nil {
+		return err
+	}
+	fmt.Println(dim("starting " + name + "…"))
+	return a.Start(ctx, name)
+}
+
+func debugPIDFile(a *engine.App, svc string) string {
+	return filepath.Join(a.StateDir(), "debug", svc+".pid")
+}
+
+// debugInBackground runs `rig debug <svc>` detached from this process (the debugger, its port
+// forward and relay live in it) and returns once the service's stable debug port answers.
+func debugInBackground(ctx context.Context, a *engine.App, svc, instance string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(debugPIDFile(a, svc))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	logFile := filepath.Join(dir, svc+".log")
+	out, err := os.Create(logFile)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	args := []string{"-f", a.Spec.File, "-e", a.Env.Name, "--yes", "debug", svc}
+	if instance != "" {
+		args = append(args, "-i", instance)
+	}
+	cmd := exec.Command(self, args...)
+	cmd.Stdout, cmd.Stderr = out, out
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_ = os.WriteFile(debugPIDFile(a, svc), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	deadline := time.After(2 * time.Minute)
+	for {
+		if addr, ok := debuggerUp(svc); ok {
+			fmt.Println(green("✓ debugger on ") + bold(addr) + dim("  (rig debug --stop "+svc+" ends it; log "+logFile+")"))
+			return nil
+		}
+		select {
+		case <-exited:
+			_ = os.Remove(debugPIDFile(a, svc))
+			raw, _ := os.ReadFile(logFile)
+			return fmt.Errorf("the debugger of %s ended: %s", svc, strings.TrimSpace(string(raw)))
+		case <-deadline:
+			_ = cmd.Process.Signal(os.Interrupt)
+			return fmt.Errorf("the debugger of %s did not listen on its port in 2 minutes (log %s)", svc, logFile)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
+func stopDebugger(a *engine.App, svc string) error {
+	raw, err := os.ReadFile(debugPIDFile(a, svc))
+	if err != nil {
+		return fmt.Errorf("no background debugger of %s (rig debug --detach starts one)", svc)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	_ = os.Remove(debugPIDFile(a, svc))
+	// a stale file may name a pid the system gave to something else since
+	if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && !strings.Contains(string(cmdline), "debug\x00"+svc) {
+		return fmt.Errorf("the debugger of %s was not running", svc)
+	}
+	if pid <= 0 || syscall.Kill(pid, syscall.SIGINT) != nil {
+		return fmt.Errorf("the debugger of %s was not running", svc)
+	}
+	for i := 0; i < 50 && syscall.Kill(pid, 0) == nil; i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	fmt.Println(green("✓ stopped the debugger of " + svc))
+	return nil
+}

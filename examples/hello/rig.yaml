@@ -1,0 +1,34 @@
+# The smallest rig project: one Go service run as a local process.
+#
+#   rig up       build and start it
+#   rig          the control plane: Services, Logs, Metrics, Load, Tests
+version: 1
+project: hello
+default: local
+
+services:
+  hello:
+    build: { go: . }
+    ports: { http: 7070, metrics: 7071 }
+    health: { port: http, path: /healthz }
+    metrics: { port: metrics }
+
+environments:
+  local:
+    description: hello as a local process
+    runtime: { type: local }
+
+components:
+  prom: { type: scrape }   # rig reads /metrics itself: no Prometheus to run
+  load: { kind: loadgen, type: http, target: "svc://hello:7070/hello?name=load", rate: 10, max: 200, step: 10 }
+
+dashboards:
+  main:
+    - { title: requests/s, query: 'sum(rate(hello_requests_total[1m]))', unit: /s }
+    - { title: failures/s, query: 'sum(rate(hello_failures_total[1m]))', unit: /s }
+
+tests:
+  unit: { packages: [.] }
+
+ui:
+  mode: simple

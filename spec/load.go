@@ -44,7 +44,10 @@ func Find(dir string) (string, error) {
 // Load reads the project and resolves it for one environment: variables expanded,
 // the environment's service patches merged, its components layered over the shared ones.
 // env "" picks $RIG_ENV, then the project's default, then the only environment.
-func Load(file, env string) (*Project, *Environment, error) {
+func Load(file, env string) (*Project, *Environment, error) { return LoadWith(file, env, nil) }
+
+// LoadWith is Load with variable overrides (`rig vars set`): they win over rig.yaml's vars, not over the OS environment.
+func LoadWith(file, env string, overrides map[string]string) (*Project, *Environment, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		return nil, nil, err
@@ -94,6 +97,9 @@ func Load(file, env string) (*Project, *Environment, error) {
 	}
 	lookup := func(name string) (string, bool) {
 		if v, ok := base(name); ok {
+			return v, true
+		}
+		if v, ok := overrides[name]; ok {
 			return v, true
 		}
 		if v, ok := head.Environments[env].Vars[name]; ok {
@@ -237,6 +243,16 @@ func (p *Project) validate() error {
 		for _, t := range p.UI.Tabs {
 			if !slices.Contains(Screens, t) {
 				errs = append(errs, fmt.Sprintf("ui.tabs: unknown screen %q (screens: %s)", t, strings.Join(Screens, ", ")))
+			}
+		}
+		if m := p.UI.Mode; m != "" && m != "simple" && m != "detailed" {
+			errs = append(errs, fmt.Sprintf("ui.mode: %q is neither simple nor detailed", m))
+		}
+	}
+	if p.AI != nil {
+		for k := range p.AI.Ideas {
+			if k != "all" && !slices.Contains(Screens, k) {
+				errs = append(errs, fmt.Sprintf("ai.ideas: unknown screen %q (all, %s)", k, strings.Join(Screens, ", ")))
 			}
 		}
 	}

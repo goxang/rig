@@ -1,0 +1,81 @@
+# A shop on docker: an api and a worker (one Go binary, ./app) over Postgres, Redis, RabbitMQ and
+# Zipkin. compose.yaml is the same stack for docker compose; `rig init` wrote the first version of
+# this file from it.
+#
+#   rig up         build the app and start everything, in dependency order
+#   rig            the control plane: watch orders flow through every screen
+#   rig load run   orders at 20/s from the terminal
+version: 1
+project: shop
+default: docker
+
+services:
+  api:
+    groups: [app]
+    depends_on: [postgres, redis, rabbitmq, zipkin]
+    image: app
+    build: { go: ./app }
+    ports: { http: 8080, metrics: 9090 }
+    health: { port: http, path: /healthz }
+    metrics: { port: metrics }
+    env: { ROLE: api, DATABASE_URL: "postgres://postgres:shop@postgres:5432/shop", REDIS_ADDR: "redis:6379", RABBIT_URL: "http://guest:guest@rabbitmq:15672", ZIPKIN_URL: "http://zipkin:9411" }
+
+  worker:
+    groups: [app]
+    depends_on: [postgres, rabbitmq, zipkin]
+    image: app
+    build: { go: ./app }
+    ports: { http: 8080, metrics: 9090 }
+    health: { port: http, path: /healthz }
+    metrics: { port: metrics }
+    env: { ROLE: worker, DATABASE_URL: "postgres://postgres:shop@postgres:5432/shop", RABBIT_URL: "http://guest:guest@rabbitmq:15672", ZIPKIN_URL: "http://zipkin:9411" }
+
+  postgres: { role: infra, image: "postgres:17", ports: { pg: 5432 }, env: { POSTGRES_PASSWORD: shop, POSTGRES_DB: shop } }
+  redis:    { role: infra, image: "redis:latest", ports: { redis: 6379 } }
+  rabbitmq: { role: infra, image: "rabbitmq:3-management", ports: { amqp: 5672, mgmt: 15672 }, health: { port: mgmt, path: / } }
+  zipkin:   { role: infra, image: "openzipkin/zipkin:2.21.7", ports: { http: 9411 }, health: { port: http, path: /health } }
+
+environments:
+  docker:
+    description: every service a container on one docker network
+    runtime: { type: docker }
+  local:
+    description: api and worker as local processes, the infrastructure from docker
+    infra: docker
+    runtime: { type: local }
+    services:
+      worker: { ports: { http: 8082, metrics: 9092 }, env: { PORT: "8082", METRICS_PORT: "9092" } }
+
+components:
+  prom:   { type: scrape }
+  db:     { type: sql, driver: postgres, addr: "svc://postgres:5432", user: postgres, password: shop, database: shop, clear: ["DELETE FROM orders"] }
+  cache:  { type: redis, addr: "svc://redis:6379" }
+  queue:  { type: rabbitmq, addr: "svc://rabbitmq:15672" }
+  traces: { type: zipkin, addr: "svc://zipkin:9411" }
+  orders: { kind: loadgen, type: http, target: "svc://api:8080/orders?item=coffee", method: POST, rate: 20, max: 300, step: 10 }
+  api-http: { kind: query, type: http, addr: "svc://api:8080" }
+
+queries:
+  by-status:  { source: db, group: orders, help: "orders per status", query: "SELECT status, count(*) FROM orders GROUP BY status ORDER BY 2 DESC", every: 5s, active: true }
+  latest:     { source: db, group: orders, help: "the newest orders", query: "SELECT * FROM orders ORDER BY id DESC LIMIT {{n}}", params: { n: "20" } }
+  count:      { source: cache, group: orders, help: "orders counted in Redis", query: "GET orders:count" }
+  place:      { source: api-http, group: orders, help: "place one order", query: "POST /orders?item={{item}}", params: { item: tea } }
+
+dashboards:
+  main:
+    - { title: orders/s, query: 'sum(rate(shop_orders_total[1m]))', unit: /s }
+    - { title: shipped/s, query: 'sum by (result) (rate(shop_shipped_total[1m]))', unit: /s, legend: "{{result}}" }
+    - { title: api latency (avg), query: '1000 * sum(rate(http_request_duration_seconds_sum[1m])) / sum(rate(http_request_duration_seconds_count[1m]))', unit: ms }
+    - { title: requests/s by code, query: 'sum by (code) (rate(http_requests_total[1m]))', unit: /s, legend: "{{code}}" }
+
+alerts:
+  - { name: shipping failures, source: prom, query: 'sum(rate(shop_shipped_total{result="failed"}[1m]))', warn: 1, crit: 5, unit: /s }
+  - { name: orders waiting, source: queue, query: "queues name messages", warn: 100, crit: 1000 }
+
+ui:
+  logs: { hide: [trace] }
+
+ai:
+  ideas:
+    data: ["why do orders end up in orders.failed?"]
+    all: ["walk one order from the api to the worker: logs, trace, row and queue"]

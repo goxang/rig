@@ -105,6 +105,19 @@ func (r *Runtime) nodeUsage(ctx context.Context, h *core.Host) {
 				UsedBytes     int64 `json:"usedBytes"`
 			} `json:"fs"`
 		} `json:"node"`
+		Pods []struct {
+			PodRef struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"podRef"`
+			StartTime time.Time `json:"startTime"`
+			CPU       struct {
+				UsageNanoCores float64 `json:"usageNanoCores"`
+			} `json:"cpu"`
+			Memory struct {
+				WorkingSetBytes int64 `json:"workingSetBytes"`
+			} `json:"memory"`
+		} `json:"pods"`
 	}
 	if json.Unmarshal(out, &s) != nil {
 		return
@@ -114,6 +127,9 @@ func (r *Runtime) nodeUsage(ctx context.Context, h *core.Host) {
 	}
 	h.MemUsed = s.Node.Memory.WorkingSetBytes
 	h.DiskTotal, h.DiskUsed = s.Node.FS.CapacityBytes, s.Node.FS.UsedBytes
+	for _, p := range s.Pods {
+		h.Pods = append(h.Pods, core.HostPod{Namespace: p.PodRef.Namespace, Name: p.PodRef.Name, CPU: p.CPU.UsageNanoCores / 1e9, Mem: p.Memory.WorkingSetBytes, Started: p.StartTime})
+	}
 }
 
 // Shell opens a root shell on a node through a privileged debug pod.

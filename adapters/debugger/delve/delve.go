@@ -86,10 +86,45 @@ func (d *Debugger) Attach(ctx context.Context, s *spec.Service, instance string)
 	if err != nil {
 		return core.DebugSession{}, err
 	}
+	// forwards land on any port (or a container's IP); the IDE configs dial the stable one
+	unrelay := func() {}
+	if stable, err := listenAddr(s.Name); err == nil && stable != addr && stable == "127.0.0.1:"+strconv.Itoa(core.DebugPort(s.Name)) {
+		if unrelay, err = relay(stable, addr); err == nil {
+			addr = stable
+		}
+	}
 	stop := func() error {
+		unrelay()
 		return rt.Exec(context.Background(), s, core.ExecOptions{Command: []string{"sh", "-c", "pkill dlv || killall dlv"}, Instance: instance, Stdout: io.Discard, Stderr: io.Discard})
 	}
 	return core.DebugSession{Addr: addr, Hint: hint(addr), Close: stop}, nil
+}
+
+// relay copies every connection to listen through to target until the returned func closes it.
+func relay(listen, target string) (func(), error) {
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				t, err := net.DialTimeout("tcp", target, 5*time.Second)
+				if err != nil {
+					return
+				}
+				defer t.Close()
+				go func() { _, _ = io.Copy(t, c) }()
+				_, _ = io.Copy(c, t)
+			}()
+		}
+	}()
+	return func() { l.Close() }, nil
 }
 
 func (d *Debugger) local(svc string, pid int) (core.DebugSession, error) {

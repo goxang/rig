@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -19,6 +20,8 @@ type RenderOptions struct {
 	// Env is added to every container of the workload, replacing entries of the same name.
 	Env      map[string]string
 	Replicas *int
+	// Capabilities are added to the securityContext of the named container (Image's), e.g. SYS_PTRACE for a debugger.
+	Capabilities []string
 	// Labels are added to the workload and its pod template.
 	Labels map[string]string
 	// NodePorts keeps the node ports Services already have (service → port → node port), so a redeploy
@@ -185,9 +188,13 @@ func patchWorkload(m map[string]any, kind string, o RenderOptions) error {
 		if !ok {
 			continue
 		}
-		if o.Image != "" && (o.Container == "" && i == 0 || cm["name"] == o.Container) {
+		target := o.Container == "" && i == 0 || cm["name"] == o.Container
+		if o.Image != "" && target {
 			cm["image"] = o.Image
 			found = true
+		}
+		if target && len(o.Capabilities) > 0 {
+			addCapabilities(cm, o.Capabilities)
 		}
 		if len(o.Env) > 0 {
 			cm["env"] = mergeEnv(cm["env"], o.Env)
@@ -197,6 +204,16 @@ func patchWorkload(m map[string]any, kind string, o RenderOptions) error {
 		return fmt.Errorf("no container %q", o.Container)
 	}
 	return nil
+}
+
+func addCapabilities(container map[string]any, caps []string) {
+	add, _ := child(child(container, "securityContext"), "capabilities")["add"].([]any)
+	for _, c := range caps {
+		if !slices.Contains(add, any(c)) {
+			add = append(add, c)
+		}
+	}
+	child(child(container, "securityContext"), "capabilities")["add"] = add
 }
 
 func mergeEnv(cur any, add map[string]string) []any {

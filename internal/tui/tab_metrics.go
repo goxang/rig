@@ -70,7 +70,8 @@ type metricsTab struct {
 	dash      int
 	focus     int
 	zoom      bool
-	rng       int
+	win       timeWindow
+	dragged   tea.Cmd // what a drag that zoomed asks for, taken by dragCmd
 	every     int
 	adhoc     []spec.Panel
 	data      []panelData
@@ -97,9 +98,10 @@ func (t *metricsTab) interval() time.Duration { return refreshes[t.every] }
 
 func (t *metricsTab) hints() [][2]string {
 	if t.zoom {
-		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"< > I", "sort"}, {"y", "copy query"}}
+		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"< > I", "sort"}, {"y", "copy query"},
+			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"[ ] d", "dashboard"}, {"$", "variables"}, {"t", "range"}, {"m", "source"}, {"R", "refresh"}, {"o O", "fold rows"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"[ ] d", "dashboard"}, {"$", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o O", "fold rows"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {
@@ -107,6 +109,7 @@ func (t *metricsTab) init() {
 		t.vars, t.choices = map[string]map[string][]string{}, map[string]map[string][]string{}
 		t.collapsed, t.series, t.stack = map[string]bool{}, map[string]*seriesState{}, map[string]bool{}
 		t.cursor, t.every = -1, 2
+		t.win.presets, t.win.rng = ranges, 1
 		t.legend = newGrid("mlegend", col("", 1), col("series", 0), rcol("min", 12), rcol("max", 12), rcol("mean", 12), rcol("last", 12), rcol("@cursor", 12))
 	}
 }
@@ -193,7 +196,6 @@ func (t *metricsTab) state(m *model, pi int) *seriesState {
 
 func (t *metricsTab) open(m *model) tea.Cmd {
 	t.init()
-	t.rng = 1
 	return t.fetchAll(m)
 }
 
@@ -240,18 +242,17 @@ func (t *metricsTab) fetchVars(m *model, name string, d *spec.Dashboard) tea.Cmd
 	}
 }
 
-func (t *metricsTab) step() time.Duration { return max(ranges[t.rng]/120, time.Second) }
-
 // fetch runs every panel's range query in parallel against its source.
 func (t *metricsTab) fetch(m *model, name string, panels []spec.Panel) tea.Cmd {
 	a, gen, ctx, source := m.app, m.gen, m.ctx, t.source
-	rng, step := ranges[t.rng], t.step()
+	start, end := t.win.span(time.Now())
+	rng := end.Sub(start)
+	step := max(rng/120, time.Second)
 	vars := t.vars[name]
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		out := make([]panelData, len(panels))
-		end := time.Now()
 		var wg sync.WaitGroup
 		for i, p := range panels {
 			wg.Add(1)
@@ -415,7 +416,14 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case "esc":
 		t.cursor = -1
 	case "t":
-		t.rng = (t.rng + 1) % len(ranges)
+		t.win.preset(t.win.rng + 1)
+		return t.reload(m)
+	case "Z", "ctrl+z":
+		if t.win.zoomOut() {
+			return t.reload(m)
+		}
+	case ",", ".":
+		t.win.shift(map[string]int{",": -1, ".": 1}[k.String()])
 		return t.reload(m)
 	case "R":
 		t.every = (t.every + 1) % len(refreshes)
@@ -674,9 +682,9 @@ func (t *metricsTab) pickRange(m *model) {
 	for _, r := range ranges {
 		items = append(items, "last "+rangeText(r))
 	}
-	m.pick("time range", items, nil, t.rng, false, func(chosen []string) tea.Cmd {
+	m.pick("time range (drag across a chart zooms in, Z zooms out, , . shift)", items, nil, t.win.rng, false, func(chosen []string) tea.Cmd {
 		if i := slices.Index(items, firstOf(chosen)); i >= 0 {
-			t.rng = i
+			t.win.preset(i)
 			return t.reload(m)
 		}
 		return nil
@@ -790,6 +798,14 @@ func (t *metricsTab) click(m *model, h hit) tea.Cmd {
 		t.pickDash(m)
 	case id == "mrange":
 		t.pickRange(m)
+	case id == "mzoomout":
+		if t.win.zoomOut() {
+			return t.reload(m)
+		}
+	case strings.HasPrefix(id, "mshift:"):
+		d, _ := strconv.Atoi(strings.TrimPrefix(id, "mshift:"))
+		t.win.shift(d)
+		return t.reload(m)
 	case id == "mrefresh":
 		t.pickRefresh(m)
 	case id == "mback":
@@ -854,6 +870,18 @@ func (t *metricsTab) click(m *model, h hit) tea.Cmd {
 }
 
 func (t *metricsTab) wheel(m *model, z hit, up bool) (tea.Cmd, bool) {
+	if z.id == "mrange" {
+		if up {
+			t.win.preset(t.win.rng - 1)
+		} else {
+			t.win.preset(t.win.rng + 1)
+		}
+		return t.reload(m), true
+	}
+	if pi, frac, ok := t.plotAt(z); ok && z.mod && pi < len(t.data) {
+		t.win.zoomAround(frac, up, t.data[pi].from, t.data[pi].to)
+		return t.reload(m), true
+	}
 	if t.zoom {
 		k := tea.KeyMsg{Type: tea.KeyDown}
 		if up {
@@ -870,6 +898,40 @@ func (t *metricsTab) wheel(m *model, z hit, up bool) (tea.Cmd, bool) {
 	}
 	t.keepFocusVisible()
 	return nil, true
+}
+
+// plotAt is the panel and the fraction of its time axis under a hit on a plot.
+func (t *metricsTab) plotAt(h hit) (int, float64, bool) {
+	f := strings.Split(h.id, ":")
+	if f[0] != "mplot" || len(f) != 3 {
+		return 0, 0, false
+	}
+	pi, _ := strconv.Atoi(f[1])
+	w, _ := strconv.Atoi(f[2])
+	if w < 2 {
+		return 0, 0, false
+	}
+	return pi, float64(h.x) / float64(w-1), true
+}
+
+// drag across a plot selects a time range and zooms every panel to it, as in Grafana.
+func (t *metricsTab) drag(m *model, h hit, phase dragPhase) bool {
+	pi, frac, ok := t.plotAt(h)
+	if !ok || pi >= len(t.data) {
+		return false
+	}
+	if t.win.drag(h.id, frac, phase, t.data[pi].from, t.data[pi].to) {
+		t.cursor = -1
+		m.setStatus("zoomed to "+t.win.label()+" · Z or ⊖ zooms out", false)
+		t.dragged = t.reload(m)
+	}
+	return true
+}
+
+func (t *metricsTab) dragCmd() tea.Cmd {
+	c := t.dragged
+	t.dragged = nil
+	return c
 }
 
 // keepFocusVisible moves the focus onto the screen after a scroll, so rendering does not scroll back.
@@ -960,7 +1022,14 @@ func (t *metricsTab) viewKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case "y":
 		t.copyQuery(m)
 	case "t":
-		t.rng = (t.rng + 1) % len(ranges)
+		t.win.preset(t.win.rng + 1)
+		return t.reload(m)
+	case "Z", "ctrl+z":
+		if t.win.zoomOut() {
+			return t.reload(m)
+		}
+	case ",", ".":
+		t.win.shift(map[string]int{",": -1, ".": 1}[k.String()])
 		return t.reload(m)
 	case "r":
 		return t.fetchAll(m)
@@ -972,11 +1041,15 @@ func (t *metricsTab) viewKey(m *model, k tea.KeyMsg) tea.Cmd {
 
 func (t *metricsTab) header(m *model, w int) string {
 	names := t.dashNames(m)
-	rangeLab := "last " + rangeText(ranges[t.rng]) + " ▾"
+	rangeLab := t.win.label() + " ▾"
 	refLab := refreshText(refreshes[t.every]) + " ▾"
-	right := sDim.Render(" ⏱ ") + sAccent.Render(rangeLab) + sDim.Render("  ⟳ ") + sAccent.Render(refLab) + " "
+	nav := sKey.Render("‹") + " " + sKey.Render("⊖") + " " + sKey.Render("›")
+	right := " " + nav + sDim.Render(" ⏱ ") + sAccent.Render(rangeLab) + sDim.Render("  ⟳ ") + sAccent.Render(refLab) + " "
 	rw := lipgloss.Width(right)
-	m.zone("mrange", w-rw, 0, 3+lipgloss.Width(rangeLab), 1)
+	m.zone("mshift:-1", w-rw+1, 0, 1, 1)
+	m.zone("mzoomout", w-rw+3, 0, 1, 1)
+	m.zone("mshift:1", w-rw+5, 0, 1, 1)
+	m.zone("mrange", w-rw+6, 0, 3+lipgloss.Width(rangeLab), 1)
 	m.zone("mrefresh", w-1-lipgloss.Width(refLab), 0, lipgloss.Width(refLab), 1)
 	m.zone("mdash-more", 0, 0, 3, 1)
 	src := ""
@@ -1213,7 +1286,7 @@ func (t *metricsTab) renderPanel(m *model, p spec.Panel, pl placed, dy, bodyH in
 			if ih >= 14 && len(ls) > 3 {
 				legendH = 2
 			}
-			opts := viz.Opts{From: d.from, To: d.to, Unit: p.Unit, Hidden: hidden, Highlight: -1, Cursor: t.cursor, Stack: p.Stack != t.stack[t.key(m, pl.pi)]}
+			opts := viz.Opts{From: d.from, To: d.to, Unit: p.Unit, Hidden: hidden, Highlight: -1, Cursor: t.cursor, Stack: p.Stack != t.stack[t.key(m, pl.pi)], Band: t.win.bandOn(fmt.Sprintf("mplot:%d:", pl.pi))}
 			plotH := ih - legendH
 			if off := viz.PlotOffset(ls, plotH, opts); off > 0 {
 				visibleZone(m, fmt.Sprintf("mplot:%d:%d", pl.pi, iw-off), pl.x+1+off, pl.y+1, iw-off, plotH-2, dy, 2, bodyH)
@@ -1503,7 +1576,7 @@ func (t *metricsTab) viewPanel(m *model, p spec.Panel, w, h int) string {
 	case "table":
 		chart = tableBody(p, ls, hidden, at, hasAt, w-2, chartH-2)
 	default:
-		opts := viz.Opts{From: d.from, To: d.to, Unit: p.Unit, Hidden: hidden, Highlight: highlight, Cursor: t.cursor, Stack: stacked}
+		opts := viz.Opts{From: d.from, To: d.to, Unit: p.Unit, Hidden: hidden, Highlight: highlight, Cursor: t.cursor, Stack: stacked, Band: t.win.bandOn(fmt.Sprintf("mplot:%d:", t.focus))}
 		if off := viz.PlotOffset(ls, chartH-2, opts); off > 0 {
 			// the chart's panel starts on body line 4, its plot one line and one column in
 			m.zone(fmt.Sprintf("mplot:%d:%d", t.focus, w-2-off), 1+off, 5, w-2-off, chartH-4)

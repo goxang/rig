@@ -1,7 +1,8 @@
-# A complete rig project: an api, a worker and a load generator (one Go binary, examples/kind/app)
-# with Prometheus, Zipkin, Consul, Redis, Postgres and RabbitMQ, runnable on kind, docker or locally.
+# rig on Kubernetes: an api and a worker (one Go binary, ./app) deployed on a local kind cluster
+# from the manifests in deploy/, with an HPA on the api. The same services also run on docker, or as
+# local processes.
 #
-#   rig do runtime create      # kind: cluster + registry + preloaded infra images
+#   rig do runtime create      # kind: cluster + registry
 #   rig up --build             # everything, in dependency order
 #   rig                        # the control plane
 version: 1
@@ -11,42 +12,22 @@ default: kind
 services:
   api:
     groups: [app]
-    depends_on: [worker, zipkin]
+    depends_on: [worker]
     image: app
     build: { go: ./app }
     ports: { http: 8080, metrics: 9090 }
     health: { port: http, path: /healthz }
-    metrics: { port: metrics }
     pprof: { port: metrics }
-    env: { ROLE: api, WORKER_URL: "http://worker:8080", ZIPKIN_URL: "http://zipkin:9411" }
+    env: { ROLE: api, WORKER_URL: "http://worker:8080" }
 
   worker:
     groups: [app]
-    depends_on: [zipkin]
     image: app
     build: { go: ./app }
     ports: { http: 8080, metrics: 9090 }
     health: { port: http, path: /healthz }
-    metrics: { port: metrics }
     pprof: { port: metrics }
-    env: { ROLE: worker, ZIPKIN_URL: "http://zipkin:9411" }
-
-  # no manifest: rig generates its Deployment and Service from this block
-  loadgen:
-    role: load
-    depends_on: [api, consul]
-    image: app
-    build: { go: ./app }
-    ports: { metrics: 9090 }
-    metrics: { port: metrics }
-    env: { ROLE: loadgen, TARGET: "http://api:8080/echo?q=fleet", CONSUL_URL: "http://consul:8500", RATE_KEY: demo/load }
-
-  prometheus: { role: infra, ports: { web: 9090 } }
-  zipkin:     { role: infra, image: "openzipkin/zipkin:2.21.7", ports: { http: 9411 }, health: { port: http, path: /health } }
-  consul:     { role: infra, image: "consul:1.8.4", ports: { http: 8500 } }
-  redis:      { role: infra, image: "redis:latest", ports: { redis: 6379 } }
-  postgres:   { role: infra, image: "postgres:17", ports: { pg: 5432 }, env: { POSTGRES_PASSWORD: "${PG_PASSWORD:-demo}" } }
-  rabbitmq:   { role: infra, image: "rabbitmq:3-management", ports: { amqp: 5672, mgmt: 15672 } }
+    env: { ROLE: worker }
 
 environments:
   kind:
@@ -60,64 +41,27 @@ environments:
       create_namespace: true
       manifests: [deploy]
       env: { PPROF_ENABLED: "true" }
-      preload: ["redis:latest", "postgres:17", "rabbitmq:3-management", "consul:1.8.4", "openzipkin/zipkin:2.21.7", "prom/prometheus:latest"]
 
   docker:
-    description: containers on one docker network, no Prometheus (rig scrapes)
+    description: containers on one docker network
     runtime: { type: docker, env: { PPROF_ENABLED: "true" } }
-    only: [app, loadgen, consul, redis, postgres, rabbitmq, zipkin]
-    components:
-      prom: { type: scrape }
 
   local:
     description: api and worker as local processes
     runtime: { type: local, env: { PPROF_ENABLED: "true" } }
-    only: [app]
     services:
-      api:    { env: { WORKER_URL: "http://127.0.0.1:8081", ZIPKIN_URL: "" } }
-      worker: { ports: { http: 8081, metrics: 9091 }, env: { PORT: "8081", METRICS_PORT: "9091", ZIPKIN_URL: "" } }
-    components:
-      prom: { type: scrape }
+      api:    { env: { WORKER_URL: "http://127.0.0.1:8081" } }
+      worker: { ports: { http: 8081, metrics: 9091 }, env: { PORT: "8081", METRICS_PORT: "9091" } }
 
 components:
-  prom:   { type: prometheus, addr: "svc://prometheus:9090" }
-  zipkin: { type: zipkin, addr: "svc://zipkin:9411" }
-  db:
-    type: sql
-    driver: postgres
-    addr: "svc://postgres:5432"
-    user: postgres
-    password: "${PG_PASSWORD:-demo}"
-    database: postgres
-    seeds: [{ file: seed.sql }]
-    clear: ["DELETE FROM orders"]
-  cache: { type: redis, addr: "svc://redis:6379" }
-  queue: { type: rabbitmq, addr: "svc://rabbitmq:15672" }
-  kv:    { type: consul, addr: "svc://consul:8500" }
-
-  # two generators behind one interface: one inside rig, one a fleet of pods steered through Consul
-  load-direct: { kind: loadgen, type: http, target: "svc://api:8080/echo?q=rig", rate: 20, max: 400, step: 20 }
-  load-fleet:
-    type: kv
-    store: kv
-    key: demo/load
-    field: rate
-    services: [loadgen]
-    max: 800
-    step: 50
-    metrics: { source: prom, sent: "sum(loadgen_sent_total)", failed: "sum(loadgen_failed_total)" }
-
+  # load sent from inside rig, in every environment
+  load: { kind: loadgen, type: http, target: "svc://api:8080/echo?q=rig", rate: 20, max: 400, step: 20 }
   api-http: { kind: query, type: http, addr: "svc://api:8080" }
   go-build: { type: go, base: "docker://alpine:3.20" }
 
-dashboards:
-  main:
-    - { title: requests/s by service, query: 'sum by (service) (rate(http_requests_total[1m]))', unit: /s, legend: "{{service}}" }
-    - { title: errors/s, query: 'sum by (service) (rate(http_requests_total{code=~"5.."}[1m]))', unit: /s, legend: "{{service}}" }
-    - { title: api latency (avg), query: '1000 * sum(rate(http_request_duration_seconds_sum{service="api"}[1m])) / sum(rate(http_request_duration_seconds_count{service="api"}[1m]))', unit: ms }
-    - { title: in flight, query: 'sum by (service) (http_in_flight)', legend: "{{service}}" }
-  load:
-    - { title: generator sent/s, query: 'sum(rate(loadgen_sent_total[1m]))', unit: /s }
-    - { title: generator failed/s, query: 'sum(rate(loadgen_failed_total[1m]))', unit: /s }
-    - { title: generator latency (avg), query: '1000 * sum(rate(loadgen_latency_seconds_sum[1m])) / sum(rate(loadgen_latency_seconds_count[1m]))', unit: ms }
-    - { title: api uptime, query: 'max(process_uptime_seconds{service="api"})', unit: s, kind: stat }
+queries:
+  echo: { source: api-http, query: "GET /echo?q=hello", help: "one request through api and worker" }
+
+ai:
+  ideas:
+    load: ["raise load until the api HPA scales out, then report the rate"]

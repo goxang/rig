@@ -17,7 +17,6 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - { name: ROLE, value: worker }
-            - { name: ZIPKIN_URL, value: "http://zipkin:9411" }
           ports:
             - { name: http, containerPort: 8080 }
             - { name: metrics, containerPort: 9090 }

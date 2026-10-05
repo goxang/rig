@@ -86,12 +86,34 @@ type UI struct {
 	// Tabs are the screens shown, in order (number keys follow it); left out, every screen the
 	// project configures something for shows, in the order of Screens.
 	Tabs []string `yaml:"tabs"`
+	// Mode is simple (fewer columns, keys and panels, for newcomers) or detailed (the default); V
+	// switches it in the UI.
+	Mode string  `yaml:"mode"`
+	Logs *LogsUI `yaml:"logs"`
+}
+
+// LogsUI says how the Logs screen reads structured (JSON) lines; every key has a default.
+type LogsUI struct {
+	Wrap bool `yaml:"wrap"`
+	// Raw shows lines as written instead of "LEVEL message key=value"; s switches.
+	Raw bool `yaml:"raw"`
+	// Time, Level and Message are the JSON keys of those parts, first match wins.
+	Time    []string `yaml:"time"`
+	Level   []string `yaml:"level"`
+	Message []string `yaml:"message"`
+	// Fields, when set, are the only other keys shown, in this order; Hide are keys left out (stack,
+	// caller, ...) until h shows them.
+	Fields []string `yaml:"fields"`
+	Hide   []string `yaml:"hide"`
 }
 
 type AI struct {
 	// Deny are project paths (globs) the assistant never reads, e.g. configs/** holding credentials.
 	Deny         []string `yaml:"deny"`
 	Instructions string   `yaml:"instructions"`
+	// Ideas are the questions tab offers in an empty chat, by screen (services, logs, ...) or "all";
+	// they come before rig's own.
+	Ideas map[string][]string `yaml:"ideas"`
 }
 
 // Import pulls services from another tool's file, e.g. {godev: .godev.yaml}.

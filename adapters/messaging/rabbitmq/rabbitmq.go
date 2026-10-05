@@ -75,6 +75,97 @@ func (r *Rabbit) Queues(ctx context.Context) ([]core.Queue, error) {
 	return out, nil
 }
 
+func (r *Rabbit) queuePath(queue string) string {
+	return "/api/queues/" + r.vhost() + "/" + url.PathEscape(queue)
+}
+
+// noisy are queue fields the management API returns that say nothing to someone reading a queue.
+var noisy = []string{"garbage_collection", "backing_queue_status", "consumer_details", "effective_policy_definition", "slave_nodes",
+	"synchronised_slave_nodes", "recoverable_slaves", "reductions", "head_message_timestamp"}
+
+func (r *Rabbit) QueueInfo(ctx context.Context, queue string) (core.Table, error) {
+	var q map[string]any
+	if err := r.opt.Do(ctx, r.env, "GET", r.queuePath(queue), nil, &q); err != nil {
+		return core.Table{}, err
+	}
+	t := core.Table{Columns: []string{"field", "value"}}
+	flat := map[string]string{}
+	flatten("", q, flat)
+	first := []string{"type", "state", "durable", "auto_delete", "exclusive", "messages", "messages_ready", "messages_unacknowledged", "consumers",
+		"message_stats.publish_details.rate", "message_stats.deliver_get_details.rate", "message_stats.ack_details.rate", "message_stats.redeliver_details.rate", "policy", "node"}
+	for _, k := range first {
+		if v, ok := flat[k]; ok {
+			t.Rows = append(t.Rows, []string{k, v})
+			delete(flat, k)
+		}
+	}
+	for _, k := range sortedKeys(flat) {
+		if matchesAny(k, noisy) || strings.HasSuffix(k, ".samples") || strings.Contains(k, "_details.avg") || flat[k] == "" {
+			continue
+		}
+		t.Rows = append(t.Rows, []string{k, flat[k]})
+	}
+	if cs, ok := q["consumer_details"].([]any); ok {
+		for _, c := range cs {
+			m, _ := c.(map[string]any)
+			f := map[string]string{}
+			flatten("", m, f)
+			t.Rows = append(t.Rows, []string{"consumer", fmt.Sprintf("%s · tag %s · prefetch %s · ack %s", f["channel_details.connection_name"], f["consumer_tag"], f["prefetch_count"], f["ack_required"])})
+		}
+	}
+	var binds []map[string]any
+	if err := r.opt.Do(ctx, r.env, "GET", r.queuePath(queue)+"/bindings", nil, &binds); err == nil {
+		for _, b := range binds {
+			src := fmt.Sprint(b["source"])
+			if src == "" {
+				src = "(default)"
+			}
+			t.Rows = append(t.Rows, []string{"binding", src + " → " + fmt.Sprint(b["routing_key"])})
+		}
+	}
+	return t, nil
+}
+
+// Peek reads n messages and puts them back (ack_requeue_true), as the management UI's "get
+// messages" does; RabbitMQ marks them redelivered.
+func (r *Rabbit) Peek(ctx context.Context, queue string, n int) (core.Table, error) {
+	req := map[string]any{"count": n, "ackmode": "ack_requeue_true", "encoding": "auto", "truncate": 50000}
+	var raw []struct {
+		Payload      string         `json:"payload"`
+		Encoding     string         `json:"payload_encoding"`
+		Exchange     string         `json:"exchange"`
+		RoutingKey   string         `json:"routing_key"`
+		Redelivered  bool           `json:"redelivered"`
+		MessageCount int            `json:"message_count"`
+		Properties   map[string]any `json:"properties"`
+	}
+	if err := r.opt.Do(ctx, r.env, "POST", r.queuePath(queue)+"/get", req, &raw); err != nil {
+		return core.Table{}, err
+	}
+	t := core.Table{Columns: []string{"#", "exchange", "routing_key", "redelivered", "properties", "payload"}}
+	for i, m := range raw {
+		props := map[string]string{}
+		flatten("", m.Properties, props)
+		var ps []string
+		for _, k := range sortedKeys(props) {
+			ps = append(ps, k+"="+props[k])
+		}
+		payload := m.Payload
+		if m.Encoding == "base64" {
+			payload = "base64:" + payload
+		}
+		t.Rows = append(t.Rows, []string{strconv.Itoa(i + 1), m.Exchange, m.RoutingKey, strconv.FormatBool(m.Redelivered), strings.Join(ps, " "), payload})
+	}
+	if len(raw) == 0 {
+		t.Note = "the queue has no ready messages"
+	}
+	return t, nil
+}
+
+func (r *Rabbit) DeleteQueue(ctx context.Context, queue string) error {
+	return r.opt.Do(ctx, r.env, "DELETE", r.queuePath(queue), nil, nil)
+}
+
 func (r *Rabbit) Purge(ctx context.Context, queue string) error {
 	return r.opt.Do(ctx, r.env, "DELETE", "/api/queues/"+r.vhost()+"/"+url.PathEscape(queue)+"/contents", nil, nil)
 }

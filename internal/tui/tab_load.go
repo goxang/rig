@@ -30,6 +30,10 @@ type loadTab struct {
 	restored map[string]savedLoadHist
 	// started is when this session started each generator: the default window of W's report
 	started map[string]time.Time
+	// full is chart fullIdx of the selected generator shown full size; w the screen's width
+	full    *chartView
+	fullIdx int
+	w       int
 }
 
 // podHist is one generator instance while the TUI watched it, keyed "<generator>/<instance>".
@@ -72,8 +76,11 @@ type loadMsg struct {
 func (t *loadTab) name() string { return "Load" }
 func (t *loadTab) typing() bool { return false }
 func (t *loadTab) hints() [][2]string {
+	if t.full != nil {
+		return t.full.hints()
+	}
 	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"},
-		{"i", "instance shown"}, {"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}, {"W", "save a metrics report"}}
+		{"i", "instance shown"}, {"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}, {"W", "save a metrics report"}, {"z click", "chart full size"}}
 }
 
 func (t *loadTab) open(m *model) tea.Cmd {
@@ -138,6 +145,18 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 		m.setStatus("rate is read every 5s; other fields need a restart of the generator (b)", false)
 		return editKV(m, msg.comp, msg.key, msg.value)
 	case tea.KeyMsg:
+		if t.full != nil {
+			if msg.String() == "n" {
+				t.openChart(m, t.fullIdx+1)
+			} else if !t.full.key(m, msg) {
+				t.full = nil
+			}
+			return nil
+		}
+		if msg.String() == "z" {
+			t.openChart(m, 0)
+			return nil
+		}
 		if listKeys(msg, &t.sel, len(t.names)) || len(t.names) == 0 {
 			return nil
 		}
@@ -226,13 +245,34 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 }
 
 func keep(p []core.Point) []core.Point {
-	if len(p) > 600 {
-		return p[len(p)-600:]
+	if len(p) > 3600 {
+		return p[len(p)-3600:]
 	}
 	return p
 }
 
+// openChart shows chart i (wrapping) of the selected generator full size, keeping the range and zoom.
+func (t *loadTab) openChart(m *model, i int) {
+	if len(t.names) == 0 {
+		return
+	}
+	cs := t.charts(m, t.names[t.sel])
+	i = (i%len(cs) + len(cs)) % len(cs)
+	c := newChartView("lfull:")
+	if t.full != nil {
+		c.win = t.full.win
+	}
+	t.full, t.fullIdx = c, i
+}
+
 func (t *loadTab) view(m *model, w, h int) string {
+	t.w = w
+	if t.full != nil && len(t.names) > 0 {
+		cs := t.charts(m, t.names[t.sel])
+		c := cs[min(t.fullIdx, len(cs)-1)]
+		t.full.title, t.full.unit, t.full.lines = c.title, c.unit, c.lines
+		return t.full.view(m, 0, 0, w, h)
+	}
 	if len(t.names) == 0 {
 		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, sDim.Render(`no load generators — add one to rig.yaml:
 
@@ -326,20 +366,44 @@ func (t *loadTab) allView(m *model, n string, st core.LoadStatus, rw, h int) str
 		}
 		gauge += sDim.Render("   " + strings.Join(ex, " · "))
 	}
-	chartH := h - lipgloss.Height(tiles) - 1
-	lines := []viz.Line{
+	head := lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw))
+	return head + "\n" + t.chartStack(m, n, rw, h-lipgloss.Height(head), 1+lipgloss.Height(head))
+}
+
+type loadChart struct {
+	title, unit, empty string
+	lines              []viz.Line
+}
+
+// charts are what the right side plots for generator n: its rates and, with several instances, one
+// line per instance; for one instance, its rate and CPU.
+func (t *loadTab) charts(m *model, n string) []loadChart {
+	if id := t.inst[n]; id != "" {
+		p := t.pods[n+"/"+id]
+		if p == nil {
+			p = &podHist{}
+		}
+		sent := loadChart{title: shortInstance(id) + " · req/s", unit: "/s", lines: []viz.Line{{Name: "sent", Points: p.sent, Color: "#73BF69"}}}
+		if len(p.sent) == 0 {
+			sent.empty = "no per-instance counter: give the generator's kv load component metrics.per_instance, a PromQL sent counter labelled pod"
+		}
+		return []loadChart{sent, {title: shortInstance(id) + " · CPU while watching", lines: []viz.Line{{Name: "cpu (cores)", Points: p.cpu, Color: "#B877D9"}}}}
+	}
+	hist := t.hist[n]
+	if hist == nil {
+		hist = &loadHist{}
+	}
+	out := []loadChart{{title: n + " · req/s while watching", unit: "/s", lines: []viz.Line{
 		{Name: "target", Points: hist.target, Color: "#5794F2"},
 		{Name: "actual", Points: hist.actual, Color: "#73BF69"},
 		{Name: "failed", Points: hist.failed, Color: "#F2495C"},
-	}
+	}}}
 	ids := t.instanceIDs(m, n)[1:]
 	if len(ids) < 2 {
-		chart := panel(n+" · req/s while watching", viz.LineChart(lines, rw-2, chartH-2, "/s"), rw, chartH, false)
-		return lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw), chart)
+		return out
 	}
 	// one line per instance: sent/s when the generator reports it, else CPU
-	var per []viz.Line
-	unit, what := "/s", "req/s"
+	per := loadChart{title: n + " · req/s per instance", unit: "/s"}
 	for _, id := range ids {
 		p := t.pods[n+"/"+id]
 		if p == nil {
@@ -347,14 +411,33 @@ func (t *loadTab) allView(m *model, n string, st core.LoadStatus, rw, h int) str
 		}
 		pts := p.sent
 		if len(pts) == 0 {
-			pts, unit, what = p.cpu, "", "CPU cores"
+			pts, per.unit, per.title = p.cpu, "", n+" · CPU cores per instance"
 		}
-		per = append(per, viz.Line{Name: shortInstance(id), Points: pts, Color: colorFor(id)})
+		per.lines = append(per.lines, viz.Line{Name: shortInstance(id), Points: pts, Color: colorFor(id)})
 	}
-	topH := chartH / 2
-	top := panel(n+" · req/s while watching", viz.LineChart(lines, rw-2, topH-2, "/s"), rw, topH, false)
-	bottom := panel(n+" · "+what+" per instance", viz.LineChart(per, rw-2, chartH-topH-2, unit), rw, chartH-topH, false)
-	return lipgloss.JoinVertical(lipgloss.Left, tiles, truncate(gauge, rw), top, bottom)
+	return append(out, per)
+}
+
+// chartStack draws the charts of n one above the other in rw×h, the top at body row y; a click on
+// one opens it full size.
+func (t *loadTab) chartStack(m *model, n string, rw, h, y int) string {
+	cs := t.charts(m, n)
+	x := t.w - rw
+	var parts []string
+	for i, c := range cs {
+		ch := h / len(cs)
+		if i == len(cs)-1 {
+			ch = h - ch*(len(cs)-1)
+		}
+		m.zone(fmt.Sprintf("load:chart:%d", i), x, y, rw, ch)
+		y += ch
+		body := viz.LineChart(c.lines, rw-2, ch-2, c.unit)
+		if c.empty != "" {
+			body = sDim.Render(wrap(c.empty, rw-4))
+		}
+		parts = append(parts, panel(c.title+sDim.Render("  · enter or click: full size"), body, rw, ch, false))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (t *loadTab) instanceView(m *model, n, id string, rw, h int) string {
@@ -385,20 +468,9 @@ func (t *loadTab) instanceView(m *model, n, id string, rw, h int) string {
 		tile("cpu", cpuText(in.CPU), "cores", cPurple, tw),
 		tile("memory", bytesText(in.Memory), in.Host, cAmber, rw-3*tw),
 	)
-	chartH := h - lipgloss.Height(tiles)
-	topH := chartH / 2
-	var top string
-	if len(p.sent) > 0 {
-		top = panel(shortInstance(id)+" · req/s", viz.LineChart([]viz.Line{{Name: "sent", Points: p.sent, Color: "#73BF69"}}, rw-2, topH-2, "/s"), rw, topH, false)
-	} else {
-		top = panel(shortInstance(id)+" · req/s", sDim.Render(wrap("no per-instance counter: give the generator's kv load component metrics.per_instance, a PromQL sent counter labelled pod", rw-4)), rw, topH, false)
-	}
-	cpu := []viz.Line{{Name: "cpu (cores)", Points: p.cpu, Color: "#B877D9"}}
-	bottom := panel(shortInstance(id)+" · CPU while watching", viz.LineChart(cpu, rw-2, chartH-topH-2, ""), rw, chartH-topH, false)
-	return lipgloss.JoinVertical(lipgloss.Left, tiles, top, bottom)
+	return tiles + "\n" + t.chartStack(m, n, rw, h-lipgloss.Height(tiles), 1+lipgloss.Height(tiles))
 }
 
-// services are the statuses of the services a generator runs as.
 func (t *loadTab) services(m *model, n string) []core.Status {
 	g, _, err := engine.Get[core.LoadGenerator](m.app, core.KindLoad, n)
 	if err != nil {
@@ -453,6 +525,17 @@ func (t *loadTab) trackPods(m *model, n string, st core.LoadStatus, now time.Tim
 }
 
 func (t *loadTab) click(m *model, h hit) tea.Cmd {
+	if t.full != nil {
+		if !t.full.click(m, h) {
+			t.full = nil
+		}
+		return nil
+	}
+	if i, ok := strings.CutPrefix(h.id, "load:chart:"); ok {
+		k, _ := strconv.Atoi(i)
+		t.openChart(m, k)
+		return nil
+	}
 	if h.id == "load:list" && h.y < len(t.names) {
 		t.sel = h.y
 		return nil
@@ -537,4 +620,15 @@ func (t *loadTab) configure(m *model, op, n string, lc core.LoadConfigured) tea.
 		return m.act("set env of "+n, true, func(ctx context.Context) error { return a.SetEnv(ctx, svcs, kv) })
 	})
 	return nil
+}
+
+func (t *loadTab) drag(m *model, h hit, phase dragPhase) bool {
+	return t.full != nil && t.full.drag(m, h, phase)
+}
+
+func (t *loadTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
+	if t.full == nil {
+		return nil, false
+	}
+	return nil, t.full.wheel(h, up)
 }

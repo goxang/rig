@@ -22,6 +22,9 @@ type grid struct {
 	id     string // zone id prefix
 	shown  int    // rows that fit, from the last render
 	x0     []int  // column start offsets, from the last render
+	xcol   []int  // the column each x0 starts
+	// simple are the columns the simple view shows; empty shows them all
+	simple []int
 }
 
 type gcol struct {
@@ -84,6 +87,9 @@ func (g *grid) sortRows() {
 	}
 	sort.SliceStable(g.rows, func(i, j int) bool {
 		c := compare(key(g.rows[i]), key(g.rows[j]))
+		if c == 0 {
+			c = strings.Compare(g.rows[i].id, g.rows[j].id)
+		}
 		if g.desc {
 			return c > 0
 		}
@@ -166,7 +172,7 @@ func (g *grid) click(h hit) (selected bool) {
 	case g.id + ":head":
 		for i := len(g.x0) - 1; i >= 0; i-- {
 			if h.x >= g.x0[i] {
-				g.sortOn(i)
+				g.sortOn(g.xcol[i])
 				return false
 			}
 		}
@@ -179,10 +185,24 @@ func (g *grid) click(h hit) (selected bool) {
 	return false
 }
 
-func (g *grid) widths(w int) []int {
+// shows are the columns drawn: the simple ones in the simple view, else all.
+func (g *grid) shows(m *model) []int {
+	if m != nil && m.simple && len(g.simple) > 0 {
+		return g.simple
+	}
+	out := make([]int, len(g.cols))
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
+// widths of every column for width w; columns not in show get 0 and take no room.
+func (g *grid) widths(w int, show []int) []int {
 	ws := make([]int, len(g.cols))
-	fixed, flex := len(g.cols)-1, 0
-	for i, c := range g.cols {
+	fixed, flex := len(show)-1, 0
+	for _, i := range show {
+		c := g.cols[i]
 		ws[i] = c.width
 		fixed += c.width
 		if c.width == 0 {
@@ -191,7 +211,7 @@ func (g *grid) widths(w int) []int {
 	}
 	if flex > 0 {
 		each := max(6, (w-fixed)/flex)
-		for i := range ws {
+		for _, i := range show {
 			if ws[i] == 0 {
 				ws[i] = each
 			}
@@ -202,12 +222,14 @@ func (g *grid) widths(w int) []int {
 
 // view renders the grid in w×h cells at (x, y) of the tab body and registers its click zones.
 func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
-	ws := g.widths(w)
-	g.x0 = g.x0[:0]
+	show := g.shows(m)
+	ws := g.widths(w, show)
+	g.x0, g.xcol = g.x0[:0], g.xcol[:0]
 	var head []string
 	off := 0
-	for i, c := range g.cols {
-		g.x0 = append(g.x0, off)
+	for _, i := range show {
+		c := g.cols[i]
+		g.x0, g.xcol = append(g.x0, off), append(g.xcol, i)
 		t := c.title
 		if i == g.sortBy {
 			if g.desc {
@@ -234,16 +256,17 @@ func (g *grid) view(m *model, x, y, w, h int, focused bool) string {
 	b.WriteString(strings.Join(head, " "))
 	for i := g.offset; i < len(g.rows) && i-g.offset < g.shown; i++ {
 		r := g.rows[i]
-		cells := make([]string, len(g.cols))
-		for j, c := range g.cols {
+		cells := make([]string, 0, len(show))
+		for _, j := range show {
+			c := g.cols[j]
 			v := ""
 			if j < len(r.cells) {
 				v = printable(r.cells[j])
 			}
 			if c.right {
-				cells[j] = padLeft(v, ws[j])
+				cells = append(cells, padLeft(v, ws[j]))
 			} else {
-				cells[j] = padRight(v, ws[j])
+				cells = append(cells, padRight(v, ws[j]))
 			}
 		}
 		line := strings.Join(cells, " ")

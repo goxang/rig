@@ -22,6 +22,9 @@ type hostsTab struct {
 	sel    int
 	cpu    map[string][]float64
 	mem    map[string][]float64
+	// podsOf is the host whose pods show (p); empty shows the hosts
+	podsOf string
+	pods   *grid
 }
 
 type hostsMsg struct {
@@ -35,11 +38,18 @@ func (t *hostsTab) name() string            { return "Hosts" }
 func (t *hostsTab) interval() time.Duration { return 3 * time.Second }
 func (t *hostsTab) typing() bool            { return false }
 func (t *hostsTab) hints() [][2]string {
-	return [][2]string{{"enter", "shell"}, {"c", "run command"}}
+	if t.podsOf != "" {
+		return [][2]string{{"esc", "hosts"}, {"< >", "sort column"}, {"I", "invert"}}
+	}
+	return [][2]string{{"enter", "shell"}, {"c", "run command"}, {"p", "pods"}}
 }
 
 func (t *hostsTab) open(m *model) tea.Cmd {
 	t.cpu, t.mem = map[string][]float64{}, map[string][]float64{}
+	if t.pods == nil {
+		t.pods = newGrid("hosts:pods", col("POD", 0), col("NAMESPACE", 30), rcol("CPU", 8), rcol("MEM", 9), rcol("AGE", 7))
+		t.pods.sortBy, t.pods.desc = 2, true
+	}
 	return t.refresh(m)
 }
 
@@ -75,7 +85,16 @@ func (t *hostsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.mem[h.Name] = last(append(t.mem[h.Name], float64(h.MemUsed)/float64(h.MemTotal)), 60)
 			}
 		}
+		t.setPods()
 	case tea.KeyMsg:
+		if t.podsOf != "" {
+			if msg.String() == "esc" {
+				t.podsOf = ""
+			} else {
+				t.pods.key(msg)
+			}
+			return nil
+		}
 		if listKeys(msg, &t.sel, len(t.hosts)) || len(t.hosts) == 0 {
 			return nil
 		}
@@ -83,6 +102,13 @@ func (t *hostsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		switch msg.String() {
 		case "enter", "s":
 			return t.shell(m, host, nil)
+		case "p":
+			if len(t.hosts[t.sel].Pods) == 0 {
+				m.setStatus(t.source+" does not list the pods of "+host, true)
+				return nil
+			}
+			t.podsOf = host
+			t.setPods()
 		case "c":
 			m.askTemplate("command on "+host, "uptime", "a Linux shell command to run on host "+host, func(v string) tea.Cmd {
 				return t.shell(m, host, []string{"sh", "-c", v + "; echo; printf 'press enter '; read _"})
@@ -103,12 +129,31 @@ func (t *hostsTab) shell(m *model, host string, command []string) tea.Cmd {
 		m.setStatus(err.Error(), true)
 		return nil
 	}
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+	return execProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return statusMsg{text: "shell on " + host + ": " + err.Error(), err: true}
 		}
 		return statusMsg{text: "back from " + host}
 	})
+}
+
+func (t *hostsTab) setPods() {
+	if t.podsOf == "" {
+		return
+	}
+	var rows []grow
+	for _, h := range t.hosts {
+		if h.Name != t.podsOf {
+			continue
+		}
+		for _, p := range h.Pods {
+			age := time.Since(p.Started)
+			rows = append(rows, grow{id: p.Namespace + "/" + p.Name,
+				cells: []string{p.Name, p.Namespace, fmt.Sprintf("%.2f", p.CPU), bytesText(p.Mem), shortAge(age)},
+				keys:  []any{nil, nil, p.CPU, float64(p.Mem), age.Seconds()}})
+		}
+	}
+	t.pods.set(rows)
 }
 
 func last(v []float64, n int) []float64 {
@@ -124,6 +169,9 @@ func (t *hostsTab) view(m *model, w, h int) string {
 	}
 	if len(t.hosts) == 0 {
 		return panel("hosts", sDim.Render("loading…"), w, h, true)
+	}
+	if t.podsOf != "" {
+		return panel(fmt.Sprintf("pods on %s · %d", t.podsOf, len(t.pods.rows)), t.pods.view(m, 1, 1, w-2, h-2, true), w, h, true)
 	}
 	inner := w - 2
 	nameW := 18
@@ -164,7 +212,7 @@ func (t *hostsTab) view(m *model, w, h int) string {
 	}
 	if t.sel < len(t.hosts) {
 		x := t.hosts[t.sel]
-		b.WriteString("\n" + sDim.Render(truncate(fmt.Sprintf("%s  %s  %s · %s  %d cores  %s memory", x.Addr, strings.Join(x.Roles, ","), x.OS, x.Kernel, x.CPUs, bytesText(x.MemTotal)), inner)) + "\n")
+		b.WriteString("\n" + sDim.Render(truncate(fmt.Sprintf("%s  %s  %s · %s  %d cores  %s memory  %d pods (p)", x.Addr, strings.Join(x.Roles, ","), x.OS, x.Kernel, x.CPUs, bytesText(x.MemTotal), len(x.Pods)), inner)) + "\n")
 		if hist := t.cpu[x.Name]; len(hist) > 1 && h-len(t.hosts)-8 > 4 {
 			pts := make([]core.Point, len(hist))
 			now := time.Now()
@@ -179,6 +227,10 @@ func (t *hostsTab) view(m *model, w, h int) string {
 }
 
 func (t *hostsTab) click(m *model, h hit) tea.Cmd {
+	if t.podsOf != "" {
+		t.pods.click(h)
+		return nil
+	}
 	if h.id != "hosts:rows" || h.y >= len(t.hosts) {
 		return nil
 	}

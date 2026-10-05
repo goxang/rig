@@ -89,3 +89,10 @@ Reply with ONLY the characters that come after the cursor, on one line: no quote
 Input so far (cursor at the end):
 ` + text
 }
+
+func DescribePrompt(hint, before, want string) string {
+	return `Write the input for a developer tool. Context: ` + hint + `
+The user typed the start of the input, then described in words what the rest should do. Reply with ONLY the whole input on one line, starting with exactly what they typed: no quotes, no code fences, no explanation.
+Typed: ` + before + `
+Description of the rest: ` + want
+}

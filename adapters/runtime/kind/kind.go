@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/goxang/rig/adapters/runtime/kubernetes"
@@ -64,6 +66,86 @@ func (r *Runtime) registryName() string { return r.opt.Cluster + "-registry" }
 // LoadImage copies a local docker image into the cluster's nodes.
 func (r *Runtime) LoadImage(ctx context.Context, image string) error {
 	return sh.New("kind", "load", "docker-image", image, "--name", r.opt.Cluster).Run(ctx)
+}
+
+// Hosts are the cluster's nodes. Kind nodes are local containers, so docker fills in what the API
+// server cannot give: the whole list when kubectl cannot reach the cluster (stopped, or its context
+// missing from the kubeconfig), and the load, plus CPU and memory when the kubelet summary is missing.
+func (r *Runtime) Hosts(ctx context.Context) ([]core.Host, error) {
+	hosts, kerr := r.Runtime.Hosts(ctx)
+	out, err := sh.New("docker", "ps", "-a", "--filter", "label=io.x-k8s.kind.cluster="+r.opt.Cluster,
+		"--format", `{{.Names}}	{{.State}}	{{.Label "io.x-k8s.kind.role"}}`).Output(ctx)
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return hosts, kerr
+	}
+	known := map[string]int{}
+	for i, h := range hosts {
+		known[h.Name] = i
+	}
+	var running []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(l, "\t")
+		if len(f) < 3 {
+			continue
+		}
+		if _, ok := known[f[0]]; !ok {
+			known[f[0]] = len(hosts)
+			hosts = append(hosts, core.Host{Name: f[0], Roles: []string{f[2]}, OS: "kind node (" + f[1] + ")"})
+		}
+		if f[1] == "running" {
+			running = append(running, f[0])
+		}
+	}
+	if len(running) == 0 {
+		return hosts, nil
+	}
+	if out, err := sh.New("docker", append([]string{"stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"}, running...)...).Output(ctx); err == nil {
+		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			f := strings.Split(l, "\t")
+			i, ok := known[f[0]]
+			if len(f) < 3 || !ok {
+				continue
+			}
+			h := &hosts[i]
+			h.Ready = h.Ready || kerr != nil
+			cpu, _ := strconv.ParseFloat(strings.TrimSuffix(f[1], "%"), 64)
+			used, total, _ := strings.Cut(f[2], " / ")
+			if h.CPUUsed == 0 && h.MemUsed == 0 {
+				h.MemUsed = dockerBytes(used)
+				if h.CPUs == 0 {
+					h.CPUs = runtime.NumCPU()
+				}
+				h.CPUUsed = cpu / 100 / float64(h.CPUs)
+			}
+			if h.MemTotal == 0 {
+				h.MemTotal = dockerBytes(total)
+			}
+		}
+	}
+	for _, n := range running {
+		if raw, err := sh.New("docker", "exec", n, "cat", "/proc/loadavg").Output(ctx); err == nil {
+			if f := strings.Fields(string(raw)); len(f) > 0 {
+				hosts[known[n]].Load1, _ = strconv.ParseFloat(f[0], 64)
+			}
+		}
+	}
+	return hosts, nil
+}
+
+// dockerBytes reads docker stats' sizes: 1.5GiB, 512MiB, 900kB.
+func dockerBytes(s string) int64 {
+	s = strings.TrimSpace(s)
+	units := []struct {
+		suffix string
+		mult   float64
+	}{{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}, {"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"B", 1}}
+	for _, u := range units {
+		if v, ok := strings.CutSuffix(s, u.suffix); ok {
+			f, _ := strconv.ParseFloat(v, 64)
+			return int64(f * u.mult)
+		}
+	}
+	return 0
 }
 
 func (r *Runtime) Shell(ctx context.Context, host string, command []string) (*exec.Cmd, error) {
