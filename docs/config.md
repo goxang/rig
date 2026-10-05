@@ -92,6 +92,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `sql` | `driver` (postgres, mssql, mysql), `addr`, `user`, `password`, `database`, `params`, `seeds`, `clear` |
 | `redis` | `addr`, `password`, `db`, `unsafe` |
 | `rabbitmq` | `addr` (management API), `user`, `password`, `vhost` |
+| `kafka` | `addr` (brokers, comma separated), `user`, `password`, `sasl` (plain, scram-sha-256, scram-sha-512), `tls`; queries: `topics`, `groups`, `lag <group>`, `tail <topic> [n]` |
 | `consul` | `addr`, `token` |
 | `http` (loadgen) | `target`, `method`, `body`, `headers`, `rate`, `max_in_flight`, `timeout` |
 | `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99, per_instance}` (`per_instance`: a sent counter labelled `pod` or `instance`, charted per instance on the Load screen) |

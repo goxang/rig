@@ -30,7 +30,7 @@ interface of one **kind**.
 | logs | `LogSource` | `runtime` (default), `loki` |
 | database | `Database` | `sql` (postgres, mssql, mysql) |
 | cache | `Cache` | `redis` |
-| messaging | `Messaging` | `rabbitmq` |
+| messaging | `Messaging` | `rabbitmq`, `kafka` |
 | kv | `KV` | `consul` |
 | loadgen | `LoadGenerator`: start, stop, set rate, status | `http` (in-process), `kv` (generator pods steered through a key), `command` |
 | hosts | `Hosts`: list with usage, shell | `ssh`; runtimes provide their own (nodes, this machine) |

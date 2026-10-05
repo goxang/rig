@@ -15,6 +15,7 @@ import (
 	_ "github.com/goxang/rig/adapters/loadgen/kv"
 	_ "github.com/goxang/rig/adapters/logs/loki"
 	_ "github.com/goxang/rig/adapters/logs/runtime"
+	_ "github.com/goxang/rig/adapters/messaging/kafka"
 	_ "github.com/goxang/rig/adapters/messaging/rabbitmq"
 	_ "github.com/goxang/rig/adapters/metrics/prometheus"
 	_ "github.com/goxang/rig/adapters/metrics/scrape"
