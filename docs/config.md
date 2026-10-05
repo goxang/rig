@@ -25,6 +25,8 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
 | `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
 | `reports` | metrics a run is measured by, saved as markdown: `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
+| `otel` | OpenTelemetry for every app and load service (see below) |
+| `ui` | `{tabs: [services, logs, ...]}`: the screens and their order; left out, every screen the project configures something for |
 | `ai` | `{deny: [globs], instructions: text}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), and notes it gets with every turn |
 
 ## services.<name>
@@ -63,6 +65,7 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 | `components` | components added or replaced here; one without `type` patches the shared one |
 | `tasks` | tasks replacing the project's tasks of the same name |
 | `queries` | saved queries replacing the project's of the same name |
+| `otel` | fields replacing the project's `otel:` here (a local environment's endpoints, say) |
 | `infra` | the environment that runs this one's `shared` services; they are started, stopped and reached there, and a Kubernetes runtime gets a Service pointing at the host for each |
 
 ### runtime options
@@ -85,6 +88,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `prometheus` | `addr` |
 | `scrape` | `targets` (services or URLs; default every service with `metrics`), `interval`, `retention` |
 | `zipkin`, `jaeger` | `addr` |
+| `tempo` | `addr`; queries take TraceQL: `{ status = error && duration > 1s }` |
 | `loki` | `addr`, `label` (default `app`), `selector` (`{app="{service}"}`) |
 | `pprof` | `port`, `path`, `summary` |
 | `command` (profiler) | `kinds: {cpu: {command, where: service|host, fetch, format, ext}}`, `pid` |
@@ -272,6 +276,27 @@ whose query returns rows: each row's first number is checked, its other cells na
 fires under the thresholds. With no `alerts:`, nodes are watched for cpu and memory at 90% and 98%, disk at 97% and 98%.
 The TUI checks every 15s and shows the worst in its header (`A` lists all); `rig alerts` checks once and
 exits 2 when one is critical. Environments add their own `alerts:`.
+
+## otel
+
+```yaml
+otel:
+  endpoint: svc://otel-collector:4318        # every signal to one collector, or one by one:
+  traces: svc://jaeger:4318/v1/traces
+  metrics: svc://prometheus:9090/api/v1/otlp/v1/metrics   # Prometheus with --web.enable-otlp-receiver
+  logs: svc://loki:3100/otlp/v1/logs
+  protocol: http/protobuf                    # or grpc, http/json
+  sample: 0.1                                # parent-based ratio; left out, every trace
+  attributes: { team: payments }
+```
+
+rig sets the standard variables every OpenTelemetry SDK reads (Go, Java, Python, Node, .NET, ...) on each
+app and load service: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (`service.namespace`,
+`deployment.environment`, then `attributes`), `OTEL_EXPORTER_OTLP_*ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`,
+`OTEL_{TRACES,METRICS,LOGS}_EXPORTER` (`none` for a signal with no address), the sampler and
+`OTEL_PROPAGATORS=tracecontext,baggage`. A variable the service sets itself wins. `svc://` addresses are the
+service's name inside docker or Kubernetes and a forwarded port for local processes. Read the traces back with
+a `jaeger` or `tempo` component, the metrics with `prometheus`, the logs with `loki`.
 
 ## run state an environment keeps
 

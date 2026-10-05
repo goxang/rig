@@ -43,6 +43,8 @@ type App struct {
 
 	envMu        sync.Mutex
 	envOverrides map[string]map[string]string // service → env set with SetEnv, nil until read
+
+	reached sync.Map // svc:// address → what local processes reach it at (otel)
 }
 
 type entry struct {

@@ -24,7 +24,7 @@ interface of one **kind**.
 | runtime | `Runtime`: discover, start, stop, restart, status, scale, logs, exec, deploy | `local`, `docker`, `kubernetes`, `kind` |
 | builder | `Builder` | `go` (no daemon), `docker`, `command` |
 | metrics | `Metrics`: instant and range queries | `prometheus` (any Prometheus API), `scrape` (no server) |
-| tracing | `Tracing`: services, search, trace | `zipkin`, `jaeger` |
+| tracing | `Tracing`: services, search, trace | `zipkin`, `jaeger`, `tempo` |
 | profiler | `Profiler` | `pprof`, `command` (async-profiler, perf, py-spy, ...) |
 | debugger | `Debugger` | `delve` |
 | logs | `LogSource` | `runtime` (default), `loki` |

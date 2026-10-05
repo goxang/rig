@@ -345,19 +345,18 @@ func (a *App) overrides() map[string]map[string]string {
 	return a.envOverrides
 }
 
-// withEnv is s with its env overrides on top, as a copy; s itself is the project's and stays as written.
+// withEnv is s with the OTEL_* variables under its env and its env overrides on top, as a copy; s itself is the project's and stays as written.
 func (a *App) withEnv(s *spec.Service) *spec.Service {
-	o := a.overrides()[s.Name]
-	if len(o) == 0 {
+	o, otel := a.overrides()[s.Name], a.otelEnv(s)
+	if len(o) == 0 && len(otel) == 0 {
 		return s
 	}
 	c := *s
 	c.Env = map[string]string{}
-	for k, v := range s.Env {
-		c.Env[k] = v
-	}
-	for k, v := range o {
-		c.Env[k] = v
+	for _, m := range []map[string]string{otel, s.Env, o} {
+		for k, v := range m {
+			c.Env[k] = v
+		}
 	}
 	return &c
 }

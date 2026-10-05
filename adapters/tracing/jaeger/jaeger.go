@@ -64,7 +64,7 @@ func (tr trace) spans() []core.Span {
 		}
 		for _, t := range s.Tags {
 			sp.Tags[t.Key] = fmt.Sprint(t.Value)
-			if t.Key == "error" && fmt.Sprint(t.Value) == "true" {
+			if t.Key == "error" && fmt.Sprint(t.Value) == "true" || t.Key == "otel.status_code" && fmt.Sprint(t.Value) == "ERROR" {
 				sp.Error = true
 			}
 		}

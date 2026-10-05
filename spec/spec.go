@@ -42,6 +42,8 @@ type Project struct {
 	Reports map[string]*Report `yaml:"reports"`
 	// Sections split the Services screen by business area; services in none fall under "other".
 	Sections map[string]*Section `yaml:"sections"`
+	// OTel points every app and load service at OpenTelemetry backends.
+	OTel *OTel `yaml:"otel"`
 	// UI picks the screens of `rig` and their order.
 	UI *UI `yaml:"ui"`
 	// AI tells the assistant (`rig ai`, @ in the UI) about the project: paths it must not read, notes.
@@ -55,6 +57,26 @@ type Project struct {
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
 	File string `yaml:"-"`
+}
+
+// OTel becomes the standard OTEL_* variables of every app and load service; a variable the service
+// sets itself wins. Addresses take svc://service:port[/path]: inside the runtime's network for
+// containers and pods, forwarded for local processes.
+type OTel struct {
+	// Endpoint takes every signal (an OpenTelemetry Collector: svc://otel-collector:4318); Traces,
+	// Metrics and Logs send one signal elsewhere, with its full path (svc://jaeger:4318/v1/traces).
+	// A signal with no address is off.
+	Endpoint string `yaml:"endpoint"`
+	Traces   string `yaml:"traces"`
+	Metrics  string `yaml:"metrics"`
+	Logs     string `yaml:"logs"`
+	// Protocol is http/protobuf (default), http/json or grpc.
+	Protocol string `yaml:"protocol"`
+	// Sample is the fraction of traces kept (parent based); left out, the SDK's default (all).
+	Sample *float64 `yaml:"sample"`
+	// Attributes are added to every service's resource, after service.namespace (the project) and
+	// deployment.environment (the environment).
+	Attributes map[string]string `yaml:"attributes"`
 }
 
 // Screens are the UI's screens in their default order.
@@ -138,6 +160,8 @@ type Environment struct {
 	Queries map[string]*Query `yaml:"queries"`
 	// Alerts add to the project's alerts in this environment.
 	Alerts []Alert `yaml:"alerts"`
+	// OTel replaces the fields it sets of the project's otel:.
+	OTel *OTel `yaml:"otel"`
 	// Infra names the environment that runs this one's shared services, so heavy infrastructure
 	// (a database, a broker) runs once for local, docker and kind alike.
 	Infra string `yaml:"infra"`
