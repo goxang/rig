@@ -11,6 +11,12 @@ import (
 )
 
 func TestMetricsPort(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("finding a process's ports reads procfs")
+	}
+	metricsMu.Lock()
+	delete(metricsFound, os.Getpid())
+	metricsMu.Unlock()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

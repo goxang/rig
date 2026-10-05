@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -118,9 +119,14 @@ func TestUpOrdersAndWaits(t *testing.T) {
 	if err := a.Down(context.Background(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	want = []string{"stop web", "stop gen", "stop api"}
-	if got := shared.log[3:]; got[0] != "stop web" || got[len(got)-1] != "stop api" || len(got) != 3 {
-		t.Fatalf("down must stop apps in reverse order and leave infra: %v, want %v", got, want)
+	// web and gen both depend on api only: either may stop first, api only after both
+	got := append([]string{}, shared.log[3:]...)
+	if len(got) != 3 || got[2] != "stop api" {
+		t.Fatalf("down must stop apps in reverse order and leave infra: %v", got)
+	}
+	sort.Strings(got[:2])
+	if got[0] != "stop gen" || got[1] != "stop web" {
+		t.Fatalf("down must stop web and gen before api: %v", got)
 	}
 	if err := a.Down(context.Background(), []string{"infra"}, nil); err != nil || shared.log[len(shared.log)-1] != "stop db" {
 		t.Fatalf("named infra must stop: %v %v", err, shared.log)
