@@ -3,9 +3,16 @@
 [![ci](https://github.com/goxang/rig/actions/workflows/ci.yml/badge.svg)](https://github.com/goxang/rig/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/goxang/rig)](https://github.com/goxang/rig/releases/latest)
 
-One control plane for your services and the infrastructure around them: local processes, docker or
-Kubernetes. Describe them once in `rig.yaml`, then run, watch and tune everything from one CLI and one
-terminal UI.
+**The AI-integrated pilot for every service you run.** Manage every part of your software from the terminal:
+services, infrastructure, data, Kubernetes, logs, metrics, tests. Local processes, docker or Kubernetes;
+Go, Python, Node, Java, Rust or anything that runs. Describe it once in `rig.yaml`, then run, watch and tune
+it all from one CLI and one terminal UI.
+
+- **Plugin-based**: every runtime, database, broker, metrics or logs backend is an adapter behind one
+  registry. New components plug in without touching the core, and contributions are welcome.
+- **AI built in**: `@` on any screen chats about what it shows and can act on it; query prompts get AI
+  autocomplete. Works with opencode (free models, no login needed), Claude Code, OpenAI or any
+  OpenAI-compatible endpoint, Anthropic, DeepSeek and 9router.
 
 ![Services](docs/img/services.png)
 
@@ -21,8 +28,10 @@ terminal UI.
 - **Data**: browse and edit databases, Redis, RabbitMQ, Kafka, key-value config; saved queries on a schedule
 - **Kubernetes**: manifests as a graph, edited field by field, synced from the cluster; HPAs, namespaces
 - **Test and load**: test suites with live results, load generators with rate and instances
-- **AI**: `@` on any screen asks about what it shows; `rig mcp` gives agents every tool
-- **Any stack**: Go, Python, Node, Java, Rust; `rig init` reads compose files, manifests and sources
+- **AI**: `@` chat on every screen, inline query completions, `:?` plain-language queries; `rig mcp` gives
+  agents every tool
+- **Any stack**: not just Go; Python, Node, Java, Rust, any image or binary; `rig init` reads compose files,
+  manifests and sources
 
 ## Install
 
@@ -78,5 +87,10 @@ All of it ships in the binary too: `rig docs guide`.
 
 ## Contributing
 
-`go vet ./... && go test -race ./...` must pass. Commits follow Conventional Commits; every green push
+rig is open to contributions: new adapters, screens, fixes, docs. [Design](docs/design.md) shows how to
+write an adapter. `go vet ./... && go test -race ./...` must pass. Commits follow Conventional Commits; every green push
 to `main` is released (`feat:` minor, anything else patch).
+
+## License
+
+[Apache 2.0](LICENSE)
