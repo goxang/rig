@@ -437,6 +437,13 @@ func (a *App) runJob(ctx context.Context, s *spec.TestSuite, run *TestRun, o Tes
 	if s.Dir != "" {
 		dir = filepath.Join(a.Spec.Dir, s.Dir)
 	}
+	if s.Command != "" {
+		pattern := o.Run
+		if pattern == "" {
+			pattern = ".*"
+		}
+		return runCommand(ctx, s, run, dir, append(env, "RIG_RUN="+pattern))
+	}
 	if len(s.Exclude) > 0 {
 		pkgs, err := excluding(ctx, dir, o.Packages, s.Exclude)
 		if err != nil {
@@ -857,7 +864,9 @@ type junitCase struct {
 	Classname string        `xml:"classname,attr"`
 	Time      string        `xml:"time,attr"`
 	Failure   *junitMessage `xml:"failure,omitempty"`
+	Error     *junitMessage `xml:"error,omitempty"`
 	Skipped   *junitMessage `xml:"skipped,omitempty"`
+	SystemOut string        `xml:"system-out,omitempty"`
 }
 
 type junitMessage struct {
