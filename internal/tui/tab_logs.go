@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,11 +27,13 @@ type logsTab struct {
 	services []string
 	instance string
 	grep     string
-	restart  bool
-	stream   int
-	cancel   context.CancelFunc
-	ch       <-chan core.LogLine
-	err      string
+	// query is grep when it reads as a field query: lines are filtered here, not by the source
+	query   logQuery
+	restart bool
+	stream  int
+	cancel  context.CancelFunc
+	ch      <-chan core.LogLine
+	err     string
 	// inspect shows the picked line (or the newest) field by field
 	inspect *jsonTree
 }
@@ -59,9 +62,9 @@ func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
 	if t.inspect != nil {
 		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
-			{"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
+			{"f", "filter lines by this field"}, {"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
 	}
-	return [][2]string{{"f", "pick services"}, {"/", "grep (regex)"}, {"↑↓ click", "pick a line"}, {"enter v", "inspect the line"}, {"w", "wrap"}, {"s", "structured/raw"},
+	return [][2]string{{"f", "pick services"}, {"/", "filter: text, regex, a.b=value"}, {"↑↓ click", "pick a line"}, {"enter v", "inspect the line"}, {"w", "wrap"}, {"s", "structured/raw"},
 		{"h", "fields shown"}, {"i", "pick instance"}, {"p", "pause"}, {"pgup pgdn ←→", "page, sideways"},
 		{"drag", "select text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear"}, {"M", "mouse off: terminal selection"}}
 }
@@ -150,6 +153,11 @@ func (t *logsTab) start(m *model) tea.Cmd {
 	if _, err := regexp.Compile(t.grep); err == nil {
 		q.Regex = true
 	}
+	t.query = nil
+	if fq, ok := parseLogQuery(t.grep); ok {
+		// the source cannot read fields: take more history and filter it here
+		t.query, q.Match, q.Regex, q.Tail = fq, "", false, 2000
+	}
 	if len(t.services) == 1 {
 		q.Instance = t.instance
 	}
@@ -203,7 +211,7 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
-		t.log.add(msg.lines)
+		t.log.add(t.filter(msg.lines))
 		if msg.done {
 			return nil
 		}
@@ -221,6 +229,14 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 					copyText(l.Text)
 					m.setStatus("copied the line", false)
 				}
+			case "f":
+				term := queryFor(t.inspect.current())
+				if _, ok := parseLogQuery(t.grep); ok {
+					term = t.grep + " " + term
+				}
+				t.grep, t.inspect = term, nil
+				m.setStatus("filter: "+term+" (/ edits it)", false)
+				return t.start(m)
 			case "J", "ctrl+down":
 				t.log.moveCursor("down")
 				t.openInspect(m)
@@ -252,8 +268,8 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "i":
 			t.pickInstance(m)
 		case "/":
-			hint := "text or an RE2 regex ((?i) ignores case) that keeps the log lines of " + strings.Join(t.services, ", ") + " that matter; recent lines:\n" + logSample(t.log.lines, 8)
-			m.askAI("grep (text or regex, (?i) ignores case)", t.grep, hint, func(v string) tea.Cmd {
+			hint := "text or an RE2 regex ((?i) ignores case), or a field query (path=value, path!=value, path~text, ANDed by spaces, e.g. output.Transaction.ID=202604), that keeps the log lines of " + strings.Join(t.services, ", ") + " that matter; recent lines:\n" + logSample(t.log.lines, 8)
+			m.askAI("filter: text, regex, or fields like output.Transaction.ID=202604 level!=debug", t.grep, hint, func(v string) tea.Cmd {
 				t.grep = v
 				return t.start(m)
 			})
@@ -278,7 +294,10 @@ func (t *logsTab) view(m *model, w, h int) string {
 	if t.instance != "" {
 		title += " · " + t.instance
 	}
-	if t.grep != "" {
+	switch {
+	case t.query != nil:
+		title += " · where " + t.grep
+	case t.grep != "":
 		title += " · grep " + t.grep
 	}
 	title += fmt.Sprintf(" · %d lines · ", len(t.log.lines)) + t.log.state()
@@ -287,7 +306,11 @@ func (t *logsTab) view(m *model, w, h int) string {
 	}
 	if len(t.log.lines) == 0 {
 		m.zone("logs:body", 1, 1, w-2, h-2)
-		return panel(title, sDim.Render("waiting for log lines…"), w, h, true)
+		wait := "waiting for log lines…"
+		if t.query != nil {
+			wait = "no line matches " + t.grep + " yet (/ edits the filter)"
+		}
+		return panel(title, sDim.Render(wait), w, h, true)
 	}
 	nameW := 0
 	for _, l := range t.log.lines[max(0, len(t.log.lines)-t.log.scroll-h):max(0, len(t.log.lines)-t.log.scroll)] {
@@ -349,18 +372,20 @@ func levelColor(s string) string {
 	return s
 }
 
-// logFormat is how a JSON log line reads: "LEVEL message key=value ...", coloured by level, with the
-// keys of ui.logs; raw shows lines as written.
+// logFormat is how a log line reads: "LEVEL message key=value ...", coloured by level, with the
+// keys of ui.logs. JSON, console and logfmt lines all go through logTree, so a value holding JSON, a
+// protobuf or a Go struct shows as compact JSON; raw shows lines as written.
 type logFormat struct {
 	raw                  bool
 	time, level, message []string
 	fields               []string
 	hidden               map[string]bool
+	trees                map[string]*jnode
 }
 
 func newLogFormat(ui *spec.LogsUI) logFormat {
 	f := logFormat{time: []string{"time", "ts", "timestamp", "@timestamp", "Time"}, level: []string{"level", "lvl", "severity", "Level"},
-		message: []string{"msg", "message", "Message"}, hidden: map[string]bool{}}
+		message: []string{"msg", "message", "Message"}, hidden: map[string]bool{}, trees: map[string]*jnode{}}
 	if ui == nil {
 		return f
 	}
@@ -391,16 +416,43 @@ func parseLogJSON(s string) (map[string]any, bool) {
 // pretty is the format of the Logs screen and service pages before ui.logs; tests and other callers keep it.
 func pretty(s string) string { return newLogFormat(nil).render(s) }
 
+// tree is line s parsed, cached: the screen redraws the same lines every second.
+func (f logFormat) tree(s string) *jnode {
+	if n, ok := f.trees[s]; ok {
+		return n
+	}
+	// ponytail: whole-cache reset, an LRU if redraws after a reset ever show up in profiles
+	if len(f.trees) > 2*logCap {
+		clear(f.trees)
+	}
+	n := logTree(s)
+	f.trees[s] = n
+	return n
+}
+
+// structured says whether s parsed into fields, not one text value.
+func structured(n *jnode) bool {
+	return n.kind == 'o' && !(len(n.kids) == 1 && n.kids[0].key == "text" && !n.kids[0].container())
+}
+
 func (f logFormat) render(s string) string {
-	m, ok := parseLogJSON(s)
-	if f.raw || !ok {
+	if f.raw {
 		return levelColor(s)
 	}
+	root := f.tree(s)
+	if !structured(root) {
+		return levelColor(s)
+	}
+	byKey := map[string]*jnode{}
+	for _, k := range root.kids {
+		byKey[k.key] = k
+	}
+	used := map[string]bool{}
 	pick := func(keys []string) string {
 		for _, k := range keys {
-			if v, ok := m[k]; ok {
-				delete(m, k)
-				return fmt.Sprint(v)
+			if n, ok := byKey[k]; ok {
+				used[k] = true
+				return n.text()
 			}
 		}
 		return ""
@@ -410,19 +462,19 @@ func (f logFormat) render(s string) string {
 	msg := pick(f.message)
 	keys := f.fields
 	if len(keys) == 0 {
-		keys = engine.SortedKeys(m)
+		for _, k := range root.kids {
+			keys = append(keys, k.key)
+		}
 	}
 	var kv []string
 	for _, k := range keys {
-		v, ok := m[k]
-		if !ok || f.hidden[k] {
+		n, ok := byKey[k]
+		if !ok || used[k] || f.hidden[k] {
 			continue
 		}
-		text := fmt.Sprint(v)
-		if _, scalar := v.(string); !scalar {
-			if raw, err := json.Marshal(v); err == nil {
-				text = string(raw)
-			}
+		text := n.text()
+		if n.container() {
+			text = compactJSON(n)
 		}
 		if k == "error" || k == "err" {
 			text = sRed.Render(text)
@@ -433,15 +485,23 @@ func (f logFormat) render(s string) string {
 	switch {
 	case strings.HasPrefix(level, "ERR"), strings.HasPrefix(level, "FATAL"), strings.HasPrefix(level, "PANIC"):
 		lv = sRed.Bold(true)
-	case strings.HasPrefix(level, "WARN"):
+	case strings.HasPrefix(level, "WARN"), level == "WRN":
 		lv = sAmber.Bold(true)
-	case strings.HasPrefix(level, "INFO"):
+	case strings.HasPrefix(level, "INF"):
 		lv = sGreen
 	}
 	return lv.Render(padRight(level, 5)) + " " + msg + "  " + strings.Join(kv, " ")
 }
 
-// logKeys are the JSON keys of lines, in first-seen order, minus the time, level and message.
+func compactJSON(n *jnode) string {
+	var b bytes.Buffer
+	if json.Compact(&b, n.bytes()) != nil {
+		return string(n.bytes())
+	}
+	return b.String()
+}
+
+// keys are the top-level fields of lines, in first-seen order, minus the time, level and message.
 func (f logFormat) keys(lines []core.LogLine) []string {
 	seen := map[string]bool{}
 	for _, k := range append(append(append([]string{}, f.time...), f.level...), f.message...) {
@@ -455,14 +515,14 @@ func (f logFormat) keys(lines []core.LogLine) []string {
 		}
 	}
 	for _, l := range lines {
-		m, ok := parseLogJSON(l.Text)
-		if !ok {
+		root := f.tree(l.Text)
+		if !structured(root) {
 			continue
 		}
-		for _, k := range engine.SortedKeys(m) {
-			if !seen[k] {
-				seen[k] = true
-				out = append(out, k)
+		for _, k := range root.kids {
+			if !seen[k.key] {
+				seen[k.key] = true
+				out = append(out, k.key)
 			}
 		}
 	}
@@ -478,7 +538,7 @@ func (f logFormat) keys(lines []core.LogLine) []string {
 func (t *logsTab) pickFields(m *model) {
 	keys := t.log.fmt.keys(t.log.lines)
 	if len(keys) == 0 {
-		m.setStatus("no JSON lines yet: fields come from structured (JSON) logs", true)
+		m.setStatus("no structured lines yet: fields come from JSON, console or key=value logs", true)
 		return
 	}
 	var shown []string
@@ -528,8 +588,22 @@ func (t *logsTab) openInspect(m *model) {
 	t.inspect = tree
 }
 
+// filter keeps the lines the field query matches.
+func (t *logsTab) filter(lines []core.LogLine) []core.LogLine {
+	if t.query == nil {
+		return lines
+	}
+	var out []core.LogLine
+	for _, l := range lines {
+		if t.query.match(t.log.fmt.tree(l.Text)) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 func (t *logsTab) grepRe() *regexp.Regexp {
-	if t.grep == "" {
+	if t.grep == "" || t.query != nil {
 		return nil
 	}
 	if re, err := regexp.Compile(t.grep); err == nil {

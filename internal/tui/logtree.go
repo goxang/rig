@@ -158,6 +158,9 @@ func decodeText(s string) *jnode {
 	if n := parseGo(t); n != nil {
 		return n
 	}
+	if n := parseProtoText(t); n != nil {
+		return n
+	}
 	if i := strings.IndexAny(t, "{["); i > 0 {
 		if n, err := parseJSON([]byte(t[i:])); err == nil && n.container() {
 			expand(n)
@@ -169,8 +172,143 @@ func decodeText(s string) *jnode {
 			return root
 		}
 	}
-	b, _ := json.Marshal(s)
+	b, _ := json.Marshal(t)
 	return &jnode{kind: 's', scalar: string(b)}
+}
+
+// parseProtoText reads a protobuf message printed by its String method (prototext, one line):
+// Name:value pairs where a value is "quoted", {a message}, [a, list] or a word; a repeated name
+// becomes an array. nil if s is not one.
+func parseProtoText(s string) *jnode {
+	if !protoField.MatchString(s) {
+		return nil
+	}
+	p := &protoParser{s: s}
+	n := p.message(0)
+	if n == nil || p.i != len(s) || len(n.kids) == 0 {
+		return nil
+	}
+	return n
+}
+
+var protoField = regexp.MustCompile(`^(?:[A-Za-z_]\w*|\[[\w.]+\]):\S`)
+
+type protoParser struct {
+	s string
+	i int
+}
+
+func (p *protoParser) space() {
+	for p.i < len(p.s) && (p.s[p.i] == ' ' || p.s[p.i] == ',' || p.s[p.i] == ';') {
+		p.i++
+	}
+}
+
+// message reads fields up to end (0: the end of the text).
+func (p *protoParser) message(end byte) *jnode {
+	n := &jnode{kind: 'o'}
+	byKey, repeated := map[string]*jnode{}, map[*jnode]bool{}
+	for {
+		p.space()
+		if p.i >= len(p.s) {
+			if end != 0 {
+				return nil
+			}
+			return n
+		}
+		if end != 0 && p.s[p.i] == end {
+			p.i++
+			return n
+		}
+		m := protoField.FindString(p.s[p.i:])
+		if m == "" {
+			return nil
+		}
+		key := m[:len(m)-2]
+		p.i += len(m) - 1
+		kid := p.value()
+		if kid == nil {
+			return nil
+		}
+		// a repeated field prints once per element: the second one turns the field into an array
+		switch prev := byKey[key]; {
+		case prev == nil:
+			kid.key, kid.parent = key, n
+			n.kids = append(n.kids, kid)
+			byKey[key] = kid
+		case repeated[prev]:
+			kid.parent = prev
+			prev.kids = append(prev.kids, kid)
+		default:
+			arr := &jnode{kind: 'a', key: key, parent: n, kids: []*jnode{prev, kid}}
+			prev.key, prev.parent, kid.parent = "", arr, arr
+			for i, k := range n.kids {
+				if k == prev {
+					n.kids[i] = arr
+				}
+			}
+			byKey[key], repeated[arr] = arr, true
+		}
+	}
+}
+
+func (p *protoParser) value() *jnode {
+	rest := p.s[p.i:]
+	switch rest[0] {
+	case '{', '<':
+		p.i++
+		return p.message(map[byte]byte{'{': '}', '<': '>'}[rest[0]])
+	case '[':
+		p.i++
+		arr := &jnode{kind: 'a'}
+		for {
+			p.space()
+			if p.i >= len(p.s) {
+				return nil
+			}
+			if p.s[p.i] == ']' {
+				p.i++
+				return arr
+			}
+			kid := p.value()
+			if kid == nil {
+				return nil
+			}
+			kid.parent = arr
+			arr.kids = append(arr.kids, kid)
+		}
+	case '"', '\'':
+		var text strings.Builder
+		// adjacent quoted strings are one value
+		for p.i < len(p.s) && (p.s[p.i] == '"' || p.s[p.i] == '\'') {
+			q, err := strconv.QuotedPrefix(p.s[p.i:])
+			if err != nil {
+				return nil
+			}
+			u, err := strconv.Unquote(q)
+			if err != nil {
+				return nil
+			}
+			text.WriteString(u)
+			p.i += len(q)
+			for p.i < len(p.s) && p.s[p.i] == ' ' && p.i+1 < len(p.s) && (p.s[p.i+1] == '"' || p.s[p.i+1] == '\'') {
+				p.i++
+			}
+		}
+		if d := decodeText(text.String()); d.container() {
+			return d
+		}
+		b, _ := json.Marshal(text.String())
+		return &jnode{kind: 's', scalar: string(b)}
+	}
+	start := p.i
+	for p.i < len(p.s) && !strings.ContainsRune(" ,;}]>", rune(p.s[p.i])) {
+		p.i++
+	}
+	if p.i == start {
+		return nil
+	}
+	return scalarNode(p.s[start:p.i])
 }
 
 // parseGo reads a value printed by fmt: {a b}, &{Name:a Age:3}, [x y], map[k:v]; nil if s is not one.

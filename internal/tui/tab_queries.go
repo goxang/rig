@@ -333,6 +333,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 
 func (t *queriesTab) newQuery(m *model, comp string) {
 	lang := t.langs[comp]
+	defer m.asPopup()
 	m.askTemplate(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, func(v string) tea.Cmd {
 		if strings.TrimSpace(v) == "" {
 			return nil
@@ -416,6 +417,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 					m.sched.extra[n] = &nq
 					return t.runSelected(m, n, &nq)
 				})
+				m.asPopup()
 			}
 		case "a":
 			if q != nil {

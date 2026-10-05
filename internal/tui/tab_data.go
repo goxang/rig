@@ -38,6 +38,10 @@ type dataTab struct {
 
 	filter   string
 	restored map[string][]string
+	// picked is the row last opened at each place of a walk, so going back lands on it; restore
+	// is the one the next fill selects
+	picked  map[string]string
+	restore string
 	// query is what Q ran at queryAt, shown instead of the walk until esc
 	query   string
 	queryAt []string
@@ -567,6 +571,32 @@ func (t *dataTab) fill() {
 		rows = append(rows, grow{id: id, cells: r})
 	}
 	t.right.set(rows)
+	if t.restore != "" && !t.loading {
+		for i, r := range t.right.rows {
+			if strings.HasSuffix(r.id, "\x00"+t.restore) {
+				t.right.sel = i
+			}
+		}
+		t.restore = ""
+	}
+}
+
+// place names where c's walk stands.
+func (t *dataTab) place(c dataComp) string {
+	return c.name + "\x00" + strings.Join(t.paths[c.name], "\x00")
+}
+
+// remember keeps the selected row of the current place for the way back.
+func (t *dataTab) remember(c dataComp) {
+	r, ok := t.right.current()
+	if !ok {
+		return
+	}
+	if t.picked == nil {
+		t.picked = map[string]string{}
+	}
+	_, child, _ := strings.Cut(r.id, "\x00")
+	t.picked[t.place(c)] = child
 }
 
 func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
@@ -614,6 +644,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		_, child, _ := strings.Cut(r.id, "\x00")
+		t.remember(c)
 		t.paths[c.name] = append(t.paths[c.name], child)
 		t.filter = ""
 		t.right = newGrid("dright")
@@ -623,6 +654,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		case t.query != "":
 			t.query = ""
 			t.right = newGrid("dright")
+			t.restore = t.picked[t.place(c)]
 			return t.load(m)
 		case t.filter != "":
 			t.filter = ""
@@ -631,6 +663,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			p := t.paths[c.name]
 			t.paths[c.name] = p[:len(p)-1]
 			t.right = newGrid("dright")
+			t.restore = t.picked[t.place(c)]
 			return t.load(m)
 		default:
 			t.focus = 0
@@ -646,6 +679,8 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 		if t.query != "" {
 			at = t.queryAt
+		} else {
+			t.remember(c)
 		}
 		if t.query != "" {
 			t.askQuery(m, c, at, t.query, "")
@@ -888,6 +923,7 @@ func (t *dataTab) askQuery(m *model, c dataComp, at []string, value, template st
 		return t.load(m)
 	}
 	label := "query " + c.name + " › " + strings.Join(at, " › ")
+	defer m.asPopup()
 	if value != "" || template == "" {
 		m.askAI(label, value, hint, run)
 		return
@@ -925,6 +961,9 @@ func (t *dataTab) click(m *model, h hit) tea.Cmd {
 		return nil
 	}
 	t.focus = 1
+	if h.id == "data:back" {
+		return t.key(m, tea.KeyMsg{Type: tea.KeyEsc})
+	}
 	if t.right.click(h) && h.double {
 		return t.key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	}
@@ -969,6 +1008,11 @@ func (t *dataTab) view(m *model, w, h int) string {
 	}
 	if c.kind == string(core.KindMessaging) {
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, t.brokerView(m, c, title, head, hh, lw, w-lw, h))
+	}
+	if len(t.paths[c.name]) > 0 || t.query != "" {
+		m.zone("data:back", lw+1, 1+hh, 6, 1)
+		head += sKey.Render("‹ back") + "\n"
+		hh++
 	}
 	noteH := boolInt(t.table.Note != "")
 	body := head + t.right.view(m, lw+1, 1+hh, w-lw-2, h-2-hh-noteH, t.focus == 1)

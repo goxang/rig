@@ -475,6 +475,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 			t.focus = len(ps) - 1
 			return t.reload(m)
 		})
+		m.asPopup()
 	case "e":
 		if t.focus < len(ps) {
 			p := ps[t.focus]
@@ -489,6 +490,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 				}
 				return t.reload(m)
 			})
+			m.asPopup()
 		}
 	case "x":
 		idx := t.focus - (len(ps) - len(t.adhoc))
