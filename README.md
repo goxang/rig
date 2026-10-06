@@ -52,6 +52,9 @@ rig up        # everything, in dependency order
 rig           # the terminal UI; ? lists the keys of every screen
 ```
 
+No `rig.yaml` yet? `rig up && rig` still work: rig infers the project in memory as `rig init` would,
+and writes nothing until you run `rig init`.
+
 On a project that already has a `rig.yaml`: `rig env` lists its environments, `-e <name>` picks one.
 
 A small `rig.yaml`:

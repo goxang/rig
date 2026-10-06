@@ -148,6 +148,9 @@ func open() (*engine.App, error) {
 		return nil, err
 	}
 	a.Confirmed = g.yes
+	if a.Inferred {
+		fmt.Fprintln(os.Stderr, dim("no rig.yaml: running config inferred from this directory (rig init writes it, rig init --dry-run shows it)"))
+	}
 	// a person at a terminal answers a protected environment's question instead of needing --yes;
 	// a task's nested rig inherits the answer as RIG_YES
 	if !g.yes && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {

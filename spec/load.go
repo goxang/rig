@@ -52,6 +52,12 @@ func LoadWith(file, env string, overrides map[string]string) (*Project, *Environ
 	if err != nil {
 		return nil, nil, err
 	}
+	return LoadData(raw, file, env, overrides)
+}
+
+// LoadData is LoadWith on a rig.yaml already read (or never written: an inferred one); file is
+// where it stands, for its directory and messages.
+func LoadData(raw []byte, file, env string, overrides map[string]string) (*Project, *Environment, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(raw, &root); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", file, err)

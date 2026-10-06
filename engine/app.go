@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/scaffold"
 	"github.com/goxang/rig/plugin"
 	"github.com/goxang/rig/spec"
 )
@@ -29,6 +30,8 @@ type App struct {
 	Env  *spec.Environment
 	// Confirmed lets mutating operations run on a protected environment.
 	Confirmed bool
+	// Inferred is a project with no rig.yaml, built in memory from the directory as rig init would.
+	Inferred bool
 	// Ask, when set, puts a yes/no question to the user (a terminal), so a protected environment
 	// can be changed after a yes instead of only with --yes.
 	Ask   func(question string) bool
@@ -58,21 +61,42 @@ type entry struct {
 	once    sync.Once
 }
 
-// Open loads the project file (found from dir when file is "") for env.
+// inferred are the rig.yaml paths this process built in memory (Inferred), so reopening one (another
+// environment, say) infers it again instead of failing on the missing file.
+var inferred sync.Map
+
+// Open loads the project file (found from dir when file is "") for env. With no rig.yaml anywhere
+// up, it infers one in memory from what the directory has, as rig init would write it (Inferred).
 func Open(file, env string) (*App, error) {
+	var raw []byte
 	if file == "" {
 		f, err := spec.Find(".")
-		if err != nil {
+		if errors.Is(err, spec.ErrNotFound) {
+			f, raw = infer(".")
+		}
+		if raw == nil && err != nil {
 			return nil, err
 		}
 		file = f
+	} else if _, ok := inferred.Load(file); ok {
+		if _, err := os.Stat(file); err != nil {
+			_, raw = infer(filepath.Dir(file))
+		}
 	}
-	p, e, err := spec.Load(file, env)
+	read := func(over map[string]string) (*spec.Project, *spec.Environment, error) {
+		if raw != nil {
+			return spec.LoadData(raw, file, env, over)
+		}
+		return spec.LoadWith(file, env, over)
+	}
+	p, e, err := read(nil)
 	if err != nil {
 		return nil, err
 	}
-	a := &App{Spec: p, Env: e, comps: map[string]*entry{}}
-	ignoreState(p.Dir)
+	a := &App{Spec: p, Env: e, comps: map[string]*entry{}, Inferred: raw != nil}
+	if !a.Inferred {
+		ignoreState(p.Dir)
+	}
 	if e == nil {
 		return a, nil
 	}
@@ -92,7 +116,7 @@ func Open(file, env string) (*App, error) {
 	// `rig vars set` lives in the environment's state, which needs the runtime; values in rig.yaml
 	// (queries, tasks, components) were expanded without it, so expand again with the overrides
 	if over := a.varOverrides(); len(over) > 0 {
-		if p, e, err = spec.LoadWith(file, env, over); err != nil {
+		if p, e, err = read(over); err != nil {
 			return nil, err
 		}
 		a.Spec, a.Env = p, e
@@ -455,6 +479,26 @@ func (a *App) DefaultImage(ctx context.Context, s *spec.Service) string {
 
 // ignoreState adds .rig/ to the project's .gitignore once rig keeps state there, so pids, logs,
 // profiles and reports never show up as changes to commit. Projects outside git are left alone.
+// infer builds a rig.yaml for dir from its compose files, manifests and sources (rig init's
+// scaffold); nil when it finds nothing to run.
+func infer(dir string) (string, []byte) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", nil
+	}
+	plan, err := scaffold.Detect(context.Background(), abs, scaffold.Options{})
+	if err != nil || len(plan.Services) == 0 {
+		return "", nil
+	}
+	raw, err := plan.YAML()
+	if err != nil {
+		return "", nil
+	}
+	file := filepath.Join(abs, "rig.yaml")
+	inferred.Store(file, true)
+	return file, raw
+}
+
 func ignoreState(dir string) {
 	if _, err := os.Stat(filepath.Join(dir, ".rig")); err != nil {
 		return
