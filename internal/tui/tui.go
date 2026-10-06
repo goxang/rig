@@ -86,6 +86,10 @@ type model struct {
 	prompt  *prompt
 	picker  *picker
 	help    bool
+	// helpScroll is lines down from the top of the help text; helpQuery, when set, is highlighted
+	// and jumped to with / and n
+	helpScroll int
+	helpQuery  string
 	// session is the saved session this run continues (S, rig resume); quitting updates it
 	session *Session
 	// mouseOff hands the mouse to the terminal, so text can be selected and copied
@@ -727,6 +731,9 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		if up {
 			key = tea.KeyMsg{Type: tea.KeyUp}
 		}
+		if m.help {
+			return m.helpKey(key)
+		}
 		if m.picker != nil {
 			return m.picker.key(m, key)
 		}
@@ -966,8 +973,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		m.setStatus("copied the environment", false)
 		return nil
 	}
-	if m.help || m.showAlerts || m.envInfo != "" {
-		m.help, m.showAlerts, m.envInfo = false, false, ""
+	if m.help {
+		return m.helpKey(k)
+	}
+	if m.showAlerts || m.envInfo != "" {
+		m.showAlerts, m.envInfo = false, ""
 		return nil
 	}
 	if c := m.chat; c != nil && c.open && c.focus {
@@ -994,7 +1004,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		case "?", "f1":
-			m.help = true
+			m.help, m.helpScroll, m.helpQuery = true, 0, ""
 			return nil
 		case "A":
 			m.showAlerts = true
@@ -1283,7 +1293,7 @@ func (m *model) View() string {
 	var body string
 	switch {
 	case m.help:
-		body = m.overlay(m.helpView(), bodyH)
+		body = m.overlay(m.helpView(bodyH), bodyH)
 	case m.showAlerts:
 		body = m.overlay(m.alertsView(), bodyH)
 	case m.envInfo != "":
@@ -1523,7 +1533,9 @@ var screenHelp = map[string]string{
 	"Tests":     "the test suites of rig.yaml: run, rerun failures, reports",
 }
 
-func (m *model) helpView() string {
+// helpLines are the help text's rows, split for scrolling and search; the content itself is
+// unchanged from before, just no longer rendered as one fixed block.
+func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
@@ -1547,8 +1559,84 @@ func (m *model) helpView() string {
 	}
 	b.WriteString("\n" + sDim.Render(ask) + "\n")
 	b.WriteString(sDim.Render("screens load only when opened; services, components and environments come from " + m.app.Spec.File))
+	return strings.Split(b.String(), "\n")
+}
+
+// helpMatch finds the next line (from, wrapping) containing q, case-insensitively; -1 when q is
+// empty or matches nothing.
+func helpMatch(lines []string, q string, from int) int {
+	if q == "" || len(lines) == 0 {
+		return -1
+	}
+	q = strings.ToLower(q)
+	for i := range lines {
+		idx := (from + i) % len(lines)
+		if strings.Contains(strings.ToLower(ansi.Strip(lines[idx])), q) {
+			return idx
+		}
+	}
+	return -1
+}
+
+// helpKey drives the open help overlay: scroll it with the usual keys, esc/q/? close it, / opens
+// a search (reusing the footer prompt) that jumps to and highlights matching lines, n repeats it.
+func (m *model) helpKey(k tea.KeyMsg) tea.Cmd {
+	lines := m.helpLines()
+	last := max(0, len(lines)-1)
+	switch k.String() {
+	case "esc", "q", "?", "f1":
+		m.help, m.helpQuery = false, ""
+	case "up", "k":
+		m.helpScroll = max(0, m.helpScroll-1)
+	case "down", "j":
+		m.helpScroll = min(last, m.helpScroll+1)
+	case "pgup":
+		m.helpScroll = max(0, m.helpScroll-20)
+	case "pgdown":
+		m.helpScroll = min(last, m.helpScroll+20)
+	case "home", "g":
+		m.helpScroll = 0
+	case "end", "G":
+		m.helpScroll = last
+	case "/":
+		m.ask("search help", m.helpQuery, func(v string) tea.Cmd {
+			m.helpQuery = v
+			if i := helpMatch(lines, v, 0); i >= 0 {
+				m.helpScroll = i
+			}
+			return nil
+		})
+	case "n":
+		if i := helpMatch(lines, m.helpQuery, m.helpScroll+1); i >= 0 {
+			m.helpScroll = i
+		}
+	}
+	return nil
+}
+
+// helpView windows helpLines to h rows from helpScroll, highlighting the line a search landed on.
+func (m *model) helpView(h int) string {
+	lines := m.helpLines()
+	inner := max(1, h-4) // border + padding
+	m.helpScroll = min(m.helpScroll, max(0, len(lines)-1))
+	end := min(len(lines), m.helpScroll+inner)
+	visible := append([]string{}, lines[m.helpScroll:end]...)
+	if m.helpQuery != "" {
+		for i := range visible {
+			if strings.Contains(strings.ToLower(ansi.Strip(visible[i])), strings.ToLower(m.helpQuery)) {
+				visible[i] = highlight(sSelected, visible[i], lipgloss.Width(visible[i]))
+			}
+		}
+	}
+	title := "rig — keys"
+	if m.helpQuery != "" {
+		title += sDim.Render("  /" + m.helpQuery + " (n: next)")
+	}
+	if len(lines) > inner {
+		title += sDim.Render(fmt.Sprintf("  %d-%d/%d", m.helpScroll+1, end, len(lines)))
+	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
-		Render(sTitle.Render("rig — keys") + "\n\n" + b.String())
+		Render(sTitle.Render(title) + "\n\n" + strings.Join(visible, "\n"))
 }
 
 // listKeys moves a selection with the usual keys and reports whether the key was one of them.
