@@ -996,6 +996,25 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return m.quit()
 	}
 	m.sel = nil
+	// alt+arrows switch screens from anywhere: they close what is open over the screen first
+	if s := k.String(); (s == "alt+left" || s == "alt+right") && len(m.tabs) > 0 {
+		if m.confirm != nil && m.confirm.cancel != nil {
+			m.confirm.cancel()
+		}
+		var esc tea.Cmd
+		if m.prompt != nil && m.prompt.escape != nil {
+			esc = m.prompt.escape()
+		}
+		m.confirm, m.prompt, m.picker, m.envInfo, m.help, m.showAlerts = nil, nil, nil, nil, false, false
+		if m.chat != nil {
+			m.chat.focus = false
+		}
+		step := 1
+		if s == "alt+left" {
+			step = len(m.tabs) - 1
+		}
+		return batch(esc, m.openTab((m.active+step)%len(m.tabs)))
+	}
 	if m.confirm != nil {
 		c := m.confirm
 		m.confirm = nil
@@ -1073,7 +1092,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	}
 	if m.picker != nil {
 		switch k.String() {
-		case "tab", "shift+tab", "alt+left", "alt+right":
+		case "tab", "shift+tab":
 			m.picker = nil
 		default:
 			return m.picker.key(m, k)
@@ -1154,9 +1173,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 			m.setStatus("mouse on", false)
 			return tea.EnableMouseAllMotion
-		case "tab", "alt+right":
+		case "tab":
 			return m.openTab((m.active + 1) % len(m.tabs))
-		case "shift+tab", "alt+left":
+		case "shift+tab":
 			return m.openTab((m.active + len(m.tabs) - 1) % len(m.tabs))
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
 			i := int(s[0]-'0') - 1

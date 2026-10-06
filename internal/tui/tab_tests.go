@@ -72,7 +72,7 @@ func (t *testsTab) hints() [][2]string {
 	if t.outFocus {
 		return [][2]string{{"↑↓ pgup pgdn", "scroll"}, {"g G", "top/end"}, {"y", "copy"}, {"esc o", "back"}}
 	}
-	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"⇧←→", "suite"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
+	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"l ⇧←→", "suite (list, prev/next)"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
 		{"i", "filter: all, failed, passed, …"}, {"enter", "fold/output"}, {"+ -", "unfold/fold all"}, {"b", "benchmarks"}, {"h", "saved runs"}, {"w", "write report"}, {"y Y", "copy"}}
 }
 
@@ -231,6 +231,8 @@ func (t *testsTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 		t.suite, t.outOff, t.outFollow = i, 0, true
 		return t.load(m)
+	case "l":
+		t.pickSuite(m)
 	case "i":
 		t.filter = (t.filter + 1) % filterBench
 	case "b":
@@ -496,10 +498,6 @@ func (t *testsTab) foldable(m *model, id string) bool {
 // ---- clicks and the wheel ----
 
 func (t *testsTab) click(m *model, h hit) tea.Cmd {
-	if i, ok := stripHit(h, "tsuite"); ok {
-		t.suite, t.outOff, t.outFollow = i, 0, true
-		return t.load(m)
-	}
 	if i, ok := stripHit(h, "tfilter"); ok {
 		if i < len(t.strip) {
 			t.filter = t.strip[i]
@@ -510,7 +508,7 @@ func (t *testsTab) click(m *model, h hit) tea.Cmd {
 	case strings.HasPrefix(h.id, "topt:"):
 		return t.toggle(m, strings.TrimPrefix(h.id, "topt:"))
 	case strings.HasPrefix(h.id, "tbtn:"):
-		key := map[string]string{"run": "r", "failed": "f", "this": ".", "stop": "x", "options": "O", "runs": "h", "report": "w"}[strings.TrimPrefix(h.id, "tbtn:")]
+		key := map[string]string{"suite": "l", "run": "r", "failed": "f", "this": ".", "stop": "x", "options": "O", "runs": "h", "report": "w"}[strings.TrimPrefix(h.id, "tbtn:")]
 		return t.key(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 	case h.id == "tout":
 		t.outFocus = true
@@ -717,8 +715,37 @@ func (t *testsTab) toolbar(m *model, w int) string {
 	names := t.suites(m)
 	o := t.options(m)
 	name := t.current(m)
-	// line 1: the suites, then the shown run's state
-	line1 := " " + m.strip("tsuite", 1, 0, names, min(t.suite, len(names)-1))
+	var b strings.Builder
+	x := 1
+	b.WriteString(" ")
+	add := func(id, s string) {
+		m.zone(id, x, 0, lipgloss.Width(s), 1)
+		x += lipgloss.Width(s) + 2
+		b.WriteString(s + "  ")
+	}
+	button := func(id, text string, bg lipgloss.TerminalColor) {
+		add("tbtn:"+id, lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(bg).Bold(true).Padding(0, 1).Render(text))
+	}
+	plain := func(id, text string) {
+		add("tbtn:"+id, lipgloss.NewStyle().Foreground(cText).Background(cPanel).Padding(0, 1).Render(text))
+	}
+	suite := fmt.Sprintf("suite: %s ▾", name)
+	if len(names) > 1 {
+		suite = fmt.Sprintf("suite: %s  %d/%d ▾", name, min(t.suite, len(names)-1)+1, len(names))
+	}
+	add("tbtn:suite", lipgloss.NewStyle().Foreground(cAccent).Background(cPanel).Bold(true).Padding(0, 1).Render(suite))
+	if t.running == "" {
+		button("run", "▶ run", cAccent)
+		plain("failed", "↻ rerun failed")
+	} else {
+		button("stop", "■ stop", cRed)
+	}
+	plain("options", "⚙ options")
+	plain("runs", "◷ runs")
+	plain("report", "✎ report")
+	line1 := truncate(b.String(), w)
+
+	// line 2: the shown run's state, then the command it runs
 	state := ""
 	if r := t.runs[name]; r != nil {
 		mark := sGreen.Render("● ")
@@ -732,38 +759,38 @@ func (t *testsTab) toolbar(m *model, w int) string {
 		if r.Err != "" && t.running != name {
 			state += sRed.Render(" · " + r.Err)
 		}
+		state += "   "
 	}
 	if s := m.app.Spec.Tests[name]; s != nil && len(s.Needs) > 0 {
 		if down := t.down(m, s.Needs); len(down) > 0 {
 			state = sAmber.Render("⚠ not up: "+strings.Join(down, ",")+"  ") + state
 		}
 	}
-	line1 = truncate(line1+"  "+state, w)
-
-	// line 2: the command it runs, then the actions; O changes the flags
-	var b strings.Builder
-	x := 1
-	b.WriteString(" ")
-	add := func(id, s string) {
-		m.zone(id, x, 1, lipgloss.Width(s), 1)
-		x += lipgloss.Width(s) + 1
-		b.WriteString(s + " ")
-	}
-	button := func(id, text string, bg lipgloss.TerminalColor) {
-		add("tbtn:"+id, lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(bg).Bold(true).Padding(0, 1).Render(text))
-	}
-	if t.running == "" {
-		button("run", "▶ run", cAccent)
-		add("tbtn:failed", sTabOff.Render("↻ failed"))
-	} else {
-		button("stop", "■ stop", cRed)
-	}
-	add("tbtn:options", sTabOff.Render("⚙ options"))
-	add("tbtn:runs", sTabOff.Render("runs"))
-	add("tbtn:report", sTabOff.Render("report"))
 	cmd := "go " + strings.Join(o.Args(m.app.Spec.Tests[name]), " ")
-	b.WriteString(" " + sDim.Render(truncate(cmd, max(0, w-x-2))))
-	return line1 + "\n" + truncate(b.String(), w)
+	return line1 + "\n" + truncate(" "+state+sDim.Render(cmd), w)
+}
+
+// pickSuite lists the suites with what each is for and how its last run went; enter shows one.
+func (t *testsTab) pickSuite(m *model) {
+	names := t.suites(m)
+	desc := make([]string, len(names))
+	for i, n := range names {
+		var parts []string
+		if r := t.runs[n]; r != nil {
+			parts = append(parts, r.Summary())
+		}
+		if s := m.app.Spec.Tests[n]; s != nil && s.Help != "" {
+			parts = append(parts, s.Help)
+		}
+		desc[i] = strings.Join(parts, " · ")
+	}
+	m.pick("test suite", names, desc, min(t.suite, len(names)-1), false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		t.suite, t.outOff, t.outFollow = slices.Index(names, c[0]), 0, true
+		return t.load(m)
+	})
 }
 
 // pickOptions lists go test's flags with their values; enter flips one (or asks its value) and the
