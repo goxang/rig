@@ -28,7 +28,7 @@ it all from one CLI and one terminal UI.
 - **Data**: browse and edit databases, Redis, RabbitMQ, Kafka, key-value config; saved queries on a schedule
 - **Kubernetes**: manifests as a graph, edited field by field, synced from the cluster; HPAs, namespaces
 - **Test and load**: test suites with live results, load generators with rate and instances
-- **AI**: `@` chat on every screen, inline query completions, `:?` plain-language queries; `rig mcp` gives
+- **AI**: `@` chat on every screen, inline query completions, `@?` plain-language queries; `rig mcp` gives
   agents every tool
 - **Any stack**: not just Go; Python, Node, Java, Rust, any image or binary; `rig init` reads compose files,
   manifests and sources

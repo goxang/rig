@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -25,7 +26,7 @@ type chat struct {
 	sess        *ai.Session
 	// msgs is the transcript as shown; the running turn owns sess until it ends
 	msgs    []ai.Message
-	input   textinput.Model
+	input   textarea.Model
 	busy    bool
 	cancel  context.CancelFunc
 	started time.Time
@@ -49,8 +50,6 @@ type (
 		reply chan ai.Reply
 	}
 )
-
-var slashCommands = []string{"/new", "/sessions", "/close", "/stop", "/model", "/effort", "/fast", "/autocomplete", "/help"}
 
 // screenStarters are offered (tab) in an empty chat, per screen.
 var screenStarters = map[string][]string{
@@ -77,13 +76,17 @@ func (m *model) ideas() []string {
 	return append(out, screenStarters[name]...)
 }
 
+// chatInputHeight is the chat's input box in rows; longer messages scroll inside it (↑↓).
+const chatInputHeight = 3
+
 func (m *model) chatOpen() *chat {
 	if m.chat == nil {
-		in := textinput.New()
+		in := textarea.New()
 		in.Prompt = "› "
-		in.Placeholder = "ask anything · tab: ideas · /sessions"
-		in.ShowSuggestions = true
-		in.SetSuggestions(slashCommands)
+		in.ShowLineNumbers = false
+		in.Placeholder = "ask anything · enter: send · alt+enter: newline · tab: ideas · /sessions"
+		in.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter"))
+		in.SetHeight(chatInputHeight)
 		m.chat = &chat{input: in}
 	}
 	c := m.chat
@@ -144,16 +147,20 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 			c.cancel()
 		}
 		return nil
-	case "pgup", "up":
-		if k.String() == "pgup" {
-			c.scroll += 10
-		} else {
-			c.scroll++
-		}
+	case "pgup":
+		c.scroll += 10
 		return nil
-	case "pgdown", "down":
-		if k.String() == "pgdown" {
-			c.scroll = max(0, c.scroll-10)
+	case "pgdown":
+		c.scroll = max(0, c.scroll-10)
+		return nil
+	case "up", "down":
+		// a multi-line draft keeps up/down for moving the cursor between its lines;
+		// otherwise they scroll the transcript, as before.
+		if c.input.LineCount() > 1 {
+			break
+		}
+		if k.String() == "up" {
+			c.scroll++
 		} else {
 			c.scroll = max(0, c.scroll-1)
 		}
@@ -552,13 +559,13 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sDim.Render(wordWrap("  → "+t, iw)))
 		}
 	}
-	status := sDim.Render("enter send · tab ideas · /model /effort /sessions /new · esc hide")
+	status := sDim.Render("enter send · alt+enter newline · tab ideas · /model /effort /sessions /new · esc hide")
 	if c.busy {
 		status = sAmber.Render(fmt.Sprintf("⟳ working %s", time.Since(c.started).Round(time.Second))) + sDim.Render(" · ctrl+x stops")
 	} else if m.confirm != nil {
 		status = sAmber.Render("↓ answer the question below")
 	}
-	room := max(1, h-4)
+	room := max(1, h-4-(chatInputHeight-1))
 	end := max(0, len(lines)-c.scroll)
 	c.scroll = len(lines) - end
 	start := max(0, end-room)
@@ -568,7 +575,7 @@ func (c *chat) view(m *model, x, w, h int) string {
 	} else if pad > 0 {
 		body += strings.Repeat("\n", pad)
 	}
-	c.input.Width = iw - 3
+	c.input.SetWidth(iw - 3)
 	body += "\n" + c.input.View() + "\n" + status
 	return panel(title, body, w, h, c.focus)
 }
@@ -868,10 +875,14 @@ func (m *model) toggleAutocomplete() {
 	}
 }
 
-// describing splits an input at ":?": the input before it and the words after it, which say what
+// aiTrigger is typed inline in any AI-assisted input to ask for the rest in plain language; it
+// reuses "@", already the chat's own sigil, so the two AI entry points read as one convention.
+const aiTrigger = "@?"
+
+// describing splits an input at "@?": the input before it and the words after it, which say what
 // the AI should write in their place.
 func describing(v string) (before, want string, ok bool) {
-	before, want, ok = strings.Cut(v, ":?")
+	before, want, ok = strings.Cut(v, aiTrigger)
 	return before, strings.TrimSpace(want), ok && strings.TrimSpace(want) != ""
 }
 

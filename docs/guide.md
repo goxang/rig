@@ -92,9 +92,9 @@ open screens, explain logs against the code, suggest `rig profile` / `go tool pp
 Query prompts (Data `Q`, Queries, Metrics, Logs grep, KV values) get inline completions: `tab` takes them,
 `ctrl+t` turns them off or on for good. A suggested query (Data `Q`, a new query) waits behind the empty
 input: type your own and the AI completes it, `tab` takes the suggestion to edit, `enter` runs it as is.
-`:?` then words asks for the rest in plain language: `:?logs slower than 1s`, or
-`SELECT * FROM transactions WHERE :?amount above 100k`; the AI's version shows above the input,
-`tab` takes it, `enter` runs it.
+`@?` then words asks for the rest in plain language: `@?logs slower than 1s`, or
+`SELECT * FROM transactions WHERE @?amount above 100k`; the AI's version shows in its own
+bordered "✦ ai suggests" box above the input, `tab` takes it, `enter` runs it.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
 AI or not.
 

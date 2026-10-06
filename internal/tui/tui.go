@@ -148,7 +148,7 @@ type prompt struct {
 	// template is offered while the input is empty: tab fills it in, enter runs it as is
 	template string
 	took     time.Duration
-	// described is what the AI wrote for the ":?description" in describedFor, the input it saw
+	// described is what the AI wrote for the "@?description" in describedFor, the input it saw
 	described, describedFor string
 	// popup draws the input as a box over the screen, wrapped (queries); all is ctrl+a's
 	// select-all, which the next key copies, replaces or drops
@@ -921,7 +921,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 			if _, _, ok := describing(v); ok && p.hint != "" {
 				if p.describedFor != v || p.described == "" {
-					m.setStatus("waiting for the AI to write what :? describes (tab takes it)", false)
+					m.setStatus("waiting for the AI to write what @? describes (tab takes it)", false)
 					return m.completeDue(completeTickMsg{seq: p.seq})
 				}
 				v = p.described
@@ -1509,9 +1509,9 @@ func (m *model) promptView() string {
 	}
 	above := ""
 	if p.described != "" && p.describedFor == p.input.Value() {
-		above = truncate(sAccent.Render(" ✦ ")+sTitle.Render(p.described)+sDim.Render("   tab takes it, enter runs it"), m.w) + "\n"
+		above = panel("✦ ai suggests", sTitle.Render(p.described)+sDim.Render("   tab takes it, enter runs it"), m.w, 4, false) + "\n"
 	} else if _, _, ok := describing(p.input.Value()); ok && p.hint != "" && !p.waiting {
-		above = sDim.Render(" ✦ describe what you want after :? — the AI writes it here") + "\n"
+		above = sDim.Render(" ✦ describe what you want after "+aiTrigger+" — the AI writes it here") + "\n"
 	}
 	if room := m.w - lipgloss.Width(head) - 3 - buttonsW; lipgloss.Width(text)+2 <= room {
 		p.input.Width = room
@@ -1737,15 +1737,15 @@ func (m *model) promptPopup() string {
 	if s := p.input.MatchedSuggestions(); p.input.ShowSuggestions && len(s) > 0 && s[0] != p.input.Value() {
 		notes = append(notes, sAccent.Render("✦ ")+sDim.Render(ansi.Wrap(s[0], w-6, " ,"))+sDim.Render("  (tab takes it)"))
 	}
-	if p.described != "" && p.describedFor == p.input.Value() {
-		notes = append(notes, sAccent.Render("✦ ")+ansi.Wrap(p.described, w-6, " ,")+sDim.Render("  (tab takes it)"))
-	}
 	if p.input.Value() == "" && p.template != "" {
 		notes = append(notes, sDim.Render("tab fills in the template, enter runs it as is"))
 	}
 	content := sTitle.Render(p.label) + "\n\n" + body
 	if len(notes) > 0 {
 		content += "\n\n" + strings.Join(notes, "\n")
+	}
+	if p.described != "" && p.describedFor == p.input.Value() {
+		content += "\n\n" + panel("✦ ai suggests", ansi.Wrap(p.described, w-6, " ,")+sDim.Render("  (tab takes it)"), w-2, 5, false)
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(0, 1).Width(w).Render(content)
 }
