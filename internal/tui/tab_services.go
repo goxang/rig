@@ -358,7 +358,7 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 	case "l":
 		for i, tb := range m.tabs {
 			if lt, ok := tb.(*logsTab); ok {
-				lt.services, lt.instance = names, ""
+				lt.services, lt.instances = names, nil
 				lt.restart = true
 				return m.openTab(i)
 			}

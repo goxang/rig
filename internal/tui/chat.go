@@ -485,7 +485,7 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 	case "logs":
 		for i, t := range m.tabs {
 			if lt, ok := t.(*logsTab); ok {
-				lt.services, lt.grep, lt.instance = strings.Fields(a["services"]), a["grep"], ""
+				lt.services, lt.grep, lt.instances = strings.Fields(a["services"]), a["grep"], nil
 				if !m.opened[i] {
 					return true, "showing logs", m.openTab(i)
 				}

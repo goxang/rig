@@ -28,9 +28,9 @@ type Session struct {
 	Tab     int       `json:"tab"`
 	TabName string    `json:"tab_name,omitempty"`
 
-	LogServices []string `json:"log_services,omitempty"`
-	LogInstance string   `json:"log_instance,omitempty"`
-	LogGrep     string   `json:"log_grep,omitempty"`
+	LogServices  []string `json:"log_services,omitempty"`
+	LogInstances []string `json:"log_instances,omitempty"`
+	LogGrep      string   `json:"log_grep,omitempty"`
 
 	Queries   map[string]*spec.Query   `json:"adhoc_queries,omitempty"`
 	Scheduled map[string]bool          `json:"scheduled,omitempty"`
@@ -80,7 +80,7 @@ func (m *model) snapshot() *Session {
 	for _, t := range m.tabs {
 		switch t := t.(type) {
 		case *logsTab:
-			s.LogServices, s.LogInstance, s.LogGrep = t.services, t.instance, t.grep
+			s.LogServices, s.LogInstances, s.LogGrep = t.services, t.instances, t.grep
 		case *dataTab:
 			s.DataPaths = t.paths
 		case *metricsTab:
@@ -158,7 +158,7 @@ func (m *model) restore(s *Session) {
 	for _, t := range m.tabs {
 		switch t := t.(type) {
 		case *logsTab:
-			t.services, t.instance, t.grep = s.LogServices, s.LogInstance, s.LogGrep
+			t.services, t.instances, t.grep = s.LogServices, s.LogInstances, s.LogGrep
 		case *dataTab:
 			t.restored = s.DataPaths
 		case *metricsTab:

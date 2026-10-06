@@ -131,6 +131,21 @@ func walkNodes(n *jnode, visit func(*jnode) bool) bool {
 	return true
 }
 
+// highlightRe matches the values an equality or substring term looks for, so a rendered line can
+// show which part made it match; != has no positive text to highlight.
+func (q logQuery) highlightRe() *regexp.Regexp {
+	var alts []string
+	for _, c := range q {
+		if c.op != "!=" && c.want != "" {
+			alts = append(alts, regexp.QuoteMeta(c.want))
+		}
+	}
+	if len(alts) == 0 {
+		return nil
+	}
+	return regexp.MustCompile("(?i)" + strings.Join(alts, "|"))
+}
+
 // queryFor is the term that keeps lines whose field n has n's value.
 func queryFor(n *jnode) string {
 	path := strings.TrimPrefix(n.path(), "$.")

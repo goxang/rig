@@ -21,12 +21,13 @@ import (
 const logCap = 5000
 
 // logsTab streams the logs of the services the user picks (all of them only when asked), merged,
-// or of one instance of one service.
+// or of the instances picked for a single service.
 type logsTab struct {
 	log      *logView
 	services []string
-	instance string
-	grep     string
+	// instances narrows a single picked service to the instances chosen here; empty means all.
+	instances []string
+	grep      string
 	// query is grep when it reads as a field query: lines are filtered here, not by the source
 	query   logQuery
 	restart bool
@@ -65,7 +66,7 @@ func (t *logsTab) hints() [][2]string {
 			{"f", "filter lines by this field"}, {"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
 	}
 	return [][2]string{{"f", "pick services"}, {"/", "filter: text, regex, a.b=value"}, {"↑↓ click", "pick a line"}, {"enter v", "inspect the line"}, {"w", "wrap"}, {"s", "structured/raw"},
-		{"h", "fields shown"}, {"i", "pick instance"}, {"p", "pause"}, {"pgup pgdn ←→", "page, sideways"},
+		{"h", "fields shown"}, {"i", "pick instances"}, {"p", "pause"}, {"pgup pgdn ←→", "page, sideways"},
 		{"drag", "select text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear"}, {"M", "mouse off: terminal selection"}}
 }
 
@@ -93,14 +94,16 @@ func (t *logsTab) pickServices(m *model) {
 		if len(chosen) == 0 {
 			return nil
 		}
-		t.services, t.instance = chosen, ""
+		t.services, t.instances = chosen, nil
 		return t.start(m)
 	})
 }
 
+// pickInstance lets the user toggle on any subset of the single picked service's instances;
+// none picked means all of them.
 func (t *logsTab) pickInstance(m *model) {
 	if len(t.services) != 1 {
-		m.setStatus("pick a single service first (f) to choose one of its instances", true)
+		m.setStatus("pick a single service first (f) to choose its instances", true)
 		return
 	}
 	svc := t.services[0]
@@ -109,21 +112,13 @@ func (t *logsTab) pickInstance(m *model) {
 		if st.Service != svc {
 			continue
 		}
-		ids = append(ids, "all instances")
-		desc = append(desc, "")
 		for _, in := range st.Instances {
 			ids = append(ids, in.ID)
 			desc = append(desc, string(in.State)+" "+in.Host)
 		}
 	}
-	m.pick("instance of "+svc, ids, desc, 0, false, func(chosen []string) tea.Cmd {
-		if len(chosen) == 0 {
-			return nil
-		}
-		t.instance = chosen[0]
-		if t.instance == "all instances" {
-			t.instance = ""
-		}
+	m.pickMany("instances of "+svc+" (space toggles; none picked means all)", ids, desc, t.instances, func(chosen []string) tea.Cmd {
+		t.instances = chosen
 		return t.start(m)
 	})
 }
@@ -158,8 +153,9 @@ func (t *logsTab) start(m *model) tea.Cmd {
 		// the source cannot read fields: take more history and filter it here
 		t.query, q.Match, q.Regex, q.Tail = fq, "", false, 2000
 	}
-	if len(t.services) == 1 {
-		q.Instance = t.instance
+	// the source only filters to one instance; picking several is filtered client-side in filter()
+	if len(t.services) == 1 && len(t.instances) == 1 {
+		q.Instance = t.instances[0]
 	}
 	return func() tea.Msg {
 		src, _, err := engine.Get[core.LogSource](a, core.KindLogs, "")
@@ -239,10 +235,10 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return t.start(m)
 			case "J", "ctrl+down":
 				t.log.moveCursor("down")
-				t.openInspect(m)
+				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
 			case "K", "ctrl+up":
 				t.log.moveCursor("up")
-				t.openInspect(m)
+				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
 			default:
 				t.inspect.key(msg)
 			}
@@ -254,12 +250,12 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "s":
 			t.log.fmt.raw = !t.log.fmt.raw
 		case "h":
-			t.pickFields(m)
+			pickFields(m, t.log)
 		case "v":
-			t.openInspect(m)
+			t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
 		case "enter":
 			if _, ok := t.log.picked(); ok {
-				t.openInspect(m)
+				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
 			} else {
 				t.pickServices(m)
 			}
@@ -291,8 +287,8 @@ func (t *logsTab) view(m *model, w, h int) string {
 	if len(t.services) > 3 {
 		title = fmt.Sprintf("%d services", len(t.services))
 	}
-	if t.instance != "" {
-		title += " · " + t.instance
+	if len(t.instances) > 0 {
+		title += " · " + strings.Join(t.instances, ",")
 	}
 	switch {
 	case t.query != nil:
@@ -522,16 +518,17 @@ func (f logFormat) keys(lines []core.LogLine) []string {
 	return out
 }
 
-// pickFields chooses which JSON keys the lines show; it lasts until rig quits (ui.logs.hide keeps it).
-func (t *logsTab) pickFields(m *model) {
-	keys := t.log.fmt.keys(t.log.lines)
+// pickFields chooses which JSON keys lv's lines show; it lasts until rig quits (ui.logs.hide keeps
+// it as the default). Shared by the Logs tab and a service's own log page.
+func pickFields(m *model, lv *logView) {
+	keys := lv.fmt.keys(lv.lines)
 	if len(keys) == 0 {
 		m.setStatus("no structured lines yet: fields come from JSON, console or key=value logs", true)
 		return
 	}
 	var shown []string
 	for _, k := range keys {
-		if !t.log.fmt.hidden[k] {
+		if !lv.fmt.hidden[k] {
 			shown = append(shown, k)
 		}
 	}
@@ -540,28 +537,30 @@ func (t *logsTab) pickFields(m *model) {
 		for _, k := range keys {
 			hidden[k] = !contains(c, k)
 		}
-		t.log.fmt.hidden = hidden
+		lv.fmt.hidden = hidden
 		return nil
 	})
 }
 
-// openInspect shows the picked line, or the newest on screen, as a tree: JSON, console and logfmt
-// lines, with JSON and Go values inside strings opened up. The stack starts folded.
-func (t *logsTab) openInspect(m *model) {
-	l, ok := t.log.picked()
+// openInspect builds a tree for the picked line, or the newest on screen, as a tree: JSON, console
+// and logfmt lines, with JSON and Go values inside strings opened up. The stack starts folded. old
+// is the previously open inspector, if any, whose scroll/fold state carries over. Shared by the Logs
+// tab and a service's own log page.
+func openInspect(m *model, lv *logView, zone string, old *jsonTree) *jsonTree {
+	l, ok := lv.picked()
 	if !ok {
-		if len(t.log.visible) == 0 {
+		if len(lv.visible) == 0 {
 			m.setStatus("no line to inspect yet", true)
-			return
+			return old
 		}
-		l = t.log.visible[len(t.log.visible)-1]
+		l = lv.visible[len(lv.visible)-1]
 	}
-	tree := &jsonTree{zone: "logs:inspect", root: logTree(l.Text)}
+	tree := &jsonTree{zone: zone, root: logTree(l.Text)}
 	for _, k := range tree.root.kids {
 		k.closed = k.container() && (k.key == "stack" || k.key == "caller")
 	}
 	tree.flatten()
-	if old := t.inspect; old != nil {
+	if old != nil {
 		tree.wrap, tree.hoff = old.wrap, old.hoff
 		if path := old.current().path(); path != "$" {
 			for i, r := range tree.rows {
@@ -573,25 +572,35 @@ func (t *logsTab) openInspect(m *model) {
 	} else {
 		tree.wrap = true
 	}
-	t.inspect = tree
+	return tree
 }
 
-// filter keeps the lines the field query matches.
+// filter keeps the lines the field query matches, and, when several (not all) instances are
+// picked, the ones from a chosen instance: the source only knows how to filter to a single one.
 func (t *logsTab) filter(lines []core.LogLine) []core.LogLine {
-	if t.query == nil {
+	if t.query == nil && len(t.instances) <= 1 {
 		return lines
 	}
 	var out []core.LogLine
 	for _, l := range lines {
-		if t.query.match(t.log.fmt.tree(l.Text)) {
-			out = append(out, l)
+		if len(t.instances) > 1 && !contains(t.instances, l.Instance) {
+			continue
 		}
+		if t.query != nil && !t.query.match(t.log.fmt.tree(l.Text)) {
+			continue
+		}
+		out = append(out, l)
 	}
 	return out
 }
 
+// grepRe is what to highlight in a shown line: the grep/regex term, or, for a field query, the
+// literal values its terms look for.
 func (t *logsTab) grepRe() *regexp.Regexp {
-	if t.grep == "" || t.query != nil {
+	if t.query != nil {
+		return t.query.highlightRe()
+	}
+	if t.grep == "" {
 		return nil
 	}
 	if re, err := regexp.Compile(t.grep); err == nil {
@@ -619,7 +628,7 @@ func (t *logsTab) click(m *model, h hit) tea.Cmd {
 	l := t.log.visible[h.y]
 	t.log.cur = t.log.rowLine[h.y]
 	if t.inspect != nil {
-		t.openInspect(m)
+		t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
 		return nil
 	}
 	if !h.double {
@@ -627,9 +636,9 @@ func (t *logsTab) click(m *model, h hit) tea.Cmd {
 	}
 	switch {
 	case len(t.services) > 1:
-		t.services, t.instance = []string{l.Service}, ""
-	case l.Instance != "" && t.instance == "":
-		t.instance = l.Instance
+		t.services, t.instances = []string{l.Service}, nil
+	case l.Instance != "" && len(t.instances) == 0:
+		t.instances = []string{l.Instance}
 	default:
 		return nil
 	}
