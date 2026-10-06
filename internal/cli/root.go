@@ -109,7 +109,32 @@ Run rig with no arguments for the terminal UI.`,
 		c.GroupID = "infra"
 		root.AddCommand(c)
 	}
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		defaultHelp(cmd, args)
+		if cmd == root {
+			printProjectHelp()
+		}
+	})
 	return root
+}
+
+// printProjectHelp shows the current project's own rig.yaml `help:` text, if it set one —
+// a project's quick-start for its main CLI workflows, right under the generic command list.
+func printProjectHelp() {
+	file, err := spec.Find(".")
+	if g.file != "" {
+		file = g.file
+		err = nil
+	}
+	if err != nil {
+		return
+	}
+	proj, _, err := spec.Load(file, g.env)
+	if err != nil || proj.Help == "" {
+		return
+	}
+	fmt.Printf("\n%s:\n%s\n", bold(proj.Name), proj.Help)
 }
 
 func open() (*engine.App, error) {

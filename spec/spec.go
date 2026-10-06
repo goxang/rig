@@ -48,6 +48,10 @@ type Project struct {
 	UI *UI `yaml:"ui"`
 	// AI tells the assistant (`rig ai`, @ in the UI) about the project: paths it must not read, notes.
 	AI *AI `yaml:"ai"`
+	// Help is shown by `rig -h` under the project name: this project's own quick-start for its main
+	// CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few
+	// example command lines; left out, `rig -h` shows only its own generic help.
+	Help string `yaml:"help"`
 
 	// DashboardOrder, TestOrder and SectionOrder are the names as rig.yaml lists them.
 	DashboardOrder []string `yaml:"-"`
