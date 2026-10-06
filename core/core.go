@@ -401,10 +401,10 @@ type LoadGenerator interface {
 // ---- infrastructure ----
 
 type Host struct {
-	Name     string
-	Addr     string
-	Roles    []string
-	Ready    bool
+	Name  string
+	Addr  string
+	Roles []string
+	Ready bool
 	// Reason says why Ready is false, when the adapter knows (e.g. a probe error); empty otherwise.
 	Reason   string
 	OS       string

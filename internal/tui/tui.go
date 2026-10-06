@@ -1554,7 +1554,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"},{"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {
