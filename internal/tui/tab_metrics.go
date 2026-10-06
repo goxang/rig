@@ -101,7 +101,7 @@ func (t *metricsTab) hints() [][2]string {
 		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"< > I", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"[ ] d", "dashboard"}, {"$", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o O", "fold rows"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"[ ] d", "dashboard"}, {"i $", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o O", "fold rows"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {
@@ -436,7 +436,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 		return t.switchDash(m, t.dashIndex(m)-1)
 	case "d":
 		t.pickDash(m)
-	case "$":
+	case "i", "$":
 		t.pickVar(m)
 	case "m":
 		names := append([]string{"default"}, m.app.Names(core.KindMetrics)...)
