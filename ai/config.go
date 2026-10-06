@@ -49,10 +49,12 @@ type Config struct {
 	// Autocomplete suggests the rest of a query while it is typed; off by default only when set false.
 	Autocomplete *bool `json:"autocomplete,omitempty"`
 	Disabled     bool  `json:"disabled,omitempty"`
+	// Redact replaces secrets with <secret:NAME> in everything sent to the model; on unless set false.
+	Redact *bool `json:"redact,omitempty"`
 }
 
 // Keys are the settings `rig ai config key=value` takes, in the order it prints them.
-var Keys = []string{"backend", "provider", "model", "effort", "fast_model", "fast_url", "fast_api_key", "url", "api_key", "proxy", "autocomplete", "disabled"}
+var Keys = []string{"backend", "provider", "model", "effort", "fast_model", "fast_url", "fast_api_key", "url", "api_key", "proxy", "autocomplete", "disabled", "redact"}
 
 func ConfigFile() (string, error) {
 	dir, err := os.UserConfigDir()
@@ -162,6 +164,13 @@ func (c *Config) Set(key, value string) error {
 		c.Autocomplete = &b
 	case "disabled":
 		c.Disabled = value == "true" || value == "on" || value == "1"
+	case "redact":
+		if value == "" {
+			c.Redact = nil
+			return nil
+		}
+		b := value == "true" || value == "on" || value == "1"
+		c.Redact = &b
 	default:
 		return fmt.Errorf("unknown setting %q (have %s)", key, strings.Join(Keys, ", "))
 	}
@@ -199,9 +208,14 @@ func (c Config) Get(key string) string {
 		if c.Disabled {
 			return "true"
 		}
+	case "redact":
+		return fmt.Sprint(c.RedactOn())
 	}
 	return ""
 }
+
+// RedactOn is whether secrets are redacted before text reaches the model (the default).
+func (c Config) RedactOn() bool { return c.Redact == nil || *c.Redact }
 
 func mask(key string) string {
 	if len(key) > 8 {

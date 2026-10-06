@@ -2,6 +2,9 @@ package engine
 
 import (
 	"os"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/spec"
@@ -28,7 +31,73 @@ func (a *App) AI(sock string) (*ai.Runner, error) {
 	if p := a.Spec.AI; p != nil {
 		sc.Deny, sc.Extra = p.Deny, p.Instructions
 	}
-	return &ai.Runner{Setup: ai.Resolve(c), Scope: sc, Self: self, Sock: sock, Kube: sc.Runtime == "kubernetes"}, nil
+	r := &ai.Runner{Setup: ai.Resolve(c), Scope: sc, Self: self, Sock: sock, Kube: sc.Runtime == "kubernetes"}
+	if c.RedactOn() {
+		r.Redactor = a.Redactor()
+	}
+	return r, nil
+}
+
+// Redactor takes this project's secrets out of text bound for a model (ai.Redactor).
+func (a *App) Redactor() *ai.Redactor { return ai.NewRedactor(a.KnownSecrets()) }
+
+// KnownSecrets are the values rig knows to be secret, by name: secrets:, the ${NAME}s with a secret's
+// name taken from the environment, and the env vars, variables and component fields named like one.
+func (a *App) KnownSecrets() map[string]string {
+	out := a.Spec.SecretValues()
+	add := func(name, value string) {
+		if ai.SecretName(name) && value != "" {
+			if _, ok := out[name]; !ok {
+				out[name] = value
+			}
+		}
+	}
+	for n, v := range a.Spec.FromEnv {
+		add(n, v)
+	}
+	for n, v := range a.Spec.Vars {
+		add(n, v)
+	}
+	for _, s := range a.Spec.Services {
+		for k, v := range s.Env {
+			add(k, v)
+		}
+	}
+	for name, c := range a.Spec.Components {
+		secretFields(name, &c.Node, add)
+	}
+	if a.Env != nil && a.Env.Runtime != nil {
+		secretFields("runtime", &a.Env.Runtime.Node, add)
+		for k, v := range a.Env.Vars {
+			add(k, v)
+		}
+	}
+	return out
+}
+
+// secretFields finds the scalar fields named like a secret in a component's mapping, at any depth.
+func secretFields(prefix string, n *yaml.Node, add func(name, value string)) {
+	if n.Kind != yaml.MappingNode {
+		for _, c := range n.Content {
+			secretFields(prefix, c, add)
+		}
+		return
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		if v.Kind == yaml.ScalarNode {
+			name := k.Value
+			if !ai.SecretName(name) {
+				continue
+			}
+			if !strings.Contains(strings.ToUpper(name), "_") {
+				name = prefix + "." + name
+			}
+			add(name, v.Value)
+			continue
+		}
+		secretFields(prefix, v, add)
+	}
 }
 
 // AIDir is where the project's AI sessions live.

@@ -88,8 +88,10 @@ func LoadData(raw []byte, file, env string, overrides map[string]string) (*Proje
 	builtin := map[string]string{"env": env, "project": head.Name}
 	stored, _ := LoadSecrets(head.Name)
 	// secrets and built-ins: what a var's own value may refer to
+	fromEnv := map[string]string{}
 	base := func(name string) (string, bool) {
 		if v, ok := os.LookupEnv(name); ok {
+			fromEnv[name] = v
 			return v, true
 		}
 		if v, ok := stored[name]; ok {
@@ -119,7 +121,7 @@ func LoadData(raw []byte, file, env string, overrides map[string]string) (*Proje
 	unset := map[string]bool{}
 	expandTop(&root, env, lookup, func(name string) { unset[name] = true })
 
-	p := &Project{File: file, Dir: filepath.Dir(file), Unset: keys(unset)}
+	p := &Project{File: file, Dir: filepath.Dir(file), Unset: keys(unset), FromEnv: fromEnv}
 	if err := root.Decode(p); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", file, err)
 	}

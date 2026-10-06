@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/internal/scaffold"
 )
 
@@ -63,6 +64,7 @@ type mcpTool struct {
 }
 
 func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
+	redactor := mcpRedactor()
 	tools := mcpTools()
 	byName := map[string]mcpTool{}
 	for _, t := range tools {
@@ -115,6 +117,7 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 				break
 			}
 			text, failed := callTool(ctx, t, p.Arguments)
+			text = redactor.Redact(text)
 			resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "isError": failed}
 		default:
 			resp.Error = &rpcErr{Code: -32601, Message: "method not found: " + req.Method}
@@ -124,6 +127,19 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 		}
 	}
 	return sc.Err()
+}
+
+// mcpRedactor takes the project's secrets out of every tool result; nil with redact=false.
+func mcpRedactor() *ai.Redactor {
+	if c, err := ai.LoadConfig(); err == nil && !c.RedactOn() {
+		return nil
+	}
+	a, err := engine.Open(g.file, g.env)
+	if err != nil {
+		return ai.NewRedactor(nil)
+	}
+	defer a.Close()
+	return a.Redactor()
 }
 
 func instructions() string {

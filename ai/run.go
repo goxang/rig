@@ -45,6 +45,8 @@ type Runner struct {
 	// Sock is the bridge for approvals and UI actions; empty when nothing can answer.
 	Sock string
 	Kube bool
+	// Redactor takes the secrets out of every prompt; nil sends them as they are (redact=false).
+	Redactor *Redactor
 
 	clientOnce sync.Once
 	client     *http.Client
@@ -78,7 +80,7 @@ func (r *Runner) Turn(ctx context.Context, s *Session, typed, screen string, on 
 		msg = transcript(s.Messages[:len(s.Messages)-1]) + msg
 		s.Backend, s.BackendID = r.Setup.Backend, ""
 	}
-	cmd, err := r.command(ctx, s, msg)
+	cmd, err := r.command(ctx, s, r.Redactor.Redact(msg))
 	if err != nil {
 		return err
 	}
@@ -498,6 +500,7 @@ func (r *Runner) quick(ctx context.Context, prompt string) (string, error) {
 	if !r.Setup.Enabled() {
 		return "", errors.New("AI is " + r.Setup.Describe())
 	}
+	prompt = r.Redactor.Redact(prompt)
 	model := r.Setup.FastModel
 	var out string
 	var err error

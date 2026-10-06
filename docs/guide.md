@@ -120,6 +120,12 @@ No setup is needed: an opencode or Claude Code login is used as it is, and witho
 models are. Providers: `own`, `opencode`, `openai` (any compatible endpoint), `9router`, `deepseek`,
 `anthropic` (for Claude Code). The key lives in `~/.config/rig/ai.json` (0600).
 
+Secrets never reach the model: every prompt, completion and tool result goes through one redactor that
+puts `<secret:NAME>` in place of `secrets:` values, `${NAME}`s with a secret's name taken from your
+environment, env vars and component fields named like a password, token or key, passwords inside URLs
+and DSNs, and JWTs, AWS keys, GitHub tokens, bearer headers and private keys in logs.
+`rig ai config redact=false` turns it off.
+
 Guard rails, enforced by rig's MCP server rather than the prompt: a conversation is bound to the
 environment it started on (other `env`s are refused); the project directory is the only workspace, with
 credentials, `ai.deny` paths and `.git` out of reach; files change only through `rig_file` (create, edit, move;

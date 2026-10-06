@@ -62,6 +62,8 @@ type Project struct {
 	// Unset are the ${NAME}s the file uses (outside other environments) that nothing sets and that
 	// have no :-default: they stay as written.
 	Unset []string `yaml:"-"`
+	// FromEnv are the ${NAME}s the file took from the process environment, with their values.
+	FromEnv map[string]string `yaml:"-"`
 
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
