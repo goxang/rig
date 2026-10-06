@@ -652,10 +652,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 	case "esc", "left", "h", "backspace":
 		switch {
 		case t.query != "":
-			t.query = ""
-			t.right = newGrid("dright")
-			t.restore = t.picked[t.place(c)]
-			return t.load(m)
+			t.askQuery(m, c, t.queryAt, t.query, "")
 		case t.filter != "":
 			t.filter = ""
 			t.fill()
