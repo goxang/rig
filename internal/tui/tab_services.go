@@ -653,7 +653,10 @@ func (t *servicesTab) view(m *model, w, h int) string {
 		return panel(title, sDim.Render("asking the runtime…"), w, h, true)
 	}
 	names := t.sectionNames(m)
-	strip := m.strip("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section)) + sDim.Render("  ⇧←→ · dbl-click marks")
+	strip := m.stripFit("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section), w-2)
+	if hint := sDim.Render("  ⇧←→ · dbl-click marks"); lipgloss.Width(strip)+lipgloss.Width(hint) <= w-2 {
+		strip += hint
+	}
 	body := strip + "\n" + m.stripRule(0, w-2) + "\n" + t.list.view(m, 1, 3, w-2, h-4, true)
 	m.zone("svc:mark", 1, 4, 2, t.list.shown)
 	return panel(title, body, w, h, true)

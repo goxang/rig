@@ -893,11 +893,40 @@ func (m *model) zoneAt(x, y int) (hit, bool) {
 // tabs: the active one in accent, the others dim, divided by bars; stripRule underlines it. A click
 // on label i arrives as a hit with id "<id>:<i>" (stripHit reads it back).
 func (m *model) strip(id string, x, y int, labels []string, active int) string {
+	return m.stripFrom(id, x, y, labels, active, 0)
+}
+
+// stripFit is strip within w cells: when the labels do not fit, the first ones give way (‹ marks
+// them) so the active one always shows.
+func (m *model) stripFit(id string, x, y int, labels []string, active, w int) string {
+	width := func(from int) int {
+		n := 0
+		for _, l := range labels[from : min(active, len(labels)-1)+1] {
+			n += lipgloss.Width(sSubOff.Render(l)) + 1
+		}
+		return n
+	}
+	from := 0
+	for from < active && width(from) > w-2 {
+		from++
+	}
+	if from == 0 {
+		return truncate(m.strip(id, x, y, labels, active), w)
+	}
+	out := m.stripFrom(id, x+1, y, labels, active, from)
+	m.stripAt[0], m.stripAt[1] = m.stripAt[0]+1, m.stripAt[1]+1
+	return truncate(sDim.Render("‹")+out, w)
+}
+
+func (m *model) stripFrom(id string, x, y int, labels []string, active, from int) string {
 	var b strings.Builder
 	start := x
 	m.stripAt = [2]int{}
 	for i, l := range labels {
-		if i > 0 {
+		if i < from {
+			continue
+		}
+		if i > from {
 			b.WriteString(sSubSep)
 			x++
 		}

@@ -73,7 +73,7 @@ func (a *App) TaskArgChoices(ctx context.Context, arg spec.TaskArg) []string {
 		}
 		out := []string{"all"}
 		for g := range groups {
-			if a.Spec.Services[g] == nil {
+			if a.Spec.Services[g] == nil && g != "all" {
 				out = append(out, g)
 			}
 		}
