@@ -118,7 +118,7 @@ func (d *DB) Browse(ctx context.Context, path []string) (core.Table, bool, error
 // QueryAt runs q in the database the path starts at.
 func (d *DB) QueryAt(ctx context.Context, path []string, q string) (core.Table, error) {
 	if len(path) == 0 {
-		return core.Table{}, fmt.Errorf("no database in the path: give one, e.g. @db SELECT ...")
+		return core.Table{}, fmt.Errorf("no database in the path: give one, e.g. @db SELECT")
 	}
 	return d.Query(ctx, path[0], q)
 }
