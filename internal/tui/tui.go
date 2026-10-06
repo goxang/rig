@@ -863,14 +863,15 @@ func (m *model) strip(id string, x, y int, labels []string, active int) string {
 	return b.String()
 }
 
-// withStrip puts a row of tabs above a screen's body; the body is drawn h-1 high and its zones
-// shift down under the strip.
-func (m *model) withStrip(id string, labels []string, active, h int, body func(h int) string) string {
+// withStrip puts a row of tabs above a screen's body, with a separator rule between them; the
+// body is drawn h-2 high and its zones shift down under the strip and rule.
+func (m *model) withStrip(id string, labels []string, active, w, h int, body func(h int) string) string {
 	s := " " + m.strip(id, 1, 0, labels, active)
-	m.originY++
-	b := body(h - 1)
-	m.originY--
-	return s + "\n" + b
+	rule := lipgloss.NewStyle().Foreground(cPanel).Render(strings.Repeat("─", w))
+	m.originY += 2
+	b := body(h - 2)
+	m.originY -= 2
+	return s + "\n" + rule + "\n" + b
 }
 
 // stripHit is the label index a click on strip id landed on, false for any other zone.

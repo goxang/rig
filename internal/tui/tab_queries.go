@@ -578,7 +578,7 @@ func (t *queriesTab) historyView(m *model, w, h int) string {
 }
 
 func (t *queriesTab) view(m *model, w, h int) string {
-	return m.withStrip("q:mode", []string{"saved queries", "history (H)"}, boolInt(t.history), h, func(h int) string {
+	return m.withStrip("q:mode", []string{"saved queries", "history (H)"}, boolInt(t.history), w, h, func(h int) string {
 		if t.history {
 			return t.historyView(m, w, h)
 		}

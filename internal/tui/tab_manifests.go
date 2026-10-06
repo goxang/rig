@@ -510,7 +510,7 @@ func addService(file, name, role, groups, image, workload, manifestFile string) 
 }
 
 func (t *manifestsTab) view(m *model, w, h int) string {
-	return m.withStrip("mf:mode", []string{"objects", "folders and files"}, boolInt(t.tree), h, func(h int) string { return t.body(m, w, h) })
+	return m.withStrip("mf:mode", []string{"objects", "folders and files"}, boolInt(t.tree), w, h, func(h int) string { return t.body(m, w, h) })
 }
 
 func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
