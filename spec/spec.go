@@ -151,9 +151,20 @@ type Service struct {
 	// Manual services start only when named (or through their group or section), never with "all"
 	// or their role (rig infra up).
 	Manual bool `yaml:"manual"`
+	// Watch is what rig watch (ctrl+w in the UI) rebuilds and restarts the service on.
+	Watch *Watch `yaml:"watch"`
 
 	// Sections owned by adapters (local:, docker:, k8s:, ...), decoded by the adapter that reads them.
 	Sections map[string]yaml.Node `yaml:",inline"`
+}
+
+// Watch is a service's sources for live rebuilds; .gitignore'd files never count.
+type Watch struct {
+	// Paths are directories or files (from the project directory); left out, the packages a build.go
+	// main imports from the project, else build.context, else run.dir.
+	Paths []string `yaml:"paths"`
+	// Ignore are globs matched against a changed file's path and name (*_test.go, docs/**).
+	Ignore []string `yaml:"ignore"`
 }
 
 type Build struct {

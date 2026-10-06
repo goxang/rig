@@ -118,6 +118,8 @@ type model struct {
 	showAlerts bool
 	// envInfo is the ctrl+e box: what this environment resolves to, nil when closed
 	envInfo *envBox
+	// watch is ctrl+w's live rebuild, nil when off
+	watch *watching
 
 	refreshed map[int]time.Time
 	sched     *scheduler
@@ -539,6 +541,7 @@ func (m *model) alertBadge() string {
 
 func (m *model) alertsView() string {
 	var b strings.Builder
+	b.WriteString(m.watchFailures())
 	for _, f := range m.alerts {
 		st := sAmber
 		if f.Level == engine.LevelCrit {
@@ -672,10 +675,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.synced(msg)
 	case resourcesMsg:
 		return m, m.gotResources(msg)
+	case watchMsg:
+		return m, m.onWatch(msg)
 	case envMsg:
 		if msg.err != nil {
 			m.setStatus("switch environment: "+msg.err.Error(), true)
 			return m, nil
+		}
+		if m.watch != nil {
+			m.watch.cancel()
+			m.watch = nil
 		}
 		old := m.app
 		m.app, m.gen = msg.app, m.gen+1
@@ -1155,6 +1164,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		case "ctrl+e":
 			return m.fetchEnvInfo()
+		case "ctrl+w":
+			return m.toggleWatch()
 		case "E":
 			m.pickEnv()
 			return nil
@@ -1531,6 +1542,9 @@ func (m *model) header() string {
 	if b := m.alertBadge(); b != "" {
 		left += " " + b
 	}
+	if b := m.watchBadge(); b != "" {
+		left += " " + b
+	}
 	up, bad := 0, 0
 	for _, s := range m.services {
 		if engine.Ready(s) {
@@ -1733,7 +1747,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

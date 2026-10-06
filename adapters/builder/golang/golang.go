@@ -192,7 +192,34 @@ func (b *Builder) base(ctx context.Context, dir string) (v1.Image, error) {
 		return nil, err
 	}
 	goos, goarch, _ := strings.Cut(b.opt.Platform, "/")
-	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}), remote.WithTransport(registryTransport))
+	// a registry base is kept a day in the user cache: a rebuild (rig watch) then needs no network,
+	// and a registry that is down falls back to the last copy
+	cached := ""
+	if dir, err := os.UserCacheDir(); err == nil {
+		cached = filepath.Join(dir, "rig", "base", strings.NewReplacer("/", "_", ":", "_", "@", "_").Replace(b.opt.Base+"-"+goos+"-"+goarch)+".tar")
+	}
+	if fi, err := os.Stat(cached); err == nil && time.Since(fi.ModTime()) < 24*time.Hour {
+		return tarball.ImageFromPath(cached, nil)
+	}
+	img, err := remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}), remote.WithTransport(registryTransport))
+	if err != nil {
+		if _, serr := os.Stat(cached); serr == nil {
+			return tarball.ImageFromPath(cached, nil)
+		}
+		return nil, err
+	}
+	if cached == "" || os.MkdirAll(filepath.Dir(cached), 0o755) != nil {
+		return img, nil
+	}
+	tmp := cached + ".tmp"
+	if err := tarball.WriteToFile(tmp, ref, img); err != nil {
+		os.Remove(tmp)
+		return img, nil
+	}
+	if err := os.Rename(tmp, cached); err != nil {
+		return img, nil
+	}
+	return tarball.ImageFromPath(cached, nil)
 }
 
 // registryTransport gives up on a registry that takes the request and never answers it: a Nexus

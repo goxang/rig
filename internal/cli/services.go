@@ -328,7 +328,32 @@ func serviceCommands() []*cobra.Command {
 			return a.SetEnv(ctx, names, kv)
 		}),
 	}
-	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, logs, exec, setenv}
+	watchCmd := &cobra.Command{
+		Use:   "watch [service|group...]",
+		Short: "rebuild and restart services as their sources change (every app service when none); ctrl+w in the UI",
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			names, err := a.Targets(args, false)
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				names = nil
+			}
+			fmt.Printf("%s on %s: ctrl+c stops\n", bold("rig watch"), envLabel(a))
+			return a.Watch(ctx, names, func(e engine.WatchEvent) {
+				fmt.Print(dim(time.Now().Format("15:04:05 ")))
+				switch e.State {
+				case "failed":
+					fmt.Printf("%s %s: %v\n%s", red("✖"), e.Service, e.Err, e.Output)
+				case "ok":
+					fmt.Printf("%s %s rebuilt in %s\n", green("✓"), e.Service, e.Took.Round(100*time.Millisecond))
+				default:
+					fmt.Printf("%s %s %s\n", dim("·"), e.Service, e.State)
+				}
+			})
+		}),
+	}
+	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, logs, exec, setenv, watchCmd}
 }
 
 func envLabel(a *engine.App) string {

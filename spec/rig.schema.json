@@ -980,6 +980,14 @@
             "boolean",
             "string"
           ]
+        },
+        "watch": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Watch"
+            }
+          ],
+          "description": "{paths, ignore}: what rig watch (ctrl+w in the UI) rebuilds and restarts the service on. Left out: the project packages a build.go main imports, else build.context, else run.dir; .gitignored files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running"
         }
       },
       "type": "object"
@@ -1280,6 +1288,34 @@
         },
         "tabs": {
           "description": "The screens shown, in order (number keys follow it); left out, every screen the project configures something for shows, in the order of Screens.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Watch": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "description": "Globs matched against a changed file's path and name (*_test.go, docs/**).",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "paths": {
+          "description": "Directories or files (from the project directory); left out, the packages a build.go main imports from the project, else build.context, else run.dir.",
           "items": {
             "type": [
               "string",

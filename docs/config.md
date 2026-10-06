@@ -51,6 +51,7 @@ is out of date.
 | `shared` | infrastructure one environment runs for others: see `environments.<name>.infra` |
 | `delay` | wait this long (`10s`) after the dependencies are ready before starting the service |
 | `manual` | started only when named or through a group or section, never by `all` or its role, so `rig infra up` skips it too (e.g. frontends, an optional Prometheus) |
+| `watch` | `{paths, ignore}`: what `rig watch` (`ctrl+w` in the UI) rebuilds and restarts the service on. Left out: the project packages a `build.go` main imports, else `build.context`, else `run.dir`; `.gitignore`d files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running |
 | `health` | `{port, path}`: readiness for local and docker, a readiness probe in generated manifests |
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
