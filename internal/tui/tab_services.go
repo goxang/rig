@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -34,12 +35,16 @@ type servicesTab struct {
 	pods   *grid
 	log    *logView
 	logFor string
-	stream int
-	cancel context.CancelFunc
-	logErr string
-	detail string
-	prof   *profView
-	debug  map[string]core.DebugSession
+	// grep filters the open service's own log, same as the Logs tab's /
+	grep    string
+	match   func(string) bool
+	inspect *jsonTree
+	stream  int
+	cancel  context.CancelFunc
+	logErr  string
+	detail  string
+	prof    *profView
+	debug   map[string]core.DebugSession
 	// desired is each service's last seen replica count; scaled the last change of it, so a
 	// scale by an autoscaler (or anyone) shows on the list for a while
 	desired map[string]int
@@ -129,8 +134,13 @@ func (t *servicesTab) open(m *model) tea.Cmd {
 func (t *servicesTab) refresh(m *model) tea.Cmd { return nil }
 
 func (t *servicesTab) hints() [][2]string {
+	if t.inspect != nil {
+		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
+			{"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
+	}
 	if t.open_ != "" {
-		return [][2]string{{"esc", "back"}, {"enter", "logs of instance"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
+		return [][2]string{{"esc", "back"}, {"enter v", "logs of instance / inspect picked line"}, {"click", "pick a log line"}, {"/", "filter the log"}, {"w", "wrap"}, {"r", "restart"},
+			{"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
 	}
@@ -205,7 +215,7 @@ func (t *servicesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
-		t.log.add(msg.lines)
+		t.log.add(t.filterLog(msg.lines))
 		if msg.done {
 			return nil
 		}
@@ -407,6 +417,11 @@ func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
 	t.log.reset()
 	t.logFor = instance
 	t.stream++
+	q := core.LogQuery{Match: t.grep}
+	if _, err := regexp.Compile(t.grep); err == nil {
+		q.Regex = true
+	}
+	t.match, _ = q.Matcher()
 	ctx, cancel := context.WithCancel(m.ctx)
 	t.cancel = cancel
 	a, gen, stream := m.app, m.gen, t.stream
@@ -414,6 +429,21 @@ func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
 		ch, err := a.Logs(ctx, name, core.LogOptions{Follow: true, Tail: 200, Instance: instance})
 		return svcLogStart{gen: gen, stream: stream, ch: ch, err: err}
 	}
+}
+
+// filter keeps the lines t.grep matches, the same way the generic log source filters a plain-text
+// or regex query (see adapters/logs/runtime) rather than per-service log stream.
+func (t *servicesTab) filterLog(lines []core.LogLine) []core.LogLine {
+	if t.match == nil {
+		return lines
+	}
+	var out []core.LogLine
+	for _, l := range lines {
+		if t.match(l.Text) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func (t *servicesTab) closeLogs() {
@@ -460,6 +490,29 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	}
+	if t.inspect != nil {
+		switch k.String() {
+		case "esc", "v", "q":
+			t.inspect = nil
+		case "y":
+			copyText(t.inspect.current().text())
+			m.setStatus("copied "+t.inspect.current().path(), false)
+		case "Y":
+			if l, ok := t.log.picked(); ok {
+				copyText(l.Text)
+				m.setStatus("copied the line", false)
+			}
+		case "J", "ctrl+down":
+			t.log.moveCursor("down")
+			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
+		case "K", "ctrl+up":
+			t.log.moveCursor("up")
+			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
+		default:
+			t.inspect.key(k)
+		}
+		return nil
+	}
 	if t.pods.key(k) {
 		return nil
 	}
@@ -476,6 +529,10 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 		t.open_ = ""
 		return nil
 	case "enter":
+		if _, ok := t.log.picked(); ok {
+			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
+			return nil
+		}
 		if r, ok := t.pods.current(); ok {
 			inst := r.id
 			if t.logFor == inst {
@@ -483,6 +540,18 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			}
 			return t.openService(m, name, inst)
 		}
+	case "v":
+		t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
+		return nil
+	case "w":
+		t.log.wrap = !t.log.wrap
+		return nil
+	case "/":
+		m.ask("filter this service's log: text or an RE2 regex ((?i) ignores case)", t.grep, func(v string) tea.Cmd {
+			t.grep = strings.TrimSpace(v)
+			return t.openService(m, name, t.logFor)
+		})
+		return nil
 	case "e":
 		inst := ""
 		if r, ok := t.pods.current(); ok {
@@ -532,6 +601,9 @@ func (t *servicesTab) click(m *model, h hit) tea.Cmd {
 	if h.id == "back" {
 		t.closeLogs()
 		t.open_ = ""
+		return nil
+	}
+	if t.inspect != nil && t.inspect.click(h) {
 		return nil
 	}
 	if t.prof != nil && t.prof.grid.click(h) {
@@ -754,20 +826,27 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	if t.logFor != "" {
 		src = t.logFor
 	}
+	logsW := w
+	if t.inspect != nil {
+		logsW = min(max(w*3/5, 40), w-20)
+	}
 	var body string
 	title := "log · " + src + " · " + t.log.state() + " · drag copies · l: Logs screen"
+	if t.grep != "" {
+		title += " · grep " + t.grep
+	}
 	switch {
 	case t.prof != nil && t.prof.svc == name:
 		title = fmt.Sprintf("%s profile · %s · ↑↓ < > I sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
-		body = t.prof.view(m, 1, headH+1+podsH+1, w-2, logH-2)
+		body = t.prof.view(m, 1, headH+1+podsH+1, logsW-2, logH-2)
 	case t.detail != "":
 		body = t.detail
 	case t.logErr != "":
-		body = sRed.Render(wrap(t.logErr, w-4))
+		body = sRed.Render(wrap(t.logErr, logsW-4))
 	case len(t.log.lines) == 0:
 		body = sDim.Render("waiting for log lines…")
 	default:
-		body = t.log.render(m, 1, headH+1+podsH+1, w-2, logH-2, func(l core.LogLine) string {
+		body = t.log.render(m, 1, headH+1+podsH+1, logsW-2, logH-2, func(l core.LogLine) string {
 			inst := ""
 			if t.logFor == "" && len(st.Instances) > 1 && l.Instance != "" {
 				inst = lipgloss.NewStyle().Foreground(colorFor(l.Instance)).Render(shortInstance(l.Instance)) + " "
@@ -775,7 +854,17 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 			return sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + t.log.fmt.render(l.Text)
 		})
 	}
-	logs := panel(title, body, w, logH, t.prof != nil && t.prof.svc == name)
+	logs := panel(title, body, logsW, logH, t.prof != nil && t.prof.svc == name)
+	if t.inspect != nil {
+		iw := w - logsW
+		it := "line · " + t.inspect.current().path()
+		if t.inspect.wrap {
+			it += sDim.Render(" ⏎wrap")
+		} else if t.inspect.hoff > 0 {
+			it += sDim.Render(fmt.Sprintf(" ⇢%d", t.inspect.hoff))
+		}
+		logs = lipgloss.JoinHorizontal(lipgloss.Top, logs, panel(it, t.inspect.view(m, logsW+1, headH+1+podsH+1, iw-2, logH-2), iw, logH, true))
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, " "+head, "", podsBox, logs)
 }
 
@@ -1017,7 +1106,14 @@ func (t *servicesTab) drag(m *model, h hit, phase dragPhase) bool {
 }
 
 func (t *servicesTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
-	if t.open_ == "" || h.id != "svc:log" {
+	if t.open_ == "" {
+		return nil, false
+	}
+	if t.inspect != nil && h.id == t.inspect.zone {
+		t.inspect.wheel(up)
+		return nil, true
+	}
+	if h.id != "svc:log" {
 		return nil, false
 	}
 	t.log.wheel(up)
