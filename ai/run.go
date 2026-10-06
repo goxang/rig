@@ -195,11 +195,13 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"rig": map[string]any{"command": argv[0], "args": argv[1:], "env": mcpEnv}}})
 		var deny []string
 		for _, p := range r.Scope.denied() {
-			deny = append(deny, "Read(/"+filepath.Join(r.Scope.Dir, p)+")")
+			for _, tool := range []string{"Read", "Edit", "Write"} {
+				deny = append(deny, tool+"(/"+filepath.Join(r.Scope.Dir, p)+")")
+			}
 		}
 		settings, _ := json.Marshal(map[string]any{"permissions": map[string]any{"deny": deny}})
-		args := []string{"-p", "--output-format", "stream-json", "--verbose", "--tools", "Read,Grep,Glob",
-			"--strict-mcp-config", "--mcp-config", string(mcp), "--allowedTools", "mcp__rig",
+		args := []string{"-p", "--output-format", "stream-json", "--verbose", "--tools", "Read,Grep,Glob,Edit,Write,Bash",
+			"--strict-mcp-config", "--mcp-config", string(mcp), "--allowedTools", "mcp__rig,Read,Grep,Glob,Edit,Write,Bash",
 			"--permission-mode", "dontAsk", "--setting-sources", "", "--settings", string(settings), "--append-system-prompt", prompt}
 		if r.Setup.Model != "" {
 			args = append(args, "--model", r.Setup.Model)
@@ -261,7 +263,7 @@ func (r *Runner) userMCPs() []string {
 	return userMCPs.names
 }
 
-// opencodeConfig is laid over the user's opencode config. Tools are set to "ask" rather than
+// opencodeConfig is laid over the user's opencode config. Secret paths are "ask" rather than
 // "deny": a headless run refuses what would ask, and denying drops the tool from the request,
 // which opencode's free tier turns away.
 func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[string]string) (map[string]any, string) {
@@ -271,7 +273,7 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 	}
 	cfg := map[string]any{
 		"instructions": []string{rules},
-		"permission":   map[string]any{"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "deny", "read": read},
+		"permission":   map[string]any{"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "deny", "read": read},
 	}
 	// The user's own MCP servers would be extra tools, and a dead one stalls every start by ~30s.
 	mcp := map[string]any{}
