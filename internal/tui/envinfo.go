@@ -14,8 +14,8 @@ import (
 )
 
 type envInfoMsg struct {
-	gen  int
-	text string
+	gen int
+	box *envBox
 }
 
 // secretName is a name whose value the ctrl+e box hides.
@@ -28,6 +28,53 @@ func maskValue(name, value string) string {
 	return value
 }
 
+// envLine is one line of the ctrl+e box; key is set when the line is a manifest/task variable
+// (`rig vars set`'s own write path), which e/enter edits in place.
+type envLine struct {
+	text string
+	key  string
+}
+
+// envBox is the ctrl+e box: scrollable, and its variable rows are editable.
+type envBox struct {
+	env         string
+	lines       []envLine
+	sel, offset int
+}
+
+func (b *envBox) plainText() string {
+	var lines []string
+	for _, l := range b.lines {
+		lines = append(lines, l.text)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// view renders the box, scrolled to keep sel visible within h (the body height available).
+func (b *envBox) view(h int) string {
+	const frame = 7 // border(2) + padding(2) + title(1) + blank before footer(1) + footer(1)
+	inner := max(1, h-frame)
+	b.sel = max(0, min(b.sel, len(b.lines)-1))
+	b.offset = scroll(b.sel, b.offset, inner, len(b.lines))
+	var body strings.Builder
+	for i := b.offset; i < len(b.lines) && i-b.offset < inner; i++ {
+		l := b.lines[i]
+		text := l.text
+		if i == b.sel && text != "" {
+			text = highlight(sSelected, text, lipgloss.Width(text))
+		}
+		body.WriteString(text + "\n")
+	}
+	footer := "y copies · any other key closes"
+	if len(b.lines) > 0 && b.lines[b.sel].key != "" {
+		footer = "↑↓ select · e/enter edits · y copies · any other key closes"
+	} else {
+		footer = "↑↓ select · y copies · any other key closes"
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
+		Render(sTitle.Render("rig — "+b.env) + "\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + sDim.Render(footer))
+}
+
 // fetchEnvInfo builds the ctrl+e box: the environment, the variables tasks and manifests get (with
 // `rig vars set` overrides, read from the environment's state), and where each component points.
 func (m *model) fetchEnvInfo() tea.Cmd {
@@ -36,38 +83,40 @@ func (m *model) fetchEnvInfo() tea.Cmd {
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return envInfoMsg{gen: gen, text: envInfoText(c, a)}
+		return envInfoMsg{gen: gen, box: envInfoBox(c, a)}
 	}
 }
 
-func envInfoText(ctx context.Context, a *engine.App) string {
-	var b strings.Builder
-	row := func(k, v, from string) {
-		b.WriteString("  " + sKey.Render(padRight(k, 22)) + " " + v)
+func envInfoBox(ctx context.Context, a *engine.App) *envBox {
+	box := &envBox{env: a.Env.Name}
+	row := func(k, v, from, key string) {
+		text := "  " + sKey.Render(padRight(k, 22)) + " " + v
 		if from != "" {
-			b.WriteString(sDim.Render("  " + from))
+			text += sDim.Render("  " + from)
 		}
-		b.WriteString("\n")
+		box.lines = append(box.lines, envLine{text: text, key: key})
 	}
-	section := func(s string) { b.WriteString("\n" + sTitle.Render(s) + "\n") }
+	section := func(s string) {
+		box.lines = append(box.lines, envLine{}, envLine{text: sTitle.Render(s)})
+	}
 
 	env := a.Env
-	row("environment", env.Name, env.Description)
-	row("runtime", env.Runtime.Type, "")
+	row("environment", env.Name, env.Description, "")
+	row("runtime", env.Runtime.Type, "", "")
 	if ns := a.Namespace(); ns != "" {
-		row("namespace", ns, "")
+		row("namespace", ns, "", "")
 	}
 	if env.Protected {
-		row("protected", sRed.Render("yes"), "every change asks")
+		row("protected", sRed.Render("yes"), "every change asks", "")
 	}
 	vars, err := a.Vars(ctx)
 	if len(vars) > 0 || err != nil {
 		section("manifest and task variables")
 		for _, k := range engine.SortedKeys(vars) {
-			row(k, maskValue(k, vars[k].Value), vars[k].From)
+			row(k, maskValue(k, vars[k].Value), vars[k].From, k)
 		}
 		if err != nil {
-			b.WriteString("  " + sRed.Render("state: "+err.Error()) + "\n")
+			box.lines = append(box.lines, envLine{text: "  " + sRed.Render("state: "+err.Error())})
 		}
 	}
 	project := map[string]string{}
@@ -84,7 +133,7 @@ func envInfoText(ctx context.Context, a *engine.App) string {
 			if _, ok := env.Vars[k]; ok {
 				from = "environments." + env.Name + ".vars"
 			}
-			row(k, maskValue(k, project[k]), from)
+			row(k, maskValue(k, project[k]), from, "")
 		}
 	}
 	if len(a.Spec.Components) > 0 {
@@ -102,9 +151,43 @@ func envInfoText(ctx context.Context, a *engine.App) string {
 					parts = append(parts, sDim.Render(k+"=")+maskValue(k, fmt.Sprint(v)))
 				}
 			}
-			row(n, comp.Type+"  "+strings.Join(parts, " "), "")
+			row(n, comp.Type+"  "+strings.Join(parts, " "), "", "")
 		}
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
-		Render(sTitle.Render("rig — "+env.Name) + "\n" + strings.TrimRight(b.String(), "\n") + "\n\n" + sDim.Render("y copies · any key closes"))
+	// land the initial selection on the first editable row, when there is one
+	for i, l := range box.lines {
+		if l.key != "" {
+			box.sel = i
+			break
+		}
+	}
+	return box
+}
+
+// editEnvVar opens the prompt to change the selected variable's value, the same `rig vars set` write
+// path the CLI uses (environment state, key "var.<name>").
+func (m *model) editEnvVar(box *envBox) tea.Cmd {
+	if box.sel < 0 || box.sel >= len(box.lines) {
+		return nil
+	}
+	key := box.lines[box.sel].key
+	if key == "" {
+		return nil
+	}
+	vars, _ := m.app.Vars(m.ctx)
+	cur := ""
+	if v, ok := vars[key]; ok && !secretName.MatchString(key) {
+		cur = v.Value
+	}
+	m.envInfo = nil
+	m.ask("value of "+key, cur, func(v string) tea.Cmd {
+		if v == cur {
+			return nil
+		}
+		a := m.app
+		return m.act("set var "+key, false, func(ctx context.Context) error {
+			return a.SetState(ctx, map[string]string{"var." + key: v})
+		})
+	})
+	return nil
 }

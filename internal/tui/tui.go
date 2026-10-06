@@ -110,8 +110,8 @@ type model struct {
 	alertsAt   time.Time
 	alertsBusy bool
 	showAlerts bool
-	// envInfo is the ctrl+e box: what this environment resolves to, empty when closed
-	envInfo string
+	// envInfo is the ctrl+e box: what this environment resolves to, nil when closed
+	envInfo *envBox
 
 	refreshed map[int]time.Time
 	sched     *scheduler
@@ -571,7 +571,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, batch(cmds...)
 	case envInfoMsg:
 		if msg.gen == m.gen {
-			m.envInfo = msg.text
+			m.envInfo = msg.box
 			m.setStatus("", false)
 		}
 		return m, nil
@@ -968,16 +968,30 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return m.picker.key(m, k)
 		}
 	}
-	if m.envInfo != "" && k.String() == "y" {
-		copyText(ansi.Strip(m.envInfo))
-		m.setStatus("copied the environment", false)
-		return nil
+	if box := m.envInfo; box != nil {
+		switch k.String() {
+		case "up", "k":
+			box.sel = max(0, box.sel-1)
+			return nil
+		case "down", "j":
+			box.sel = min(box.sel+1, len(box.lines)-1)
+			return nil
+		case "e", "enter":
+			return m.editEnvVar(box)
+		case "y":
+			copyText(ansi.Strip(box.plainText()))
+			m.setStatus("copied the environment", false)
+			return nil
+		default:
+			m.envInfo = nil
+			return nil
+		}
 	}
 	if m.help {
 		return m.helpKey(k)
 	}
-	if m.showAlerts || m.envInfo != "" {
-		m.showAlerts, m.envInfo = false, ""
+	if m.showAlerts {
+		m.showAlerts = false
 		return nil
 	}
 	if c := m.chat; c != nil && c.open && c.focus {
@@ -1296,8 +1310,8 @@ func (m *model) View() string {
 		body = m.overlay(m.helpView(bodyH), bodyH)
 	case m.showAlerts:
 		body = m.overlay(m.alertsView(), bodyH)
-	case m.envInfo != "":
-		body = m.overlay(m.envInfo, bodyH)
+	case m.envInfo != nil:
+		body = m.overlay(m.envInfo.view(bodyH), bodyH)
 	case m.prompt != nil && m.prompt.popup:
 		body = m.overlay(m.promptPopup(), bodyH)
 	case m.picker != nil:
@@ -1539,7 +1553,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"},{"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {
