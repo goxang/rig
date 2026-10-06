@@ -430,9 +430,9 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 		m.setStatus("auto refresh "+refreshText(refreshes[t.every]), false)
 	case "r":
 		return t.fetchAll(m)
-	case "]":
+	case "]", "shift+right":
 		return t.switchDash(m, t.dashIndex(m)+1)
-	case "[":
+	case "[", "shift+left":
 		return t.switchDash(m, t.dashIndex(m)-1)
 	case "d":
 		t.pickDash(m)

@@ -1019,9 +1019,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 			m.setStatus("mouse on", false)
 			return tea.EnableMouseAllMotion
-		case "tab":
+		case "tab", "alt+right":
 			return m.openTab((m.active + 1) % len(m.tabs))
-		case "shift+tab":
+		case "shift+tab", "alt+left":
 			return m.openTab((m.active + len(m.tabs) - 1) % len(m.tabs))
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
 			i := int(s[0]-'0') - 1

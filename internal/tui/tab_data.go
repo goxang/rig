@@ -751,12 +751,12 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 // marks, purge, delete and publish.
 func (t *dataTab) queueKey(m *model, k tea.KeyMsg) (tea.Cmd, bool) {
 	switch k.String() {
-	case "[", "]":
+	case "[", "]", "shift+left", "shift+right":
 		if t.current().adapter != "rabbitmq" {
 			return nil, true
 		}
 		n := len(brokerViews) + 1
-		if k.String() == "]" {
+		if s := k.String(); s == "]" || s == "shift+right" {
 			t.qview = (t.qview + 1) % n
 		} else {
 			t.qview = (t.qview + n - 1) % n

@@ -265,10 +265,10 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 		} else {
 			t.setSection("infra")
 		}
-	case "[", "]":
+	case "[", "]", "shift+left", "shift+right":
 		names := t.sectionNames(m)
 		i := slices.Index(names, t.section)
-		if k.String() == "[" {
+		if s := k.String(); s == "[" || s == "shift+left" {
 			i = (i - 1 + len(names)) % len(names)
 		} else {
 			i = (i + 1) % len(names)
