@@ -41,6 +41,13 @@ type kvTab struct {
 	// jumpKey and jumpPath are a search hit being opened: the key to select once its folder
 	// loads, and the field to select once its value does
 	jumpKey, jumpPath string
+	// viaSearch marks the key currently shown as reached from a search jump, so esc from its
+	// value/tree reopens the last search results instead of just backing out to the key list
+	viaSearch  bool
+	searchHits []kvHit
+	// idx is the last full read of comp, kept across searches in this run; I forces a re-read
+	idx     []kvHit
+	idxComp string
 }
 
 // kvHit is one search row: a key, the path of a field of its JSON value ($.a.b; empty for the key
@@ -79,9 +86,13 @@ func (t *kvTab) name() string { return "KV" }
 func (t *kvTab) typing() bool { return false }
 func (t *kvTab) hints() [][2]string {
 	if t.inTree {
-		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"s", "config file"}, {"esc", "back to keys"}}
+		back := "back to keys"
+		if t.viaSearch {
+			back = "back to search"
+		}
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"s", "config file"}, {"esc", back}}
 	}
-	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"s", "config file"}, {"J/K", "scroll value"}}
+	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"I", "reindex search (re-read store)"}, {"s", "config file"}, {"J/K", "scroll value"}}
 	if len(t.related) > 0 {
 		h = append([][2]string{{"R", "restart " + strings.Join(t.related, ",")}}, h...)
 	}
@@ -163,6 +174,7 @@ func (t *kvTab) entries() []grow {
 }
 
 func (t *kvTab) enter(m *model, id string) tea.Cmd {
+	t.viaSearch = false
 	if strings.HasSuffix(id, "/") {
 		t.prefix, t.filter = id, ""
 		t.list.sel, t.value, t.valueFor = 0, nil, ""
@@ -174,6 +186,7 @@ func (t *kvTab) enter(m *model, id string) tea.Cmd {
 }
 
 func (t *kvTab) up(m *model) tea.Cmd {
+	t.viaSearch = false
 	if t.prefix == "" {
 		return nil
 	}
@@ -390,6 +403,8 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			m.setStatus("search: "+msg.err.Error(), true)
 			return nil
 		}
+		t.searchHits = msg.hits
+		t.idx, t.idxComp = msg.hits, t.comp
 		t.pickHit(m, msg.hits)
 	case kvEditedMsg:
 		defer os.Remove(msg.file)
@@ -417,7 +432,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		if t.list.key(msg) {
 			if r, ok := t.list.current(); ok && !strings.HasSuffix(r.id, "/") {
-				t.scroll = 0
+				t.scroll, t.viaSearch = 0, false
 				return t.fetch(m, r.id)
 			}
 			return nil
@@ -436,7 +451,13 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.treeNext = msg.String() == "enter"
 			}
 			return t.enter(m, r.id)
-		case "left", "backspace", "esc":
+		case "esc":
+			if t.viaSearch && len(t.searchHits) > 0 {
+				t.pickHit(m, t.searchHits)
+				return nil
+			}
+			return t.up(m)
+		case "left", "backspace":
 			return t.up(m)
 		case "s":
 			if ok && !strings.HasSuffix(r.id, "/") {
@@ -493,6 +514,13 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				})
 			}
 		case "/":
+			if t.idxComp == t.comp && t.idx != nil {
+				t.pickHit(m, t.idx)
+				return nil
+			}
+			m.setStatus("reading every key of "+t.comp+"…", false)
+			return t.index(m)
+		case "I":
 			m.setStatus("reading every key of "+t.comp+"…", false)
 			return t.index(m)
 		case "r":
@@ -503,7 +531,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				if len(c) == 0 {
 					return nil
 				}
-				t.comp, t.prefix = c[0], ""
+				t.comp, t.prefix, t.viaSearch = c[0], "", false
 				return t.load(m)
 			})
 		case "t":
@@ -529,7 +557,7 @@ func (t *kvTab) click(m *model, h hit) tea.Cmd {
 		}
 		return nil
 	}
-	t.inTree = false
+	t.inTree, t.viaSearch = false, false
 	if h.id == "kv:up" {
 		return t.up(m)
 	}
@@ -636,7 +664,12 @@ func (t *kvTab) treeKey(m *model, k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "s":
 		return t.openSource(m, t.treeFor, n.path())
-	case "esc", "q":
+	case "esc":
+		t.inTree = false
+		if t.viaSearch && len(t.searchHits) > 0 {
+			t.pickHit(m, t.searchHits)
+		}
+	case "q":
 		t.inTree = false
 	case "enter", "e":
 		if n.container() {
@@ -810,5 +843,6 @@ func (t *kvTab) jump(m *model, h kvHit) tea.Cmd {
 	}
 	t.prefix, t.filter, t.list.sel = dir, "", 0
 	t.jumpKey, t.jumpPath = h.key, h.path
+	t.viaSearch = true
 	return t.load(m)
 }

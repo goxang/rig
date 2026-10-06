@@ -155,7 +155,12 @@ func (t *manifestsTab) setFields(o *manifest.Object) {
 func (t *manifestsTab) fieldKey(m *model, k tea.KeyMsg) tea.Cmd {
 	n := t.fields.current()
 	switch k.String() {
-	case "esc", "q":
+	case "esc":
+		t.inFields = false
+		if t.viaSearch && len(t.hits) > 0 {
+			t.showHits(m, t.hits)
+		}
+	case "q":
 		t.inFields = false
 	case "enter", "e":
 		if n.container() {

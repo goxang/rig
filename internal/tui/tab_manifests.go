@@ -34,12 +34,18 @@ type manifestsTab struct {
 	fieldsID  string
 	inFields  bool
 	jumpPath  string // a search hit's field, selected once its object shows
+	// viaSearch marks the object/field currently shown as reached from a search jump, so esc
+	// from the fields view reopens the last search results instead of just backing out to the list
+	viaSearch bool
 
 	tree bool   // folders and files instead of every object
 	cwd  string // the folder the tree shows
 	file string // in the tree: the file whose objects are listed
 	// svcOf caches serviceOf per object, until the next scan
 	svcOf map[*manifest.Object]string
+	// hits is the search index, built once per scan and reused across searches
+	hits    []manifestHit
+	hitsSet *manifest.Set
 }
 
 type manifestFoldersMsg struct {
@@ -95,7 +101,11 @@ func (t *manifestsTab) name() string { return "Manifests" }
 func (t *manifestsTab) typing() bool { return false }
 func (t *manifestsTab) hints() [][2]string {
 	if t.inFields {
-		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"y", "copy value"}, {"esc", "back to objects"}}
+		back := "back to objects"
+		if t.viaSearch {
+			back = "back to search"
+		}
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"y", "copy value"}, {"esc", back}}
 	}
 	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
 		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
@@ -298,6 +308,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return t.fieldKey(m, msg)
 		}
 		if listKeys(msg, &t.sel, len(t.entries())) {
+			t.viaSearch = false
 			return nil
 		}
 		switch msg.String() {
@@ -309,7 +320,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return nil
 			})
 		case "t":
-			t.tree, t.sel, t.offset, t.file = !t.tree, 0, 0, ""
+			t.tree, t.sel, t.offset, t.file, t.viaSearch = !t.tree, 0, 0, "", false
 		case "v":
 			return t.gotoService(m)
 		case "enter", "right", "l", "tab":
@@ -318,7 +329,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return t.gotoService(m)
 			}
 			if ok && e.obj != nil && t.fields != nil {
-				t.inFields = true
+				t.inFields, t.viaSearch = true, false
 				return nil
 			}
 			if !ok || !t.tree {
@@ -373,6 +384,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "n":
 			return t.newService(m)
 		case "r":
+			t.viaSearch = false
 			return t.scan(m)
 		case "d":
 			root := m.app.Spec.Dir
@@ -515,7 +527,7 @@ func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
 		}
 		return nil
 	}
-	t.inFields = false
+	t.inFields, t.viaSearch = false, false
 	if h.id == "mf:svc" {
 		return t.gotoService(m)
 	}

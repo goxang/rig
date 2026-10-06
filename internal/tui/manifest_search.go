@@ -53,15 +53,26 @@ func manifestHits(o *manifest.Object) []manifestHit {
 }
 
 // search lists every object, field and value of the scanned manifests in a picker that filters as
-// you type; enter selects the object and its field.
+// you type; enter selects the object and its field. The hit list is built once per scan and reused
+// across searches; r rescans and invalidates it.
 func (t *manifestsTab) search(m *model) tea.Cmd {
 	if t.set == nil {
 		return nil
 	}
-	var hits []manifestHit
-	for _, o := range t.set.Objects {
-		hits = append(hits, manifestHits(o)...)
+	if t.hitsSet != t.set {
+		t.hits = nil
+		for _, o := range t.set.Objects {
+			t.hits = append(t.hits, manifestHits(o)...)
+		}
+		t.hitsSet = t.set
 	}
+	t.showHits(m, t.hits)
+	return nil
+}
+
+// showHits reopens the search picker on a set of hits (the last search, when esc backs out of a
+// detail view reached through it) without rebuilding the index.
+func (t *manifestsTab) showHits(m *model, hits []manifestHit) {
 	items, desc := make([]string, len(hits)), make([]string, len(hits))
 	for i, h := range hits {
 		items[i] = h.obj.ID()
@@ -82,7 +93,6 @@ func (t *manifestsTab) search(m *model) tea.Cmd {
 		}
 		return nil
 	})
-	return nil
 }
 
 // jump shows every object again and selects the hit's object and field.
@@ -98,4 +108,5 @@ func (t *manifestsTab) jump(h manifestHit) {
 	if h.path != "" {
 		t.jumpPath = "$." + h.path
 	}
+	t.viaSearch = true
 }
