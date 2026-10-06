@@ -168,9 +168,13 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "i":
+		case "i", "shift+right", "shift+left":
 			ids := t.instanceIDs(m, n)
-			t.inst[n] = ids[(slices.Index(ids, t.inst[n])+1)%len(ids)]
+			d := 1
+			if msg.String() == "shift+left" {
+				d = len(ids) - 1
+			}
+			t.inst[n] = ids[(slices.Index(ids, t.inst[n])+d)%len(ids)]
 			return nil
 		case " ", "enter":
 			if t.stats[n].Running {
@@ -318,7 +322,7 @@ components:
 			labels[i] = fmt.Sprintf("all instances (%d)", len(ids)-1)
 		}
 	}
-	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (i) · rate and config are shared by every instance"), rw)
+	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (⇧←→ i) · rate and config are shared by every instance"), rw)
 	var right string
 	if id := t.inst[n]; id != "" {
 		right = t.instanceView(m, n, id, rw, h-1)

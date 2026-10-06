@@ -260,9 +260,9 @@ func (t *queriesTab) hints() [][2]string {
 		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"I", "invert"}}
 	}
 	if t.history {
-		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H", "back to queries"}}
+		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H ⇧←→", "back to queries"}}
 	}
-	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H", "history"}, {"→", "result"}, {"< >", "sort"}}
+	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H ⇧←→", "history"}, {"→", "result"}, {"< >", "sort"}}
 }
 
 func (t *queriesTab) interval() time.Duration { return time.Second }
@@ -374,7 +374,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		}
-		if msg.String() == "H" {
+		if s := msg.String(); s == "H" || s == "shift+left" || s == "shift+right" {
 			t.history, t.resultFor = !t.history, ""
 			return nil
 		}

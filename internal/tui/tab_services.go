@@ -144,7 +144,7 @@ func (t *servicesTab) hints() [][2]string {
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
 	}
-	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"[ ]", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
+	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
 		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"< >", "sort"}}
 }
 
@@ -765,7 +765,7 @@ func (t *servicesTab) view(m *model, w, h int) string {
 		return panel(title, sDim.Render("asking the runtime…"), w, h, true)
 	}
 	names := t.sectionNames(m)
-	strip := m.strip("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section)) + sDim.Render("  [ ] · dbl-click marks")
+	strip := m.strip("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section)) + sDim.Render("  ⇧←→ · dbl-click marks")
 	body := strip + "\n" + t.list.view(m, 1, 2, w-2, h-3, true)
 	m.zone("svc:mark", 1, 3, 2, t.list.shown)
 	return panel(title, body, w, h, true)

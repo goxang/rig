@@ -107,7 +107,7 @@ func (t *manifestsTab) hints() [][2]string {
 		}
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"y", "copy value"}, {"esc", back}}
 	}
-	return [][2]string{{"t", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+	return [][2]string{{"t ⇧←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
 		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
@@ -319,7 +319,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.filter, t.sel, t.offset = v, 0, 0
 				return nil
 			})
-		case "t":
+		case "t", "shift+left", "shift+right":
 			t.tree, t.sel, t.offset, t.file, t.viaSearch = !t.tree, 0, 0, "", false
 		case "v":
 			return t.gotoService(m)
