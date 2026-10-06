@@ -207,19 +207,25 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	}
 
 	var (
-		force, dry bool
-		with       []string
+		force, dry, deep, all bool
+		with                  []string
 	)
 	initCmd := &cobra.Command{
 		Use:   "init",
 		Short: "write rig.yaml from what this directory has: compose files, Kubernetes manifests, Go/Python/Node/Java/Rust services",
 		Example: `  rig init                          # look around and write rig.yaml
   rig init --dry-run                # print it instead
-  rig init --with postgres,redis    # plus infrastructure (` + strings.Join(scaffold.Presets(), ", ") + `)`,
+  rig init --with postgres,redis    # plus infrastructure (` + strings.Join(scaffold.Presets(), ", ") + `)
+  rig init --deep                   # search every folder and running container, pick what to add (also to an existing rig.yaml)`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if deep {
+				return initDeep(cmd.Context(), dry, all)
+			}
 			return initProject(cmd.Context(), force, dry, with)
 		},
 	}
+	initCmd.Flags().BoolVar(&deep, "deep", false, "search every subfolder (Go mains and tests, Dockerfiles, compose, manifests, Helm, GoLand, Python/Node/Java/Rust/.NET) and running containers, then pick")
+	initCmd.Flags().BoolVar(&all, "all", false, "with --deep: take every candidate without asking")
 	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing rig.yaml")
 	initCmd.Flags().BoolVar(&dry, "dry-run", false, "print rig.yaml instead of writing it")
 	initCmd.Flags().StringSliceVar(&with, "with", nil, "infrastructure to add: "+strings.Join(scaffold.Presets(), ", "))

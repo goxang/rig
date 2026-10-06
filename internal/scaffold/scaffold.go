@@ -29,6 +29,8 @@ type Service struct {
 	DockerCommand, DockerArgs, Volumes []string
 	Shared                             bool
 	From                               string
+	// Adopt is a running container rig takes over (docker: {container: ...}) instead of making one.
+	Adopt string
 }
 
 type Port struct {
@@ -396,8 +398,11 @@ func (s *Service) node() *yaml.Node {
 		}
 		add("env", e)
 	}
-	if len(s.DockerCommand)+len(s.DockerArgs)+len(s.Volumes) > 0 {
+	if len(s.DockerCommand)+len(s.DockerArgs)+len(s.Volumes) > 0 || s.Adopt != "" {
 		d := flow(mapping())
+		if s.Adopt != "" {
+			d.Content = append(d.Content, scalar("container"), scalar(s.Adopt))
+		}
 		if len(s.DockerCommand) > 0 {
 			d.Content = append(d.Content, scalar("command"), seq(s.DockerCommand))
 		}
