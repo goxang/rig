@@ -20,6 +20,7 @@ it all from one CLI and one terminal UI.
 |---|---|
 | ![Metrics](docs/img/metrics.png) | ![Logs](docs/img/logs.png) |
 | ![Data](docs/img/data.png) | ![Manifests](docs/img/manifests.png) |
+| ![AI chat](docs/img/ai.png) | |
 
 ## What it does
 
