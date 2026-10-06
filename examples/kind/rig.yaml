@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../spec/rig.schema.json
 # rig on Kubernetes: an api and a worker (one Go binary, ./app) deployed on a local kind cluster
 # from the manifests in deploy/, with an HPA on the api. The same services also run on docker, or as
 # local processes.

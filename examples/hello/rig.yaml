@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../spec/rig.schema.json
 # The smallest rig project: one Go service run as a local process.
 #
 #   rig up       build and start it

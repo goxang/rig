@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../spec/rig.schema.json
 # A shop on docker: an api and a worker (one Go binary, ./app) over Postgres, Redis, RabbitMQ and
 # Zipkin. compose.yaml is the same stack for docker compose; `rig init` wrote the first version of
 # this file from it.

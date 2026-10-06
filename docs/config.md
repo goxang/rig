@@ -5,6 +5,12 @@ names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process en
 `rig secret set` values, then `secrets:` defaults, then `${env}` and `${project}`, then the environment's
 `vars`, then the project's `vars`. `$$` is a literal `$`.
 
+Editors with yaml-language-server (VS Code's YAML extension, JetBrains, Neovim) complete and check keys
+from rig's JSON Schema when the file's first line names it, as `rig init` writes:
+`# yaml-language-server: $schema=https://raw.githubusercontent.com/goxang/rig/main/spec/rig.schema.json`.
+`rig schema` prints it. It is generated from the Go types (`go generate ./spec`); a test fails when it
+is out of date.
+
 ## Top level
 
 | key | |

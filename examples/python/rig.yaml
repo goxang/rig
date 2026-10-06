@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../spec/rig.schema.json
 # A Python service run as a local process: rig starts it, tails its JSON logs, reads /metrics itself,
 # sends load and runs unittest. No build step and no dependencies beyond python3.
 #

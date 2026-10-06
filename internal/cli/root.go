@@ -106,7 +106,7 @@ Run rig with no arguments for the terminal UI.`,
 	ac := aiCommand()
 	ac.GroupID = "obs"
 	root.AddCommand(ac)
-	for _, c := range append(projectCommands(), docsCommand(), skillCommand()) {
+	for _, c := range append(projectCommands(), docsCommand(), schemaCommand(), skillCommand()) {
 		c.GroupID = "infra"
 		root.AddCommand(c)
 	}

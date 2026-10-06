@@ -270,7 +270,7 @@ func (p *Project) SectionMap() map[string]string {
 type Task struct {
 	Help string    `yaml:"help"`
 	Args []TaskArg `yaml:"args"`
-	// Confirm asks "type yes" before the first step, on any environment; --yes answers it.
+	// Confirm asks before the first step, on any environment; --yes answers it.
 	Confirm bool     `yaml:"confirm"`
 	Steps   []string `yaml:"steps"`
 }

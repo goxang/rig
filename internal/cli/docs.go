@@ -10,6 +10,7 @@ import (
 
 	"github.com/goxang/rig/docs"
 	"github.com/goxang/rig/skills"
+	"github.com/goxang/rig/spec"
 )
 
 func docsCommand() *cobra.Command {
@@ -27,6 +28,18 @@ func docsCommand() *cobra.Command {
 				return fmt.Errorf("no doc %q: have config, guide, design, manifests", name)
 			}
 			_, err = os.Stdout.Write(raw)
+			return err
+		},
+	}
+}
+
+func schemaCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "schema",
+		Short: "print rig.yaml's JSON Schema (editors: " + spec.SchemaHeader + ")",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			_, err := os.Stdout.Write(spec.SchemaJSON)
 			return err
 		},
 	}

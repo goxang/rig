@@ -1,0 +1,1468 @@
+{
+  "$id": "https://raw.githubusercontent.com/goxang/rig/main/spec/rig.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "AI": {
+      "additionalProperties": false,
+      "properties": {
+        "deny": {
+          "description": "Project paths (globs) the assistant never reads, e.g. configs/** holding credentials.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "ideas": {
+          "additionalProperties": {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "type": "array"
+          },
+          "description": "The questions tab offers in an empty chat, by screen (services, logs, ...) or \"all\"; they come before rig's own.",
+          "type": "object"
+        },
+        "instructions": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Alert": {
+      "additionalProperties": false,
+      "properties": {
+        "below": {
+          "description": "Fires when the number drops under the thresholds instead (consumers, ready replicas).",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "crit": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "metric": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "warn": {
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Build": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "object"
+        },
+        "command": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "context": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "dockerfile": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "go": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Component": {
+      "oneOf": [
+        {
+          "description": "the adapter type alone",
+          "type": "string"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "kind": {
+              "description": "",
+              "type": "string"
+            },
+            "type": {
+              "description": "",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "DashVar": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "multi": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "values": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Dashboard": {
+      "oneOf": [
+        {
+          "items": {
+            "$ref": "#/definitions/Panel"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "help": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "panels": {
+              "items": {
+                "$ref": "#/definitions/Panel"
+              },
+              "type": "array"
+            },
+            "vars": {
+              "additionalProperties": {
+                "$ref": "#/definitions/DashVar"
+              },
+              "description": "The dashboard's $variables, picked in the UI; queries use them as $name.",
+              "type": "object"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "alerts": {
+          "description": "Add to the project's alerts in this environment.",
+          "items": {
+            "$ref": "#/definitions/Alert"
+          },
+          "type": "array"
+        },
+        "components": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Component"
+          },
+          "description": "components added or replaced here; one without type patches the shared one",
+          "type": "object"
+        },
+        "description": {
+          "description": "shown by rig env and the TUI",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "infra": {
+          "description": "the environment that runs this one's shared services; they are started, stopped and reached there, and a Kubernetes runtime gets a Service pointing at the host for each",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "only": {
+          "description": "services and groups that exist here; dependencies on the rest are dropped",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "otel": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OTel"
+            }
+          ],
+          "description": "fields replacing the project's otel: here (a local environment's endpoints, say)"
+        },
+        "protected": {
+          "description": "changes need --yes or the TUI's confirmation",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "queries": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Query"
+          },
+          "description": "saved queries replacing the project's of the same name",
+          "type": "object"
+        },
+        "runtime": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Component"
+            }
+          ],
+          "description": "a component: type plus the runtime's options (below)"
+        },
+        "services": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Service"
+          },
+          "description": "patches merged into services here: api: { replicas: 3 }",
+          "type": "object"
+        },
+        "tasks": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Task"
+          },
+          "description": "tasks replacing the project's tasks of the same name",
+          "type": "object"
+        },
+        "vars": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "variables for this environment",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "LogsUI": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "Fields, when set, are the only other keys shown, in this order; Hide are keys left out (stack, caller, ...) until h shows them.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "hide": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "level": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "message": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "raw": {
+          "description": "Shows lines as written instead of \"LEVEL message key=value\"; s switches.",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "time": {
+          "description": "Time, Level and Message are the JSON keys of those parts, first match wins.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "wrap": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "OTel": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "Added to every service's resource, after service.namespace (the project) and deployment.environment (the environment).",
+          "type": "object"
+        },
+        "endpoint": {
+          "description": "Takes every signal (an OpenTelemetry Collector: svc://otel-collector:4318); Traces, Metrics and Logs send one signal elsewhere, with its full path (svc://jaeger:4318/v1/traces). A signal with no address is off.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "logs": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "metrics": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "protocol": {
+          "description": "Http/protobuf (default), http/json or grpc.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "sample": {
+          "description": "The fraction of traces kept (parent based); left out, the SDK's default (all).",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "traces": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Panel": {
+      "additionalProperties": false,
+      "properties": {
+        "crit": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "kind": {
+          "description": "Kind: line (default), stat, gauge, bar (one bar per series, its last value), table.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "legend": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "max": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "min": {
+          "description": "And Max bound a gauge (default 0..100 for %, else 0..the largest value).",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "queries": {
+          "description": "Several queries drawn together (p50, p95 and p99), each with its own legend.",
+          "items": {
+            "$ref": "#/definitions/PanelQuery"
+          },
+          "type": "array"
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "row": {
+          "description": "Starts a new titled row of panels; a panel with only row: is the row's header.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "stack": {
+          "description": "Draws line series stacked.",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "warn": {
+          "description": "And Crit colour stat, gauge and bar values amber and red past them.",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "width": {
+          "description": "Out of 24 columns, like Grafana (default 12, stat and gauge 6); Height in lines.",
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PanelQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "legend": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Probe": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "port": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Query": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "every": {
+          "description": "Runs the query on a schedule while the UI is open, when Active (or activated there).",
+          "type": "string"
+        },
+        "group": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "params": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "object"
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Report": {
+      "additionalProperties": false,
+      "properties": {
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/definitions/ReportMetric"
+          },
+          "type": "array"
+        },
+        "source": {
+          "description": "The metrics component (default the first).",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ReportMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "legend": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "stats": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "command": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "dir": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Secret": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "properties": {
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "services": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Service": {
+      "additionalProperties": true,
+      "properties": {
+        "build": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Build"
+            }
+          ],
+          "description": "go: ./cmd/api, dockerfile: path (+ context, args), or command: [...]"
+        },
+        "delay": {
+          "description": "wait this long (10s) after the dependencies are ready before starting the service",
+          "type": "string"
+        },
+        "depends_on": {
+          "description": "started first; up deploys in phases and waits for each, leaving dependencies that already run untouched",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "environment for every runtime",
+          "type": "object"
+        },
+        "groups": {
+          "description": "names to address several services at once: rig up core",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "health": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Probe"
+            }
+          ],
+          "description": "{port, path}: readiness for local and docker, a readiness probe in generated manifests"
+        },
+        "image": {
+          "description": "image to run, or the repository name builds push to",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "manual": {
+          "description": "started only when named or through a group or section, never by all or its role, so rig infra up skips it too (e.g. frontends, an optional Prometheus)",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "metrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Probe"
+            }
+          ],
+          "description": "{port, path}: scraped by the scrape metrics adapter"
+        },
+        "ports": {
+          "additionalProperties": {
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "description": "name: number; svc://service:name resolves names",
+          "type": "object"
+        },
+        "pprof": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Probe"
+            }
+          ],
+          "description": "{port, path}: where the pprof profiler connects (default: the metrics port)"
+        },
+        "replicas": {
+          "description": "left out: keep the running count (or the manifest's); set (0 included) it wins everywhere",
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "role": {
+          "description": "app (default), infra, or load (left out of rig up)",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "run": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Run"
+            }
+          ],
+          "description": "local runtime: command, args, dir (default: the binary built from build.go)"
+        },
+        "shared": {
+          "description": "infrastructure one environment runs for others: see environments.\u003cname\u003e.infra",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Task": {
+      "oneOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "items": {
+                "$ref": "#/definitions/TaskArg"
+              },
+              "type": "array"
+            },
+            "confirm": {
+              "description": "Asks before the first step, on any environment; --yes answers it.",
+              "type": [
+                "boolean",
+                "string"
+              ]
+            },
+            "help": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "steps": {
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "TaskArg": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "multi": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TestSuite": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "bench": {
+          "description": "Runs benchmarks matching it (go test -bench); Benchtime and Benchmem tune them.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "benchmem": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "benchtime": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "command": {
+          "description": "Runs the suite through sh instead of go test: pytest, jest, mvn test, cargo test, ... Writing JUnit XML to $RIG_JUNIT gives the screen one row per test; without it the suite passes or fails as a whole by its exit status.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "count": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "cover": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "dir": {
+          "description": "Where go test runs (default the project directory).",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "Reaches the test binaries; svc:// addresses resolve in the active environment.",
+          "type": "object"
+        },
+        "exclude": {
+          "description": "Drops packages from Packages (go list patterns: ./pkg/tests/...), so a suite can be \"everything but the integration tests\".",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "flags": {
+          "description": "More go test flags; Args go to the test binary after -args.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "group": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "needs": {
+          "description": "Services (or groups) the suite expects up; the UI warns when they are not.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "packages": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "parallel": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "race": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "report": {
+          "description": "A reports: entry measured over each run and saved with it.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "run": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "short": {
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
+        "skip": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "tags": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "timeout": {
+          "description": "a duration: 500ms, 30s, 5m, 1h",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "UI": {
+      "additionalProperties": false,
+      "properties": {
+        "logs": {
+          "$ref": "#/definitions/LogsUI"
+        },
+        "mode": {
+          "description": "Simple (fewer columns, keys and panels, for newcomers) or detailed (the default); V switches it in the UI.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "tabs": {
+          "description": "The screens shown, in order (number keys follow it); left out, every screen the project configures something for shows, in the order of Screens.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "patternProperties": {
+    "^x-": {}
+  },
+  "properties": {
+    "ai": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AI"
+        }
+      ],
+      "description": "{deny: [globs], instructions: text, ideas: {screen: [questions]}}: project paths the assistant never reads (on top of .env, keys and secrets/), notes it gets with every turn, and the questions tab offers in an empty chat per screen (all for every screen)"
+    },
+    "alerts": {
+      "description": "thresholds shown in the TUI header and by rig alerts",
+      "items": {
+        "$ref": "#/definitions/Alert"
+      },
+      "type": "array"
+    },
+    "components": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Component"
+      },
+      "description": "shared by every environment",
+      "type": "object"
+    },
+    "dashboards": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Dashboard"
+      },
+      "description": "name: [panel, ...] or name: {help, vars, panels}",
+      "type": "object"
+    },
+    "default": {
+      "description": "environment used when neither -e nor $RIG_ENV is given",
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "environments": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Environment"
+      },
+      "type": "object"
+    },
+    "help": {
+      "description": "Shown by `rig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `rig -h` shows only its own generic help.",
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "imports": {
+      "description": "services from other tools' files: - godev: .godev.yaml",
+      "items": {
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "manifests": {
+      "description": "folders rig manifests and the TUI scan by default",
+      "items": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      },
+      "type": "array"
+    },
+    "otel": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/OTel"
+        }
+      ],
+      "description": "OpenTelemetry for every app and load service"
+    },
+    "project": {
+      "description": "name; also the docker network and container prefix",
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "queries": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Query"
+      },
+      "description": "saved queries",
+      "type": "object"
+    },
+    "reports": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Report"
+      },
+      "description": "metrics a run is measured by, saved as markdown: rig report, a suite's report:, the Load screen's W",
+      "type": "object"
+    },
+    "secrets": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Secret"
+      },
+      "description": "NAME: {help, default}: values kept out of the repo",
+      "type": "object"
+    },
+    "sections": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Section"
+      },
+      "description": "name: {help, services: [names, groups or roles]}: the Services screen's parts, in this order; services in none show under other",
+      "type": "object"
+    },
+    "services": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Service"
+      },
+      "type": "object"
+    },
+    "tasks": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Task"
+      },
+      "description": "name: [shell step, ...] or name: {help, steps}, run in order by rig task \u003cname\u003e",
+      "type": "object"
+    },
+    "tests": {
+      "additionalProperties": {
+        "$ref": "#/definitions/TestSuite"
+      },
+      "description": "test suites for rig test and the Tests screen",
+      "type": "object"
+    },
+    "ui": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/UI"
+        }
+      ],
+      "description": "{tabs, mode, logs}: the screens and their order (left out, every screen the project configures something for); mode: simple starts newcomers on fewer screens, columns and keys (V switches); logs"
+    },
+    "vars": {
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      },
+      "description": "variables for ${...}",
+      "type": "object"
+    },
+    "version": {
+      "type": [
+        "integer",
+        "string"
+      ]
+    }
+  },
+  "title": "rig.yaml",
+  "type": "object"
+}

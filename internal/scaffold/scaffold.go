@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/goxang/rig/spec"
 )
 
 type Service struct {
@@ -506,6 +508,7 @@ func (p *Plan) YAML() ([]byte, error) {
 	}
 
 	var b bytes.Buffer
+	b.WriteString(spec.SchemaHeader + "\n")
 	b.WriteString("# rig.yaml: every environment of " + p.Project + " in one file. Reference: https://github.com/goxang/rig/blob/main/docs/config.md\n")
 	b.WriteString("# Written by rig init from what the directory has; check ports, health checks and passwords.\n")
 	enc := yaml.NewEncoder(&b)
