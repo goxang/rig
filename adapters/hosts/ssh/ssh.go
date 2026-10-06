@@ -82,7 +82,8 @@ func (s *SSH) host(name string) (Host, error) {
 }
 
 func (h Host) args(tty bool) []string {
-	a := []string{"-o", "ConnectTimeout=5"}
+	// accept-new: a machine that never saw these hosts trusts them on first contact; a changed key still fails
+	a := []string{"-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new"}
 	if tty {
 		a = append(a, "-t")
 	} else {
