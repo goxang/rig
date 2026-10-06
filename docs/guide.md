@@ -17,7 +17,8 @@ rig -e kind logs -F api worker
 rig query                     # saved queries and queryable components
 rig query db-top-cpu n=5
 rig load rate fleet 200 && rig load scale fleet +2
-rig task bootstrap            # a named list of steps from rig.yaml
+rig task bootstrap            # a named list of steps from rig.yaml (rig task <tab> completes)
+rig doctor                    # what this environment lacks: tools, cluster, ${VARS}, ports, components (--json)
 rig vars set MAIN_DB=x        # manifest variables per environment; rig setenv api K=V for env
 rig data db Switch tables     # walk databases and caches
 rig logs -E '(?i)timeout' api # regex over logs

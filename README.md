@@ -47,6 +47,7 @@ With Go 1.23+: `go install github.com/goxang/rig/cmd/rig@latest`.
 
 ```bash
 rig init      # rig.yaml from what the project has: compose, manifests, sources
+rig doctor    # what is missing: tools, cluster or daemon, variables, ports, components
 rig up        # everything, in dependency order
 rig           # the terminal UI; ? lists the keys of every screen
 ```

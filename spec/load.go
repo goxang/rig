@@ -110,9 +110,10 @@ func LoadWith(file, env string, overrides map[string]string) (*Project, *Environ
 		}
 		return "", false
 	}
-	expandNode(&root, lookup)
+	unset := map[string]bool{}
+	expandTop(&root, env, lookup, func(name string) { unset[name] = true })
 
-	p := &Project{File: file, Dir: filepath.Dir(file)}
+	p := &Project{File: file, Dir: filepath.Dir(file), Unset: keys(unset)}
 	if err := root.Decode(p); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", file, err)
 	}
@@ -282,7 +283,10 @@ func pickEnv(env, def string, have []string) string {
 var varRe = regexp.MustCompile(`\$\$|\$\{([A-Za-z_][A-Za-z0-9_.]*)(:-([^}]*))?\}`)
 
 // Expand replaces ${NAME} and ${NAME:-default}; $$ is a literal $. Unknown names stay as written.
-func Expand(s string, lookup func(string) (string, bool)) string {
+func Expand(s string, lookup func(string) (string, bool)) string { return expand(s, lookup, nil) }
+
+// expand is Expand telling unset the names it leaves as written.
+func expand(s string, lookup func(string) (string, bool), unset func(string)) string {
 	if !strings.Contains(s, "$") {
 		return s
 	}
@@ -300,17 +304,47 @@ func Expand(s string, lookup func(string) (string, bool)) string {
 		if v, ok := lookup(g[1]); ok {
 			return v
 		}
+		if unset != nil {
+			unset(g[1])
+		}
 		return m
 	})
 }
 
-func expandNode(n *yaml.Node, lookup func(string) (string, bool)) {
+// expandTop expands the whole file, telling unset the names left unexpanded outside the other
+// environments (whose own vars this environment does not have).
+func expandTop(root *yaml.Node, env string, lookup func(string) (string, bool), unset func(string)) {
+	doc := root
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		doc = doc.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		expandNode(root, lookup, unset)
+		return
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		k, v := doc.Content[i], doc.Content[i+1]
+		if k.Value != "environments" || v.Kind != yaml.MappingNode {
+			expandNode(v, lookup, unset)
+			continue
+		}
+		for j := 0; j+1 < len(v.Content); j += 2 {
+			if v.Content[j].Value == env {
+				expandNode(v.Content[j+1], lookup, unset)
+			} else {
+				expandNode(v.Content[j+1], lookup, nil)
+			}
+		}
+	}
+}
+
+func expandNode(n *yaml.Node, lookup func(string) (string, bool), unset func(string)) {
 	if n.Kind == yaml.ScalarNode {
-		n.Value = Expand(n.Value, lookup)
+		n.Value = expand(n.Value, lookup, unset)
 		return
 	}
 	for _, c := range n.Content {
-		expandNode(c, lookup)
+		expandNode(c, lookup, unset)
 	}
 }
 

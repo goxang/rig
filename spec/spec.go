@@ -59,6 +59,10 @@ type Project struct {
 	TestOrder      []string `yaml:"-"`
 	SectionOrder   []string `yaml:"-"`
 
+	// Unset are the ${NAME}s the file uses (outside other environments) that nothing sets and that
+	// have no :-default: they stay as written.
+	Unset []string `yaml:"-"`
+
 	// Dir is where the project file lives; relative paths in it resolve from here.
 	Dir  string `yaml:"-"`
 	File string `yaml:"-"`
