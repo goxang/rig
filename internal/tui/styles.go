@@ -34,6 +34,10 @@ var (
 	sTabOn     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(cAccent).Bold(true).Padding(0, 1)
 	sTabOff    = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
 	sHeader    = lipgloss.NewStyle().Background(cBar).Foreground(cText)
+	sBand      = lipgloss.NewStyle().Background(cBar)
+	sSubOn     = lipgloss.NewStyle().Foreground(cAccent).Bold(true).Padding(0, 1)
+	sSubOff    = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
+	sSubSep    = lipgloss.NewStyle().Foreground(cPanel).Render("│")
 	sKey       = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
 )
 

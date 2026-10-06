@@ -654,8 +654,8 @@ func (t *servicesTab) view(m *model, w, h int) string {
 	}
 	names := t.sectionNames(m)
 	strip := m.strip("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section)) + sDim.Render("  ⇧←→ · dbl-click marks")
-	body := strip + "\n" + t.list.view(m, 1, 2, w-2, h-3, true)
-	m.zone("svc:mark", 1, 3, 2, t.list.shown)
+	body := strip + "\n" + m.stripRule(0, w-2) + "\n" + t.list.view(m, 1, 3, w-2, h-4, true)
+	m.zone("svc:mark", 1, 4, 2, t.list.shown)
 	return panel(title, body, w, h, true)
 }
 

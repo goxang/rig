@@ -124,6 +124,8 @@ type model struct {
 
 	zones   []zone
 	originY int
+	// stripAt is where the active label of the last strip drawn starts and ends, from its left
+	stripAt [2]int
 	// hx, hy is the cell under the mouse (-1 when unknown), for hover highlights
 	hx, hy  int
 	tabSpan [][2]int
@@ -887,33 +889,51 @@ func (m *model) zoneAt(x, y int) (hit, bool) {
 	return hit{}, false
 }
 
-// strip renders labels as a row of tabs at (x, y) of the tab body, active highlighted; a click on
-// label i arrives as a hit with id "<id>:<i>" (stripHit reads it back).
+// strip renders labels as a row of sub-tabs at (x, y) of the tab body, set apart from the screen
+// tabs: the active one in accent, the others dim, divided by bars; stripRule underlines it. A click
+// on label i arrives as a hit with id "<id>:<i>" (stripHit reads it back).
 func (m *model) strip(id string, x, y int, labels []string, active int) string {
 	var b strings.Builder
+	start := x
+	m.stripAt = [2]int{}
 	for i, l := range labels {
+		if i > 0 {
+			b.WriteString(sSubSep)
+			x++
+		}
 		var p string
 		switch {
 		case i == active:
-			p = sTabOn.Render(l)
-		case m.hovering(x, y, lipgloss.Width(sTabOff.Render(l)), 1):
+			p = sSubOn.Render(l)
+		case m.hovering(x, y, lipgloss.Width(sSubOff.Render(l)), 1):
 			p = sTabHover.Render(l)
 		default:
-			p = sTabOff.Render(l)
+			p = sSubOff.Render(l)
 		}
 		w := lipgloss.Width(p)
 		m.zone(fmt.Sprintf("%s:%d", id, i), x, y, w, 1)
+		if i == active {
+			m.stripAt = [2]int{x - start, x - start + w}
+		}
 		x += w
 		b.WriteString(p)
 	}
 	return b.String()
 }
 
-// withStrip puts a row of tabs above a screen's body, with a separator rule between them; the
-// body is drawn h-2 high and its zones shift down under the strip and rule.
+// stripRule is the line under the last strip drawn, lead cells in: thin, heavy accent under the
+// active label.
+func (m *model) stripRule(lead, w int) string {
+	a, b := min(lead+m.stripAt[0], w), min(lead+m.stripAt[1], w)
+	thin := lipgloss.NewStyle().Foreground(cPanel)
+	return thin.Render(strings.Repeat("─", a)) + sKey.Render(strings.Repeat("━", b-a)) + thin.Render(strings.Repeat("─", w-b))
+}
+
+// withStrip puts a row of sub-tabs above a screen's body, underlined; the body is drawn h-2 high
+// and its zones shift down under the strip and rule.
 func (m *model) withStrip(id string, labels []string, active, w, h int, body func(h int) string) string {
 	s := " " + m.strip(id, 1, 0, labels, active)
-	rule := lipgloss.NewStyle().Foreground(cPanel).Render(strings.Repeat("─", w))
+	rule := m.stripRule(1, w)
 	m.originY += 2
 	b := body(h - 2)
 	m.originY -= 2
@@ -1519,16 +1539,17 @@ func (m *model) tabBar() string {
 		case i == m.active:
 			p = sTabOn.Render(key + " " + name)
 		case m.hy == 1 && m.hx >= x && m.hx < x+lipgloss.Width(sTabOff.Render(key+" "+name)) && m.picker == nil:
-			p = " " + sKey.Render(key) + sTabHover.Padding(0).Render(" "+name) + " "
+			p = sBand.Render(" ") + sKey.Background(cBar).Render(key) + sTabHover.Background(cBar).Padding(0).Render(" "+name) + sBand.Render(" ")
 		default:
-			p = sTabOff.Render(sKey.Render(key) + " " + name)
+			p = sBand.Render(" ") + sKey.Background(cBar).Render(key) + sBand.Foreground(cDim).Render(" "+name+" ")
 		}
 		w := lipgloss.Width(p)
 		m.tabSpan = append(m.tabSpan, [2]int{x, x + w})
 		x += w
 		parts = append(parts, p)
 	}
-	return truncate(strings.Join(parts, ""), m.w)
+	bar := truncate(strings.Join(parts, ""), m.w)
+	return bar + sBand.Render(strings.Repeat(" ", max(0, m.w-lipgloss.Width(bar))))
 }
 
 func (m *model) footer() string {

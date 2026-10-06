@@ -1041,8 +1041,8 @@ func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w,
 		for _, v := range brokerViews {
 			labels = append(labels, v[0])
 		}
-		strip = m.strip("dq:view", x+1, 1, labels, t.qview) + "\n"
-		stripH = 1
+		strip = m.strip("dq:view", x+1, 1, labels, t.qview) + "\n" + m.stripRule(0, w-2) + "\n"
+		stripH = 2
 	}
 	if n := len(t.qmarked); n > 0 {
 		marked := 0
