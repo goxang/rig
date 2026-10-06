@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/goxang/rig/adapters/loadgen"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/plugin"
@@ -31,7 +32,7 @@ type Options struct {
 type Gen struct {
 	opt  Options
 	env  core.Env
-	rate float64
+	rate loadgen.Rate
 }
 
 func New(env core.Env, c *spec.Component) (any, error) {
@@ -67,13 +68,13 @@ func (g *Gen) Stop(ctx context.Context) error {
 func (g *Gen) SetRate(ctx context.Context, rps float64) error {
 	_, err := g.run(ctx, strings.ReplaceAll(g.opt.Rate, "{rate}", strconv.FormatFloat(rps, 'f', -1, 64)))
 	if err == nil {
-		g.rate = rps
+		g.rate.Set(rps)
 	}
 	return err
 }
 
 func (g *Gen) Status(ctx context.Context) (core.LoadStatus, error) {
-	st := core.LoadStatus{Rate: g.rate}
+	st := core.LoadStatus{Rate: g.rate.Get()}
 	if g.opt.Status == "" {
 		return st, nil
 	}

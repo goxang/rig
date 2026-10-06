@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goxang/rig/adapters/loadgen"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/plugin"
 	"github.com/goxang/rig/spec"
@@ -38,8 +39,9 @@ type Gen struct {
 	env    core.Env
 	client *http.Client
 
+	rate loadgen.Rate
+
 	mu      sync.Mutex
-	rate    float64
 	cancel  context.CancelFunc
 	running bool
 
@@ -65,7 +67,7 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	if g.opt.Timeout == 0 {
 		g.opt.Timeout = 10 * time.Second
 	}
-	g.rate = g.opt.Rate
+	g.rate.Set(g.opt.Rate)
 	g.client = &http.Client{Timeout: g.opt.Timeout, Transport: &http.Transport{MaxIdleConnsPerHost: g.opt.MaxInFly, Proxy: nil}}
 	return g, nil
 }
@@ -110,16 +112,8 @@ func (g *Gen) Stop(context.Context) error {
 func (g *Gen) Close() error { return g.Stop(context.Background()) }
 
 func (g *Gen) SetRate(_ context.Context, rps float64) error {
-	g.mu.Lock()
-	g.rate = rps
-	g.mu.Unlock()
+	g.rate.Set(rps)
 	return nil
-}
-
-func (g *Gen) currentRate() float64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.rate
 }
 
 // loop releases requests on a schedule computed from the rate, catching up when a tick runs late.
@@ -133,7 +127,7 @@ func (g *Gen) loop(ctx context.Context, url string) {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			debt += now.Sub(last).Seconds() * g.currentRate()
+			debt += now.Sub(last).Seconds() * g.rate.Get()
 			last = now
 			for ; debt >= 1; debt-- {
 				if g.inflight.Load() >= int64(g.opt.MaxInFly) {
@@ -181,8 +175,9 @@ func (g *Gen) fire(ctx context.Context, url string) {
 
 func (g *Gen) Status(context.Context) (core.LoadStatus, error) {
 	g.mu.Lock()
-	st := core.LoadStatus{Running: g.running, Rate: g.rate}
+	running := g.running
 	g.mu.Unlock()
+	st := core.LoadStatus{Running: running, Rate: g.rate.Get()}
 	st.Sent, st.Failed = g.sent.Load(), g.failed.Load()
 	st.Latency = g.lat.percentiles()
 	st.Extra = map[string]string{"in_flight": fmt.Sprint(g.inflight.Load()), "target": g.opt.Target}
