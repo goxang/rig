@@ -77,8 +77,11 @@ func (r *Cache) Browse(ctx context.Context, path []string) (core.Table, bool, er
 // QueryAt runs a command against the database the path starts at (db0 when none).
 func (r *Cache) QueryAt(ctx context.Context, path []string, q string) (core.Table, error) {
 	args, err := splitArgs(q)
-	if err != nil || len(args) == 0 {
-		return core.Table{}, fmt.Errorf("empty command")
+	if err != nil {
+		return core.Table{}, err
+	}
+	if len(args) == 0 {
+		return core.Table{}, fmt.Errorf("give a redis command, e.g. GET key")
 	}
 	if unsafe[strings.ToUpper(args[0])] && !r.opt.Unsafe {
 		return core.Table{}, fmt.Errorf("%s is blocked; set unsafe: true on the component to allow it", strings.ToUpper(args[0]))

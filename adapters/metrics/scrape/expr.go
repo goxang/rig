@@ -606,7 +606,7 @@ func (p *parser) grouping(a *agg) error {
 func (p *parser) unary() (node, error) {
 	p.space()
 	if p.pos >= len(p.s) {
-		return nil, fmt.Errorf("unexpected end")
+		return nil, fmt.Errorf("query %q ends where a value was expected", p.s)
 	}
 	c := p.s[p.pos]
 	if c == '(' {
@@ -783,7 +783,7 @@ func (p *parser) selector(name string) (*selector, error) {
 	if p.pos < len(p.s) && p.s[p.pos] == '[' {
 		end := strings.IndexByte(p.s[p.pos:], ']')
 		if end < 0 {
-			return nil, fmt.Errorf("unclosed [")
+			return nil, fmt.Errorf("%q: range selector opened with [ but never closed with ]", p.s)
 		}
 		d, err := parseDuration(p.s[p.pos+1 : p.pos+end])
 		if err != nil {
@@ -793,7 +793,7 @@ func (p *parser) selector(name string) (*selector, error) {
 		p.pos += end + 1
 	}
 	if len(s.matchers) == 0 {
-		return nil, fmt.Errorf("empty selector")
+		return nil, fmt.Errorf("%q: selector has no label matchers, e.g. {job=\"x\"}", p.s)
 	}
 	return s, nil
 }
@@ -836,7 +836,7 @@ func (p *parser) str() (string, error) {
 	q := p.s[p.pos]
 	end := strings.IndexByte(p.s[p.pos+1:], q)
 	if end < 0 {
-		return "", fmt.Errorf("unclosed string")
+		return "", fmt.Errorf("%q: string starting at %d has no closing %c", p.s, p.pos, q)
 	}
 	v := p.s[p.pos+1 : p.pos+1+end]
 	p.pos += end + 2

@@ -525,10 +525,10 @@ func mcpTools() []mcpTool {
 			argv: func(a map[string]any) ([]string, error) {
 				args := list(a, "args")
 				if len(args) == 0 {
-					return nil, fmt.Errorf("args is required")
+					return nil, fmt.Errorf("args is required: give the rig command line as a list, e.g. [\"do\", \"runtime\", \"events\"]")
 				}
 				if args[0] == "mcp" || len(args) == 0 {
-					return nil, fmt.Errorf("not from inside mcp")
+					return nil, fmt.Errorf("rig mcp cannot start another mcp server from inside itself")
 				}
 				return args, nil
 			}},

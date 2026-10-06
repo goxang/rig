@@ -161,7 +161,7 @@ func (a *App) Component(name string) (any, error) {
 	a.mu.Unlock()
 	e.once.Do(func() {
 		if !ok {
-			e.err = fmt.Errorf("no component %q", name)
+			e.err = fmt.Errorf("no component %q in %s (have %v)", name, a.Spec.File, a.componentNames())
 			return
 		}
 		e.v, e.adapter, e.err = plugin.New(a, c)
@@ -189,7 +189,7 @@ func (a *App) Kind(name string) (core.Kind, string, error) {
 	c, ok := a.Spec.Components[name]
 	a.mu.Unlock()
 	if !ok {
-		return "", "", fmt.Errorf("no component %q", name)
+		return "", "", fmt.Errorf("no component %q in %s (have %v)", name, a.Spec.File, a.componentNames())
 	}
 	ad, err := plugin.Resolve(c)
 	return ad.Kind, ad.Type, err

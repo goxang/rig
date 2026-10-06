@@ -218,7 +218,7 @@ func dataCommands() []*cobra.Command {
 			}
 			b, ok := v.(core.Browser)
 			if !ok {
-				return fmt.Errorf("%s cannot be walked", args[0])
+				return fmt.Errorf("%s does not support browsing (no Browser adapter): use `rig query` for it instead", args[0])
 			}
 			t, _, err := b.Browse(ctx, args[1:])
 			if err != nil {

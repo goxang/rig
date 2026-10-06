@@ -76,7 +76,7 @@ func (g *Gen) scale(ctx context.Context, n int) error {
 	for _, name := range g.opt.Services {
 		s, ok := g.env.Project().Services[name]
 		if !ok {
-			return fmt.Errorf("no service %q", name)
+			return fmt.Errorf("no service %q in the load generator's services list: check rig.yaml", name)
 		}
 		rt := g.env.Runtime()
 		if n > 0 {

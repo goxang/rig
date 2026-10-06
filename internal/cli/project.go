@@ -427,7 +427,7 @@ func printRelations(set *manifest.Set, id string) error {
 		}
 	}
 	if o == nil {
-		return fmt.Errorf("no object %q", id)
+		return fmt.Errorf("no object %q: give its name, or kind/name when the name is ambiguous", id)
 	}
 	in, outE := set.In(o.ID()), set.Out(o.ID())
 	fmt.Println(viz.RelationGraph(o.ID(), toRel(in, true), toRel(outE, false)))

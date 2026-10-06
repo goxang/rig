@@ -98,7 +98,7 @@ func (r *Cache) Set(ctx context.Context, path []string, t core.Table, row, col i
 	if len(path) == 1 {
 		ok, err := c.RenameNX(ctx, cell[0], value).Result()
 		if err == nil && !ok {
-			err = fmt.Errorf("%s already exists", value)
+			err = fmt.Errorf("cannot rename %s to %s: a key named %s already exists", cell[0], value, value)
 		}
 		return err
 	}

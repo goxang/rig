@@ -354,7 +354,7 @@ func (t *testsTab) toggle(m *model, opt string) tea.Cmd {
 		ask("count (each test n times; 1 skips the cache, 0 go's default)", strconv.Itoa(o.Count), func(v string) error {
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 0 {
-				return fmt.Errorf("a number")
+				return fmt.Errorf("count must be a whole number >= 0, got %q", v)
 			}
 			o.Count = n
 			return nil

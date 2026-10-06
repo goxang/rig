@@ -74,7 +74,11 @@ func (s *SSH) host(name string) (Host, error) {
 			return h, nil
 		}
 	}
-	return Host{}, fmt.Errorf("no host %q", name)
+	names := make([]string, len(s.opt.Hosts))
+	for i, h := range s.opt.Hosts {
+		names[i] = h.Name
+	}
+	return Host{}, fmt.Errorf("no host %q (have %v)", name, names)
 }
 
 func (h Host) args(tty bool) []string {

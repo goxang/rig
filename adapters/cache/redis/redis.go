@@ -77,7 +77,7 @@ var unsafe = map[string]bool{"FLUSHALL": true, "FLUSHDB": true, "CONFIG": true, 
 
 func (r *Cache) Do(ctx context.Context, args ...string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("empty command")
+		return "", fmt.Errorf("give a redis command, e.g. GET key")
 	}
 	if unsafe[strings.ToUpper(args[0])] && !r.opt.Unsafe {
 		return "", fmt.Errorf("%s is blocked; set unsafe: true on the component to allow it", strings.ToUpper(args[0]))
@@ -228,7 +228,7 @@ func splitArgs(s string) ([]string, error) {
 		}
 	}
 	if quote != 0 {
-		return nil, fmt.Errorf("unclosed quote")
+		return nil, fmt.Errorf("%q: quote opened with %c is never closed", s, quote)
 	}
 	if in {
 		out = append(out, cur.String())

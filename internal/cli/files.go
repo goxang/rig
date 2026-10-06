@@ -108,7 +108,7 @@ func fileAction(root string, deny []string, args map[string]any) (string, error)
 			return "", err
 		}
 		if _, err := os.Stat(to); err == nil {
-			return "", fmt.Errorf("%s exists", toRel)
+			return "", fmt.Errorf("%s exists: move elsewhere, or delete it first", toRel)
 		}
 		if kept := keptInside(root, deny, path); kept != "" || path == root {
 			return "", fmt.Errorf("refused: %s holds %s, which is kept from assistants", rel, kept)
