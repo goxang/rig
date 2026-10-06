@@ -72,7 +72,7 @@ func (t *testsTab) hints() [][2]string {
 	if t.outFocus {
 		return [][2]string{{"↑↓ pgup pgdn", "scroll"}, {"g G", "top/end"}, {"y", "copy"}, {"esc o", "back"}}
 	}
-	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
+	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"[ ]", "suite"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
 		{"i", "filter: all, failed, passed, …"}, {"enter", "fold/output"}, {"+ -", "unfold/fold all"}, {"b", "benchmarks"}, {"h", "saved runs"}, {"w", "write report"}, {"y Y", "copy"}}
 }
 
@@ -217,6 +217,20 @@ func (t *testsTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			t.cancel()
 			m.setStatus("stopping tests…", false)
 		}
+	case "[", "]", "shift+left", "shift+right":
+		names := t.suites(m)
+		if len(names) == 0 {
+			return nil
+		}
+		n := len(names)
+		i := min(t.suite, n-1)
+		if s := k.String(); s == "[" || s == "shift+left" {
+			i = (i - 1 + n) % n
+		} else {
+			i = (i + 1) % n
+		}
+		t.suite, t.outOff, t.outFollow = i, 0, true
+		return t.load(m)
 	case "i":
 		t.filter = (t.filter + 1) % filterBench
 	case "b":
