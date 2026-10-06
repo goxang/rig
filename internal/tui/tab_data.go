@@ -122,10 +122,13 @@ func (t *dataTab) hints() [][2]string {
 	case t.focus == 2:
 		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
 	case c.kind == string(core.KindMessaging) && t.qview > 0:
-		return [][2]string{{"[ ]", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"esc ←", "components"}}
+		return [][2]string{{"⇧←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"esc ←", "components"}}
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"enter", "queue details"}, {"m", "peek messages"}, {"space a", "mark, mark all"}, {"P", "purge marked/selected"}, {"X", "purge every queue shown"},
-			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"[ ]", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"< >", "sort"}, {"esc ←", "components"}}
+			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"⇧←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"< >", "sort"}, {"esc ←", "components"}}
+	}
+	if t.query != "" {
+		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"< >", "sort"}}
 	}
 	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"< >", "sort"}}
 	if t.editable(c) {
@@ -653,6 +656,15 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		switch {
 		case t.query != "":
 			t.askQuery(m, c, t.queryAt, t.query, "")
+			if m.prompt != nil {
+				// a second esc leaves the query for the walk it ran on
+				m.prompt.escape = func() tea.Cmd {
+					t.query, t.filter = "", ""
+					t.right = newGrid("dright")
+					t.restore = t.picked[t.place(c)]
+					return t.load(m)
+				}
+			}
 		case t.filter != "":
 			t.filter = ""
 			t.fill()

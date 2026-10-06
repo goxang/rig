@@ -153,6 +153,8 @@ type prompt struct {
 	// popup draws the input as a box over the screen, wrapped (queries); all is ctrl+a's
 	// select-all, which the next key copies, replaces or drops
 	popup, all bool
+	// escape, when set, runs when esc drops the prompt
+	escape func() tea.Cmd
 }
 
 type (
@@ -912,7 +914,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		}
 		switch k.String() {
 		case "esc":
+			p := m.prompt
 			m.prompt = nil
+			if p.escape != nil {
+				return p.escape()
+			}
 			return nil
 		case "enter":
 			p := m.prompt
@@ -1552,7 +1558,7 @@ var screenHelp = map[string]string{
 // unchanged from before, just no longer rendered as one fixed block.
 func (m *model) helpLines() []string {
 	rows := [][2]string{
-		{"1-9 0 `  tab", "switch screen (or click its name)"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
+		{"1-9 0 `  tab ⇧tab  alt+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"< >  I", "sort column, invert (or click a header)"},
 		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
