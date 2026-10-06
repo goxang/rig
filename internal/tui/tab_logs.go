@@ -35,8 +35,21 @@ type logsTab struct {
 	cancel  context.CancelFunc
 	ch      <-chan core.LogLine
 	err     string
-	// inspect shows the picked line (or the newest) field by field
+	// inspect shows the picked line (or the newest) field by field; inTree says the keys walk its
+	// fields rather than the log lines beside it
 	inspect *jsonTree
+	inTree  bool
+	// id names its zones and stream messages: "logs" for the Logs screen, "svc" when a service page
+	// embeds it, following that one service (fixed)
+	id    string
+	fixed bool
+}
+
+func (t *logsTab) zone(part string) string {
+	if t.id == "" {
+		return "logs:" + part
+	}
+	return t.id + ":" + part
 }
 
 func logsUI(m *model) *spec.LogsUI {
@@ -47,12 +60,14 @@ func logsUI(m *model) *spec.LogsUI {
 }
 
 type logBatchMsg struct {
+	id          string
 	gen, stream int
 	lines       []core.LogLine
 	done        bool
 }
 
 type logStartMsg struct {
+	id          string
 	gen, stream int
 	ch          <-chan core.LogLine
 	err         error
@@ -61,9 +76,12 @@ type logStartMsg struct {
 func (t *logsTab) name() string { return "Logs" }
 func (t *logsTab) typing() bool { return false }
 func (t *logsTab) hints() [][2]string {
+	if t.inspect != nil && !t.inTree {
+		return [][2]string{{"↑↓ pgup pgdn", "previous/next log line"}, {"enter →", "into the fields"}, {"Y", "copy the line"}, {"esc v", "close"}}
+	}
 	if t.inspect != nil {
 		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
-			{"f", "filter lines by this field"}, {"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
+			{"f", "filter lines by this field"}, {"y", "copy value"}, {"Y", "copy the line"}, {"esc", "back to the lines"}, {"v", "close"}}
 	}
 	return [][2]string{{"f", "pick services"}, {"/", "filter: text, regex, a.b=value"}, {"↑↓ click", "pick a line"}, {"enter v", "inspect the line"}, {"w", "wrap"}, {"s", "structured/raw"},
 		{"h", "fields shown"}, {"i", "pick instances"}, {"p", "pause"}, {"pgup pgdn ←→", "page, sideways"},
@@ -76,7 +94,7 @@ func (t *logsTab) interval() time.Duration { return time.Second }
 // It does not open the picker itself, which would take the keys that switch screens.
 func (t *logsTab) open(m *model) tea.Cmd {
 	if t.log == nil {
-		t.log = newLogView("logs:body", logCap, logsUI(m))
+		t.log = newLogView(t.zone("body"), logCap, logsUI(m))
 	}
 	if len(t.services) == 0 {
 		return nil
@@ -137,13 +155,13 @@ func (t *logsTab) start(m *model) tea.Cmd {
 	}
 	t.stream++
 	if t.log == nil {
-		t.log = newLogView("logs:body", logCap, logsUI(m))
+		t.log = newLogView(t.zone("body"), logCap, logsUI(m))
 	}
 	t.log.reset()
 	t.err = ""
 	ctx, cancel := context.WithCancel(m.ctx)
 	t.cancel = cancel
-	a, gen, stream := m.app, m.gen, t.stream
+	a, gen, stream, id := m.app, m.gen, t.stream, t.id
 	q := core.LogQuery{Follow: true, Tail: 200, Match: t.grep, Services: t.services}
 	if _, err := regexp.Compile(t.grep); err == nil {
 		q.Regex = true
@@ -160,19 +178,19 @@ func (t *logsTab) start(m *model) tea.Cmd {
 	return func() tea.Msg {
 		src, _, err := engine.Get[core.LogSource](a, core.KindLogs, "")
 		if err != nil {
-			return logStartMsg{gen: gen, stream: stream, err: err}
+			return logStartMsg{id: id, gen: gen, stream: stream, err: err}
 		}
 		ch, err := src.Logs(ctx, q)
-		return logStartMsg{gen: gen, stream: stream, ch: ch, err: err}
+		return logStartMsg{id: id, gen: gen, stream: stream, ch: ch, err: err}
 	}
 }
 
 // next waits for log lines and hands them over in batches, so a chatty service does not flood the UI loop.
-func next(gen, stream int, ch <-chan core.LogLine) tea.Cmd {
+func next(id string, gen, stream int, ch <-chan core.LogLine) tea.Cmd {
 	return func() tea.Msg {
 		first, ok := <-ch
 		if !ok {
-			return logBatchMsg{gen: gen, stream: stream, done: true}
+			return logBatchMsg{id: id, gen: gen, stream: stream, done: true}
 		}
 		batch := []core.LogLine{first}
 		deadline := time.After(100 * time.Millisecond)
@@ -180,21 +198,21 @@ func next(gen, stream int, ch <-chan core.LogLine) tea.Cmd {
 			select {
 			case l, ok := <-ch:
 				if !ok {
-					return logBatchMsg{gen: gen, stream: stream, lines: batch, done: true}
+					return logBatchMsg{id: id, gen: gen, stream: stream, lines: batch, done: true}
 				}
 				batch = append(batch, l)
 			case <-deadline:
-				return logBatchMsg{gen: gen, stream: stream, lines: batch}
+				return logBatchMsg{id: id, gen: gen, stream: stream, lines: batch}
 			}
 		}
-		return logBatchMsg{gen: gen, stream: stream, lines: batch}
+		return logBatchMsg{id: id, gen: gen, stream: stream, lines: batch}
 	}
 }
 
 func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case logStartMsg:
-		if msg.gen != m.gen || msg.stream != t.stream {
+		if msg.id != t.id || msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
 		if msg.err != nil {
@@ -202,20 +220,60 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		t.ch = msg.ch
-		return next(msg.gen, msg.stream, msg.ch)
+		return next(t.id, msg.gen, msg.stream, msg.ch)
 	case logBatchMsg:
-		if msg.gen != m.gen || msg.stream != t.stream {
+		if msg.id != t.id || msg.gen != m.gen || msg.stream != t.stream {
 			return nil
 		}
 		t.log.add(t.filter(msg.lines))
 		if msg.done {
 			return nil
 		}
-		return next(msg.gen, msg.stream, t.ch)
+		return next(t.id, msg.gen, msg.stream, t.ch)
 	case tea.KeyMsg:
+		return t.key(m, msg)
+	}
+	return nil
+}
+
+// key handles a key on the log; false (nil cmd) also when the key is not a log key, see handled.
+func (t *logsTab) key(m *model, msg tea.KeyMsg) tea.Cmd {
+	cmd, _ := t.keyHandled(m, msg)
+	return cmd
+}
+
+// keyHandled is key, saying whether the key was the log's: a service page embedding the log
+// offers the rest to its own keys.
+func (t *logsTab) keyHandled(m *model, msg tea.KeyMsg) (tea.Cmd, bool) {
+	{
+		if t.inspect != nil && !t.inTree {
+			switch s := msg.String(); s {
+			case "esc", "v", "q":
+				t.inspect = nil
+			case "enter", "right", "l", "tab":
+				t.inTree = true
+			case "Y":
+				if l, ok := t.log.picked(); ok {
+					copyText(l.Text)
+					m.setStatus("copied the line", false)
+				}
+			case "up", "down", "k", "j", "pgup", "pgdown", "home", "J", "K", "ctrl+up", "ctrl+down":
+				step := map[string]string{"J": "down", "K": "up", "ctrl+down": "down", "ctrl+up": "up"}[s]
+				if step == "" {
+					step = s
+				}
+				t.log.moveCursor(step)
+				t.inspect = openInspect(m, t.log, t.zone("inspect"), t.inspect)
+			default:
+				return nil, false
+			}
+			return nil, true
+		}
 		if t.inspect != nil {
 			switch msg.String() {
-			case "esc", "v", "q":
+			case "esc":
+				t.inTree = false
+			case "v", "q":
 				t.inspect = nil
 			case "y":
 				copyText(t.inspect.current().text())
@@ -232,17 +290,17 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				}
 				t.grep, t.inspect = term, nil
 				m.setStatus("filter: "+term+" (/ edits it)", false)
-				return t.start(m)
+				return t.start(m), true
 			case "J", "ctrl+down":
 				t.log.moveCursor("down")
-				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
+				t.inspect = openInspect(m, t.log, t.zone("inspect"), t.inspect)
 			case "K", "ctrl+up":
 				t.log.moveCursor("up")
-				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
+				t.inspect = openInspect(m, t.log, t.zone("inspect"), t.inspect)
 			default:
 				t.inspect.key(msg)
 			}
-			return nil
+			return nil, true
 		}
 		switch msg.String() {
 		case "w":
@@ -252,14 +310,19 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "h":
 			pickFields(m, t.log)
 		case "v":
-			t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
+			t.openInspect(m)
 		case "enter":
 			if _, ok := t.log.picked(); ok {
-				t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
-			} else {
+				t.openInspect(m)
+			} else if !t.fixed {
 				t.pickServices(m)
+			} else {
+				return nil, false
 			}
 		case "f":
+			if t.fixed {
+				return nil, false
+			}
 			t.pickServices(m)
 		case "i":
 			t.pickInstance(m)
@@ -270,17 +333,21 @@ func (t *logsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return t.start(m)
 			})
 		default:
-			if t.log != nil {
-				t.log.key(m, msg, true)
+			if t.log == nil || !t.log.key(m, msg, true) {
+				return nil, false
 			}
 		}
 	}
-	return nil
+	return nil, true
+}
+
+func (t *logsTab) openInspect(m *model) {
+	t.inspect, t.inTree = openInspect(m, t.log, t.zone("inspect"), t.inspect), false
 }
 
 func (t *logsTab) view(m *model, w, h int) string {
 	if len(t.services) == 0 {
-		m.zone("logs:body", 1, 1, w-2, h-2)
+		m.zone(t.zone("body"), 1, 1, w-2, h-2)
 		return panel("logs", sDim.Render("press f (or enter, or click here) to pick the services whose logs to follow"), w, h, true)
 	}
 	title := strings.Join(t.services, ", ")
@@ -301,7 +368,7 @@ func (t *logsTab) view(m *model, w, h int) string {
 		return panel(title, sRed.Render(t.err), w, h, true)
 	}
 	if len(t.log.lines) == 0 {
-		m.zone("logs:body", 1, 1, w-2, h-2)
+		m.zone(t.zone("body"), 1, 1, w-2, h-2)
 		wait := "waiting for log lines…"
 		if t.query != nil {
 			wait = "no line matches " + t.grep + " yet (/ edits the filter)"
@@ -317,19 +384,19 @@ func (t *logsTab) view(m *model, w, h int) string {
 	if t.inspect != nil {
 		iw := min(max(w*3/5, 40), w-20)
 		lw := w - iw
-		left := t.logPanel(m, title, nameW, re, lw, h)
+		left := t.logPanel(m, title, nameW, re, lw, h, !t.inTree)
 		it := "line · " + t.inspect.current().path()
 		if t.inspect.wrap {
 			it += sDim.Render(" ⏎wrap")
 		} else if t.inspect.hoff > 0 {
 			it += sDim.Render(fmt.Sprintf(" ⇢%d", t.inspect.hoff))
 		}
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(it, t.inspect.view(m, lw+1, 1, iw-2, h-2), iw, h, true))
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, panel(it, t.inspect.view(m, lw+1, 1, iw-2, h-2), iw, h, t.inTree))
 	}
-	return t.logPanel(m, title, nameW, re, w, h)
+	return t.logPanel(m, title, nameW, re, w, h, true)
 }
 
-func (t *logsTab) logPanel(m *model, title string, nameW int, re *regexp.Regexp, w, h int) string {
+func (t *logsTab) logPanel(m *model, title string, nameW int, re *regexp.Regexp, w, h int, focused bool) string {
 	body := t.log.render(m, 1, 1, w-2, h-2, func(l core.LogLine) string {
 		who := l.Service
 		if len(t.services) == 1 && l.Instance != "" {
@@ -342,7 +409,7 @@ func (t *logsTab) logPanel(m *model, title string, nameW int, re *regexp.Regexp,
 		}
 		return sDim.Render(l.Time.Local().Format("15:04:05.000")) + " " + svc + " " + text
 	})
-	return panel(title, body, w, h, true)
+	return panel(title, body, w, h, focused)
 }
 
 func colorFor(name string) lipgloss.Color {
@@ -613,9 +680,10 @@ func (t *logsTab) grepRe() *regexp.Regexp {
 // following one service, only its instance).
 func (t *logsTab) click(m *model, h hit) tea.Cmd {
 	if t.inspect != nil && t.inspect.click(h) {
+		t.inTree = true
 		return nil
 	}
-	if h.id != "logs:body" {
+	if h.id != t.zone("body") {
 		return nil
 	}
 	if len(t.services) == 0 {
@@ -627,11 +695,16 @@ func (t *logsTab) click(m *model, h hit) tea.Cmd {
 	}
 	l := t.log.visible[h.y]
 	t.log.cur = t.log.rowLine[h.y]
+	t.log.paused = true
 	if t.inspect != nil {
-		t.inspect = openInspect(m, t.log, "logs:inspect", t.inspect)
+		t.openInspect(m)
 		return nil
 	}
 	if !h.double {
+		return nil
+	}
+	if t.fixed {
+		t.openInspect(m)
 		return nil
 	}
 	switch {
@@ -646,7 +719,7 @@ func (t *logsTab) click(m *model, h hit) tea.Cmd {
 }
 
 func (t *logsTab) drag(m *model, h hit, phase dragPhase) bool {
-	if h.id != "logs:body" || t.log == nil || len(t.services) == 0 {
+	if h.id != t.zone("body") || t.log == nil || len(t.services) == 0 {
 		return false
 	}
 	t.log.drag(m, h, phase)
@@ -658,7 +731,7 @@ func (t *logsTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
 		t.inspect.wheel(up)
 		return nil, true
 	}
-	if h.id != "logs:body" || t.log == nil {
+	if h.id != t.zone("body") || t.log == nil {
 		return nil, false
 	}
 	t.log.wheel(up)

@@ -1024,7 +1024,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	}
 	if m.picker != nil {
 		switch k.String() {
-		case "tab", "shift+tab":
+		case "tab", "shift+tab", "alt+left", "alt+right":
 			m.picker = nil
 		default:
 			return m.picker.key(m, k)

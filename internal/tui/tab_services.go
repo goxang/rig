@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -31,20 +30,13 @@ type servicesTab struct {
 	section  string
 	sections map[string]string
 
-	open_  string // the service being shown, "" for the list
-	pods   *grid
-	log    *logView
-	logFor string
-	// grep filters the open service's own log, same as the Logs tab's /
-	grep    string
-	match   func(string) bool
-	inspect *jsonTree
-	stream  int
-	cancel  context.CancelFunc
-	logErr  string
-	detail  string
-	prof    *profView
-	debug   map[string]core.DebugSession
+	open_ string // the service being shown, "" for the list
+	pods  *grid
+	// lt is the open service's log: the Logs screen itself, pinned to that service
+	lt     *logsTab
+	detail string
+	prof   *profView
+	debug  map[string]core.DebugSession
 	// desired is each service's last seen replica count; scaled the last change of it, so a
 	// scale by an autoscaler (or anyone) shows on the list for a while
 	desired map[string]int
@@ -86,19 +78,6 @@ func (t *servicesTab) scaleNote(svc string) (arrow, note string) {
 	return arrow, fmt.Sprintf("scaled %d→%d %s ago", c.from, c.to, shortAge(time.Since(c.at)))
 }
 
-type svcLogStart struct {
-	gen, stream int
-	ch          <-chan core.LogLine
-	err         error
-}
-
-type svcLogBatch struct {
-	gen, stream int
-	lines       []core.LogLine
-	done        bool
-	ch          <-chan core.LogLine
-}
-
 // resultMsg carries an operation's outcome into the detail pane (and the footer).
 type resultMsg struct {
 	gen     int
@@ -127,22 +106,22 @@ func (t *servicesTab) open(m *model) tea.Cmd {
 	t.pods.simple = []int{0, 1, 3, 5}
 	t.marked = map[string]bool{}
 	t.debug = map[string]core.DebugSession{}
-	t.log = newLogView("svc:log", 2000, logsUI(m))
+	t.lt = &logsTab{id: "svc", fixed: true, log: newLogView("svc:body", 2000, logsUI(m))}
 	return nil
 }
 
 func (t *servicesTab) refresh(m *model) tea.Cmd { return nil }
 
 func (t *servicesTab) hints() [][2]string {
-	if t.inspect != nil {
-		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
-			{"y", "copy value"}, {"Y", "copy the line"}, {"esc v", "close"}}
+	if t.open_ != "" && t.lt.inspect != nil {
+		return t.lt.hints()
 	}
 	if t.open_ != "" {
-		return [][2]string{{"esc", "back"}, {"enter v", "logs of instance / inspect picked line"}, {"click", "pick a log line"}, {"/", "filter the log"}, {"w", "wrap"}, {"r", "restart"},
-			{"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
+		return [][2]string{{"esc", "back"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
+			{"w", "wrap"}, {"s", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
+			{"r", "restart"}, {"u/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
-			{"shift+↑↓ ←→", "scroll the log, sideways"}, {"drag", "select log text: copied (past an edge scrolls)"}, {"y/Y", "copy shown/all"}, {"G", "follow again"}, {"c", "clear the log"}}
+			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
 		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"< >", "sort"}}
@@ -202,24 +181,10 @@ func (t *servicesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.prof = msg.profile
 		}
 		return nil
-	case svcLogStart:
-		if msg.gen != m.gen || msg.stream != t.stream {
-			return nil
+	case logStartMsg, logBatchMsg:
+		if t.lt != nil {
+			return t.lt.update(m, msg)
 		}
-		if msg.err != nil {
-			t.logErr = msg.err.Error()
-			return nil
-		}
-		return nextSvcLog(msg.gen, msg.stream, msg.ch)
-	case svcLogBatch:
-		if msg.gen != m.gen || msg.stream != t.stream {
-			return nil
-		}
-		t.log.add(t.filterLog(msg.lines))
-		if msg.done {
-			return nil
-		}
-		return nextSvcLog(msg.gen, msg.stream, msg.ch)
 	case tea.KeyMsg:
 		if t.open_ != "" {
 			return t.detailKey(m, msg)
@@ -412,67 +377,18 @@ func each(names []string, f func(string) error) error {
 
 // openService shows one service and streams its log (or one instance's) until it is closed.
 func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
-	t.closeLogs()
-	t.open_, t.logErr, t.detail = name, "", ""
-	t.log.reset()
-	t.logFor = instance
-	t.stream++
-	q := core.LogQuery{Match: t.grep}
-	if _, err := regexp.Compile(t.grep); err == nil {
-		q.Regex = true
+	t.open_, t.detail = name, ""
+	t.lt.services, t.lt.instances, t.lt.inspect = []string{name}, nil, nil
+	if instance != "" {
+		t.lt.instances = []string{instance}
 	}
-	t.match, _ = q.Matcher()
-	ctx, cancel := context.WithCancel(m.ctx)
-	t.cancel = cancel
-	a, gen, stream := m.app, m.gen, t.stream
-	return func() tea.Msg {
-		ch, err := a.Logs(ctx, name, core.LogOptions{Follow: true, Tail: 200, Instance: instance})
-		return svcLogStart{gen: gen, stream: stream, ch: ch, err: err}
-	}
-}
-
-// filter keeps the lines t.grep matches, the same way the generic log source filters a plain-text
-// or regex query (see adapters/logs/runtime) rather than per-service log stream.
-func (t *servicesTab) filterLog(lines []core.LogLine) []core.LogLine {
-	if t.match == nil {
-		return lines
-	}
-	var out []core.LogLine
-	for _, l := range lines {
-		if t.match(l.Text) {
-			out = append(out, l)
-		}
-	}
-	return out
+	return t.lt.start(m)
 }
 
 func (t *servicesTab) closeLogs() {
-	if t.cancel != nil {
-		t.cancel()
-		t.cancel = nil
-	}
-}
-
-func nextSvcLog(gen, stream int, ch <-chan core.LogLine) tea.Cmd {
-	return func() tea.Msg {
-		first, ok := <-ch
-		if !ok {
-			return svcLogBatch{gen: gen, stream: stream, done: true}
-		}
-		batch := []core.LogLine{first}
-		deadline := time.After(100 * time.Millisecond)
-		for len(batch) < 500 {
-			select {
-			case l, ok := <-ch:
-				if !ok {
-					return svcLogBatch{gen: gen, stream: stream, lines: batch, done: true}
-				}
-				batch = append(batch, l)
-			case <-deadline:
-				return svcLogBatch{gen: gen, stream: stream, lines: batch, ch: ch}
-			}
-		}
-		return svcLogBatch{gen: gen, stream: stream, lines: batch, ch: ch}
+	if t.lt != nil && t.lt.cancel != nil {
+		t.lt.cancel()
+		t.lt.cancel = nil
 	}
 }
 
@@ -490,33 +406,12 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	}
-	if t.inspect != nil {
-		switch k.String() {
-		case "esc", "v", "q":
-			t.inspect = nil
-		case "y":
-			copyText(t.inspect.current().text())
-			m.setStatus("copied "+t.inspect.current().path(), false)
-		case "Y":
-			if l, ok := t.log.picked(); ok {
-				copyText(l.Text)
-				m.setStatus("copied the line", false)
-			}
-		case "J", "ctrl+down":
-			t.log.moveCursor("down")
-			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
-		case "K", "ctrl+up":
-			t.log.moveCursor("up")
-			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
-		default:
-			t.inspect.key(k)
-		}
-		return nil
-	}
-	if t.pods.key(k) {
-		return nil
-	}
 	name := t.open_
+	if t.lt.inspect != nil {
+		if cmd, ok := t.lt.keyHandled(m, k); ok {
+			return cmd
+		}
+	}
 	switch k.String() {
 	case "m":
 		return m.showMetrics(name)
@@ -528,33 +423,11 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 		t.closeLogs()
 		t.open_ = ""
 		return nil
-	case "enter":
-		if _, ok := t.log.picked(); ok {
-			t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
-			return nil
-		}
-		if r, ok := t.pods.current(); ok {
-			inst := r.id
-			if t.logFor == inst {
-				inst = ""
-			}
-			return t.openService(m, name, inst)
-		}
-	case "v":
-		t.inspect = openInspect(m, t.log, "svc:inspect", t.inspect)
-		return nil
-	case "w":
-		t.log.wrap = !t.log.wrap
-		return nil
-	case "/":
-		m.ask("filter this service's log: text or an RE2 regex ((?i) ignores case)", t.grep, func(v string) tea.Cmd {
-			t.grep = strings.TrimSpace(v)
-			return t.openService(m, name, t.logFor)
-		})
-		return nil
 	case "e":
 		inst := ""
-		if r, ok := t.pods.current(); ok {
+		if len(t.lt.instances) > 0 {
+			inst = t.lt.instances[0]
+		} else if r, ok := t.pods.current(); ok {
 			inst = r.id
 		}
 		return t.shell(m, name, inst)
@@ -563,14 +436,26 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "D":
 		return t.toggleDebug(m, name)
-	default:
-		if t.log.key(m, k, false) {
-			t.detail = ""
-			return nil
-		}
-		return t.ops(m, k.String(), []string{name})
+	case "u":
+		return t.ops(m, "s", []string{name})
+	case "a":
+		return t.ops(m, "h", []string{name})
+	case "s", "h":
+		t.detail = ""
 	}
-	return nil
+	if cmd, ok := t.lt.keyHandled(m, k); ok {
+		t.detail = ""
+		return cmd
+	}
+	if k.String() == "enter" {
+		t.lt.pickInstance(m)
+		return nil
+	}
+	switch k.String() {
+	case "s", "h":
+		return nil
+	}
+	return t.ops(m, k.String(), []string{name})
 }
 
 func (t *servicesTab) click(m *model, h hit) tea.Cmd {
@@ -603,16 +488,19 @@ func (t *servicesTab) click(m *model, h hit) tea.Cmd {
 		t.open_ = ""
 		return nil
 	}
-	if t.inspect != nil && t.inspect.click(h) {
-		return nil
-	}
 	if t.prof != nil && t.prof.grid.click(h) {
 		return nil
 	}
-	if t.pods.click(h) && h.double {
-		return t.detailKey(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if t.pods.click(h) {
+		if r, ok := t.pods.current(); ok && h.double {
+			if len(t.lt.instances) == 1 && t.lt.instances[0] == r.id {
+				return t.openService(m, t.open_, "")
+			}
+			return t.openService(m, t.open_, r.id)
+		}
+		return nil
 	}
-	return nil
+	return t.lt.click(m, h)
 }
 
 // shell hands the terminal to `rig exec` for the service; the TUI comes back when it exits.
@@ -811,7 +699,7 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 			age = shortAge(time.Since(in.Started))
 		}
 		id := in.ID
-		if t.logFor == in.ID {
+		if contains(t.lt.instances, in.ID) {
 			id = sAccent.Render("▸ ") + id
 		}
 		rows = append(rows, grow{id: in.ID, cells: []string{stateDot(in.State), id, in.Host, fmt.Sprint(in.Ready), fmt.Sprint(in.Restarts), age, cpuText(in.CPU), bytesText(in.Memory)},
@@ -822,48 +710,18 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	podsBox := panel(fmt.Sprintf("instances · %d", len(rows)), t.pods.view(m, 1, headH+2, w-2, podsH-2, true), w, podsH, true)
 
 	logH := h - headH - podsH - 1
-	src := "all instances"
-	if t.logFor != "" {
-		src = t.logFor
-	}
-	logsW := w
-	if t.inspect != nil {
-		logsW = min(max(w*3/5, 40), w-20)
-	}
-	var body string
-	title := "log · " + src + " · " + t.log.state() + " · drag copies · l: Logs screen"
-	if t.grep != "" {
-		title += " · grep " + t.grep
-	}
+	var logs string
 	switch {
 	case t.prof != nil && t.prof.svc == name:
-		title = fmt.Sprintf("%s profile · %s · ↑↓ < > I sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
-		body = t.prof.view(m, 1, headH+1+podsH+1, logsW-2, logH-2)
+		title := fmt.Sprintf("%s profile · %s · ↑↓ < > I sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
+		logs = panel(title, t.prof.view(m, 1, headH+1+podsH+1, w-2, logH-2), w, logH, true)
 	case t.detail != "":
-		body = t.detail
-	case t.logErr != "":
-		body = sRed.Render(wrap(t.logErr, logsW-4))
-	case len(t.log.lines) == 0:
-		body = sDim.Render("waiting for log lines…")
+		logs = panel("result · esc closes", t.detail, w, logH, true)
 	default:
-		body = t.log.render(m, 1, headH+1+podsH+1, logsW-2, logH-2, func(l core.LogLine) string {
-			inst := ""
-			if t.logFor == "" && len(st.Instances) > 1 && l.Instance != "" {
-				inst = lipgloss.NewStyle().Foreground(colorFor(l.Instance)).Render(shortInstance(l.Instance)) + " "
-			}
-			return sDim.Render(l.Time.Local().Format("15:04:05")) + " " + inst + t.log.fmt.render(l.Text)
-		})
-	}
-	logs := panel(title, body, logsW, logH, t.prof != nil && t.prof.svc == name)
-	if t.inspect != nil {
-		iw := w - logsW
-		it := "line · " + t.inspect.current().path()
-		if t.inspect.wrap {
-			it += sDim.Render(" ⏎wrap")
-		} else if t.inspect.hoff > 0 {
-			it += sDim.Render(fmt.Sprintf(" ⇢%d", t.inspect.hoff))
-		}
-		logs = lipgloss.JoinHorizontal(lipgloss.Top, logs, panel(it, t.inspect.view(m, logsW+1, headH+1+podsH+1, iw-2, logH-2), iw, logH, true))
+		// the log draws as if at the top of the screen; its zones shift down to where it sits
+		m.originY += headH + 1 + podsH
+		logs = t.lt.view(m, w, logH)
+		m.originY -= headH + 1 + podsH
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, " "+head, "", podsBox, logs)
 }
@@ -1098,24 +956,15 @@ func (t *servicesTab) editAutoscale(m *model, names []string, then func(context.
 }
 
 func (t *servicesTab) drag(m *model, h hit, phase dragPhase) bool {
-	if t.open_ == "" || h.id != "svc:log" {
+	if t.open_ == "" {
 		return false
 	}
-	t.log.drag(m, h, phase)
-	return true
+	return t.lt.drag(m, h, phase)
 }
 
 func (t *servicesTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
 	if t.open_ == "" {
 		return nil, false
 	}
-	if t.inspect != nil && h.id == t.inspect.zone {
-		t.inspect.wheel(up)
-		return nil, true
-	}
-	if h.id != "svc:log" {
-		return nil, false
-	}
-	t.log.wheel(up)
-	return nil, true
+	return t.lt.wheel(m, h, up)
 }

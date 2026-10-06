@@ -663,8 +663,8 @@ func (t *servicesTab) aiContext(m *model) string {
 	if len(bad) > 0 {
 		b.WriteString("failing in the environment: " + strings.Join(bad, ", ") + "\n")
 	}
-	if t.log != nil && t.open_ != "" {
-		b.WriteString("its log, last lines:\n" + logSample(t.log.lines, 60))
+	if t.lt != nil && t.open_ != "" {
+		b.WriteString("its log, last lines:\n" + logSample(t.lt.log.lines, 60))
 	}
 	return b.String()
 }
