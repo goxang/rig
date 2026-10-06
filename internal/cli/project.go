@@ -224,7 +224,10 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	initCmd.Flags().StringSliceVar(&with, "with", nil, "infrastructure to add: "+strings.Join(scaffold.Presets(), ", "))
 
 	task := &cobra.Command{
-		Use: "task [name [args...]]", Short: "run a task from rig.yaml (its shell steps, in order, args as $1... and $RIG_ARGS), or list them",
+		Use:   "task [name [args...]]",
+		Short: "run a task from rig.yaml (its shell steps, in order), or list them",
+		Example: `  rig task ship core shaparak              # positional args: $1... and $RIG_ARGS
+  rig task ship RIG_REF=feature-x TAG=v3   # NAME=value args: set that env var instead of pre-exporting it`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				var rows [][]string

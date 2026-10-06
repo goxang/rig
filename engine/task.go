@@ -55,9 +55,13 @@ func (a *App) TaskNames() []string {
 	return names
 }
 
+var taskParam = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
 // RunTask runs a task's steps in order with sh -c from the project directory, stopping at the first
 // failure. svc:// addresses in a step become a host:port reachable from here, and a nested `rig`
-// inherits this project, environment and confirmation. args reach every step as $1... and $RIG_ARGS.
+// inherits this project, environment and confirmation. A NAME=value arg sets that env var for the
+// steps (overriding any manifest var or pre-set shell env of the same name) instead of requiring it
+// pre-set; every other arg reaches every step positionally as $1... and $RIG_ARGS.
 func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Writer) error {
 	task, ok := a.Tasks()[name]
 	steps := task.Steps
@@ -66,6 +70,14 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 	}
 	if err := a.Guard(); err != nil {
 		return err
+	}
+	var positional, params []string
+	for _, arg := range args {
+		if taskParam.MatchString(arg) {
+			params = append(params, arg)
+		} else {
+			positional = append(positional, arg)
+		}
 	}
 	env := []string{"RIG_FILE=" + a.Spec.File}
 	// a nested `rig` is this binary, on PATH or not
@@ -78,11 +90,14 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 	if a.Confirmed {
 		env = append(env, "RIG_YES=1")
 	}
-	env = append(env, "RIG_TASK="+name, "RIG_ARGS="+strings.Join(args, " "))
+	env = append(env, "RIG_TASK="+name, "RIG_ARGS="+strings.Join(positional, " "))
 	vars, _ := a.Vars(ctx)
 	for k, v := range vars {
 		env = append(env, k+"="+v.Value)
 	}
+	// params come last so a CLI-passed NAME=value wins over a manifest var of the same name
+	env = append(env, params...)
+	args = positional
 	for i, step := range steps {
 		var resolveErr error
 		line := svcRef.ReplaceAllStringFunc(step, func(ref string) string {

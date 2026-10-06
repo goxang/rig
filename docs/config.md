@@ -257,7 +257,10 @@ Each step runs with `sh -c` from the project directory and the task stops at the
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
 `rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
 Write `$$` for a shell `$`, since `${...}` is rig's own expansion. `rig task ship parser load` passes
-the words after the name as `$1...` and `$RIG_ARGS`.
+the words after the name as `$1...` and `$RIG_ARGS`. A `NAME=value` word sets that env var for the
+task instead: `rig task ship RIG_REF=feature-x TAG=v3` sets `$RIG_REF` and `$TAG`, overriding a
+manifest var or pre-set shell env of the same name, so a task never needs one pre-exported just to
+run it with different parameters.
 
 In the TUI, `T` runs any task; the KV screen's `F` lists the tasks named `kv-*` (filling the store from
 the project's config files, say).
