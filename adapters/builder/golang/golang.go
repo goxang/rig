@@ -8,8 +8,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -149,7 +152,10 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 		return "", err
 	}
 	if o.Push {
-		return ref, remote.Write(tagRef, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		if err := remote.Write(tagRef, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithTransport(registryTransport)); err != nil {
+			return "", pushError(ref, err)
+		}
+		return ref, nil
 	}
 	file := filepath.Join(tmp, "image.tar")
 	if err := tarball.WriteToFile(file, tagRef, img); err != nil {
@@ -186,7 +192,23 @@ func (b *Builder) base(ctx context.Context, dir string) (v1.Image, error) {
 		return nil, err
 	}
 	goos, goarch, _ := strings.Cut(b.opt.Platform, "/")
-	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}))
+	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithPlatform(v1.Platform{OS: goos, Architecture: goarch}), remote.WithTransport(registryTransport))
+}
+
+// registryTransport gives up on a registry that takes the request and never answers it: a Nexus
+// whose blob store is full accepts the upload POST and hangs, which stalled a deploy for good.
+var registryTransport = func() *http.Transport {
+	t := remote.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 2 * time.Minute
+	return t
+}()
+
+func pushError(ref string, err error) error {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return fmt.Errorf("push %s: the registry took the upload but never answered (%w); a full blob store does this, so check its free space or prune old tags", ref, err)
+	}
+	return fmt.Errorf("push %s: %w", ref, err)
 }
 
 // dlv is a static dlv for goos/goarch: Options.Dlv, or one built once into the user cache.
