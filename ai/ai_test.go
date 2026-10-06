@@ -76,6 +76,13 @@ func TestResolveProviders(t *testing.T) {
 	if s.Enabled() || s.Why == "" {
 		t.Error("openai without a model is not usable")
 	}
+	s = Resolve(Config{Provider: "ollama", Backend: BackendOpencode, Model: "qwen2.5-coder"})
+	if s.URL != "http://localhost:11434/v1" || s.APIKey != "" {
+		t.Errorf("ollama: url %q, key %q", s.URL, s.APIKey)
+	}
+	if s = Resolve(Config{Provider: "lmstudio", Backend: BackendOpencode}); s.Enabled() {
+		t.Error("lmstudio without a model is not usable")
+	}
 }
 
 func TestDeniedPath(t *testing.T) {

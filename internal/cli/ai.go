@@ -100,7 +100,8 @@ func aiConfigCommand() *cobra.Command {
 		Long: `Without arguments, prints the setup and what it resolves to on this machine. key= clears a setting.
 
   backend       opencode | claude (default: opencode when installed, else claude)
-  provider      own | opencode | openai | 9router | deepseek | anthropic
+  provider      own | opencode | openai | 9router | deepseek | anthropic | ollama | lmstudio
+                ollama, lmstudio: a model on this machine, no key (rig ai config lists what they serve)
                 own: your opencode config or Claude Code login as they are (default when opencode has a model set)
                 opencode: opencode's free models (default otherwise)
   model         e.g. opencode/big-pickle, deepseek-chat, sonnet
@@ -147,6 +148,14 @@ RIG_AI_<KEY> (RIG_AI_MODEL, RIG_AI_FAST_URL, ...) overrides a setting for one ru
 				line = red("○ ") + s.Describe()
 			}
 			fmt.Println("\n" + line + "\n" + dim(f))
+			for _, l := range ai.DetectLocal(cmd.Context()) {
+				if len(l.Models) == 0 {
+					fmt.Printf("\n%s %s at %s serves no model yet: %s\n", amber("◆"), l.Provider, l.URL, map[string]string{"ollama": "ollama pull qwen2.5-coder", "lmstudio": "load one in LM Studio"}[l.Provider])
+					continue
+				}
+				fmt.Printf("\n%s %s at %s serves: %s\n  %s\n", green("◆"), l.Provider, l.URL, strings.Join(l.Models, ", "),
+					dim("use it: rig ai config provider="+l.Provider+" model="+l.Models[0]))
+			}
 			return nil
 		},
 	}

@@ -116,6 +116,15 @@ rig ai config proxy=localhost:10808    every AI request goes through it
 rig ai config fast_url=https://…/v1 fast_api_key=… fast_model=…   completions as one direct request
 ```
 
+**Local models.** `provider=ollama` (http://localhost:11434/v1) or `provider=lmstudio`
+(http://localhost:1234/v1) run everything on this machine with no key and no data leaving it:
+`ollama pull qwen2.5-coder`, then `rig ai config provider=ollama model=qwen2.5-coder` (`rig ai config`
+lists what a running server serves). Completions go to it directly; the chat runs through opencode,
+which needs to be installed. The tradeoffs: small models (7B and under) complete queries well but
+pick tools badly, so the chat may answer without looking or call rig's tools with wrong arguments;
+prefer a model trained for tool calling (qwen2.5-coder, llama3.1, mistral-nemo) and 14B or more for the
+chat, and expect a turn to take longer than a hosted model on a laptop GPU.
+
 No setup is needed: an opencode or Claude Code login is used as it is, and without one opencode's free
 models are. Providers: `own`, `opencode`, `openai` (any compatible endpoint), `9router`, `deepseek`,
 `anthropic` (for Claude Code). The key lives in `~/.config/rig/ai.json` (0600).

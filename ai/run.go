@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -287,12 +288,15 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 	}
 	cfg["mcp"] = mcp
 	model := r.Setup.Model
-	switch r.Setup.Provider {
-	case "openai", "9router", "deepseek":
+	if compatible(r.Setup.Provider) {
+		key := r.Setup.APIKey
+		if key == "" {
+			key = r.Setup.Provider // a local server takes any key, the SDK wants one
+		}
 		cfg["provider"] = map[string]any{"rig": map[string]any{
 			"npm":     "@ai-sdk/openai-compatible",
 			"name":    "rig " + r.Setup.Provider,
-			"options": map[string]any{"baseURL": r.Setup.URL, "apiKey": r.Setup.APIKey},
+			"options": map[string]any{"baseURL": r.Setup.URL, "apiKey": key},
 			"models":  map[string]any{r.Setup.Model: map[string]any{"name": r.Setup.Model}},
 		}}
 		model = "rig/" + r.Setup.Model
@@ -507,7 +511,7 @@ func (r *Runner) quick(ctx context.Context, prompt string) (string, error) {
 	switch {
 	case r.Setup.FastURL != "":
 		out, err = r.chatCompletion(ctx, r.Setup.FastURL, r.Setup.FastAPIKey, model, prompt)
-	case (r.Setup.Provider == "openai" || r.Setup.Provider == "9router" || r.Setup.Provider == "deepseek") && r.Setup.URL != "":
+	case compatible(r.Setup.Provider) && r.Setup.URL != "":
 		if model == "" {
 			model = r.Setup.Model
 		}
@@ -635,7 +639,13 @@ func (r *Runner) httpClient() (*http.Client, error) {
 				r.clientErr = fmt.Errorf("proxy %q: %w", p, err)
 				return
 			}
-			tr.Proxy = http.ProxyURL(u)
+			// a model on this machine (ollama, lmstudio) is never behind the proxy
+			tr.Proxy = func(req *http.Request) (*url.URL, error) {
+				if h := req.URL.Hostname(); h == "localhost" || net.ParseIP(h).IsLoopback() {
+					return nil, nil
+				}
+				return u, nil
+			}
 		}
 		r.client = &http.Client{Transport: tr, Timeout: 60 * time.Second}
 	})
@@ -648,7 +658,7 @@ func (r *Runner) Models(ctx context.Context, fast bool) ([]string, error) {
 	switch {
 	case fast && r.Setup.FastURL != "":
 		return r.endpointModels(ctx, r.Setup.FastURL, r.Setup.FastAPIKey)
-	case (r.Setup.Provider == "openai" || r.Setup.Provider == "9router" || r.Setup.Provider == "deepseek") && r.Setup.URL != "":
+	case compatible(r.Setup.Provider) && r.Setup.URL != "":
 		return r.endpointModels(ctx, r.Setup.URL, r.Setup.APIKey)
 	case r.Setup.Backend == BackendClaude:
 		return []string{"opus", "sonnet", "haiku"}, nil

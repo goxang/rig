@@ -4,14 +4,17 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -27,6 +30,21 @@ var Providers = map[string]string{
 	"9router":   "a 9router instance (OpenAI-compatible, default http://localhost:20128/v1)",
 	"deepseek":  "DeepSeek's API: api_key (model deepseek-chat unless set)",
 	"anthropic": "an Anthropic-compatible endpoint for Claude Code: url, api_key",
+	"ollama":    "a local Ollama (default http://localhost:11434/v1): model, no key",
+	"lmstudio":  "a local LM Studio server (default http://localhost:1234/v1): model, no key",
+}
+
+// LocalProviders are the providers that run on this machine, with their OpenAI-compatible endpoints.
+var LocalProviders = map[string]string{"ollama": "http://localhost:11434/v1", "lmstudio": "http://localhost:1234/v1"}
+
+// compatible is whether the provider speaks the OpenAI API (through opencode for chat, directly
+// for completions).
+func compatible(provider string) bool {
+	switch provider {
+	case "openai", "9router", "deepseek", "ollama", "lmstudio":
+		return true
+	}
+	return false
 }
 
 const DefaultFreeModel = "opencode/big-pickle"
@@ -266,8 +284,8 @@ func Resolve(c Config) Setup {
 		s.Why = "AI is disabled (rig ai config disabled=false)"
 		return s
 	}
-	switch c.Provider {
-	case "openai", "9router", "deepseek":
+	switch {
+	case compatible(c.Provider):
 		if s.Backend == "" {
 			s.Backend = BackendOpencode
 		}
@@ -275,7 +293,7 @@ func Resolve(c Config) Setup {
 			s.Why = "provider " + c.Provider + " runs through opencode (backend=opencode)"
 			return s
 		}
-	case "anthropic":
+	case c.Provider == "anthropic":
 		if s.Backend == "" {
 			s.Backend = BackendClaude
 		}
@@ -311,6 +329,10 @@ func Resolve(c Config) Setup {
 		if s.URL == "" {
 			s.URL = "http://localhost:20128/v1"
 		}
+	case "ollama", "lmstudio":
+		if s.URL == "" {
+			s.URL = LocalProviders[s.Provider]
+		}
 	case "deepseek":
 		if s.URL == "" {
 			s.URL = "https://api.deepseek.com/v1"
@@ -322,8 +344,8 @@ func Resolve(c Config) Setup {
 	switch {
 	case (s.Provider == "openai" || s.Provider == "anthropic") && s.URL == "":
 		s.Bin, s.Why = "", "provider "+s.Provider+" needs url (rig ai config url=https://…)"
-	case (s.Provider == "openai" || s.Provider == "9router") && s.Model == "":
-		s.Bin, s.Why = "", "provider "+s.Provider+" needs model (rig ai config model=…)"
+	case (s.Provider == "openai" || s.Provider == "9router" || LocalProviders[s.Provider] != "") && s.Model == "":
+		s.Bin, s.Why = "", "provider "+s.Provider+" needs model (rig ai config model=…; rig ai config lists what it serves)"
 	case (s.Provider == "deepseek" || s.Provider == "anthropic") && s.APIKey == "":
 		s.Bin, s.Why = "", "provider "+s.Provider+" needs api_key (rig ai config api_key=…)"
 	}
@@ -378,4 +400,43 @@ func (s Setup) Describe() string {
 		d += " · proxy " + s.Proxy
 	}
 	return d
+}
+
+// LocalServer is a model server found running on this machine.
+type LocalServer struct {
+	Provider, URL string
+	Models        []string
+}
+
+// DetectLocal finds the local model servers (LocalProviders) that answer, with the models they serve.
+func DetectLocal(ctx context.Context) []LocalServer {
+	c := &http.Client{Timeout: 700 * time.Millisecond, Transport: &http.Transport{Proxy: nil}}
+	var out []LocalServer
+	for _, p := range []string{"ollama", "lmstudio"} {
+		u := LocalProviders[p]
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u+"/models", nil)
+		if err != nil {
+			continue
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			continue
+		}
+		var list struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&list)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode/100 != 2 {
+			continue
+		}
+		s := LocalServer{Provider: p, URL: u}
+		for _, m := range list.Data {
+			s.Models = append(s.Models, m.ID)
+		}
+		out = append(out, s)
+	}
+	return out
 }
