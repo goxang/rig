@@ -81,3 +81,16 @@ case ":$PATH:" in
     echo "  open a new terminal, or run: $line"
     ;;
 esac
+
+# tab completion of commands, environments, services and tasks (rig task <tab>)
+case "$(basename "${SHELL:-}")" in
+  zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" line='autoload -Uz compinit && { (( $+functions[compdef] )) || compinit -i; } && source <(rig completion zsh)' ;;
+  bash) rc="$HOME/.bashrc" line='source <(rig completion bash)' ;;
+  fish) rc="$HOME/.config/fish/config.fish" line='rig completion fish | source' ;;
+  *) rc="" ;;
+esac
+if [ -n "$rc" ] && ! grep -qs "rig completion" "$rc"; then
+  mkdir -p "$(dirname "$rc")"
+  printf '\n%s\n' "$line" >> "$rc"
+  echo "rig: added tab completion to $rc"
+fi

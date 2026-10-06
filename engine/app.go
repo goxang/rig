@@ -29,6 +29,10 @@ type App struct {
 	Env  *spec.Environment
 	// Confirmed lets mutating operations run on a protected environment.
 	Confirmed bool
+	// Ask, when set, puts a yes/no question to the user (a terminal), so a protected environment
+	// can be changed after a yes instead of only with --yes.
+	Ask   func(question string) bool
+	askMu sync.Mutex
 
 	runtime core.Runtime
 
@@ -312,7 +316,16 @@ func (a *App) envName() string {
 
 // Guard refuses a mutating operation on a protected environment the caller did not confirm.
 func (a *App) Guard() error {
-	if a.Env != nil && a.Env.Protected && !a.Confirmed {
+	if a.Env == nil || !a.Env.Protected {
+		return nil
+	}
+	a.askMu.Lock()
+	defer a.askMu.Unlock()
+	if !a.Confirmed && a.Ask != nil {
+		a.Confirmed = a.Ask(a.Env.Name + " is protected (others use it): change it?")
+		a.Ask = nil
+	}
+	if !a.Confirmed {
 		return fmt.Errorf("%s: %w", a.Env.Name, ErrProtected)
 	}
 	return nil

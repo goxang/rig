@@ -3,9 +3,11 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -235,7 +237,9 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		Short: "run a task from rig.yaml (its shell steps, in order), or list them",
 		Example: `  rig task ship core shaparak              # positional args: $1... and $RIG_ARGS
   rig task ship RIG_REF=feature-x TAG=v3   # NAME=value args: set that env var instead of pre-exporting it
-  rig task ship                            # on a terminal, asks for the args the task declares`,
+  rig task nexus-prune keep=3 DRY_RUN=1    # name=value presets a declared arg; the rest take their defaults
+  rig task ship                            # on a terminal, asks for the args the task declares
+  rig -y task ship minimum                 # --yes (or no terminal, as for agents) never asks`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				var rows [][]string
@@ -246,13 +250,26 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				return nil
 			}
 			rest := args[1:]
-			if t, ok := a.Tasks()[args[0]]; ok && len(rest) == 0 && len(t.Args) > 0 {
-				// a task run from another task's step (RIG_TASK set) takes its defaults, never asks
-				if !a.Confirmed && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd())) {
-					rest = askTaskArgs(ctx, a, args[0], t.Args)
-				} else {
-					rest = engine.TaskArgValues(t.Args, taskDefaults(t.Args))
+			t, ok := a.Tasks()[args[0]]
+			// a task run from another task's step (RIG_TASK set) takes its defaults, never asks
+			interactive := !a.Confirmed && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd()))
+			if ok && len(t.Args) > 0 {
+				if preset, named := engine.PresetTaskArgs(t.Args, rest); named {
+					rest = preset
+				} else if len(rest) == 0 && interactive {
+					rest = askTaskArgs(ctx, a, args[0], t)
+				} else if len(rest) == 0 {
+					rest = engine.PresetTaskArgsDefaults(t.Args)
 				}
+			}
+			if ok && t.Confirm && !a.Confirmed {
+				if !interactive {
+					return fmt.Errorf("task %s asks before it runs: pass --yes (-y)", args[0])
+				}
+				if !askYes(fmt.Sprintf("run %s on %s?", args[0], a.Env.Name)) {
+					return errors.New("cancelled")
+				}
+				a.Confirmed = true
 			}
 			return a.RunTask(ctx, args[0], rest, os.Stdout)
 		}),
@@ -494,43 +511,98 @@ func readSecret(name string) (string, error) {
 	return string(raw), err
 }
 
-// askTaskArgs asks on the terminal for each arg a task declares; enter keeps the default.
-func askTaskArgs(ctx context.Context, a *engine.App, task string, args []spec.TaskArg) []string {
+// askTaskArgs asks on the terminal for each arg a task declares; enter keeps the default, a number
+// picks a listed choice.
+func askTaskArgs(ctx context.Context, a *engine.App, task string, t spec.Task) []string {
 	in := bufio.NewReader(os.Stdin)
-	answers := make([]string, len(args))
-	for i, arg := range args {
-		label := arg.Name
-		if arg.Help != "" {
-			label += ": " + arg.Help
+	w := 0
+	for _, arg := range t.Args {
+		w = max(w, len(arg.Name))
+	}
+	head := bold(task)
+	if t.Help != "" {
+		head += "  " + dim(t.Help)
+	}
+	fmt.Fprintf(os.Stderr, "%s\n%s\n", head, dim("  enter keeps the [default] · ctrl+c cancels"))
+	answers := make([]string, len(t.Args))
+	for i, arg := range t.Args {
+		fmt.Fprintf(os.Stderr, "\n  %s  %s\n", bold(fmt.Sprintf("%-*s", w, arg.Name)), dim(arg.Help))
+		choices := a.TaskArgChoices(ctx, arg)
+		if len(choices) > 0 {
+			fmt.Fprintln(os.Stderr, choiceList(choices, arg.Multi))
 		}
-		fmt.Printf("%s › %s\n", task, label)
-		if c := a.TaskArgChoices(ctx, arg); len(c) > 0 {
-			more := ""
-			if arg.Multi {
-				more = " (several, space-separated)"
-			}
-			fmt.Printf("  choices%s: %s\n", more, strings.Join(c, " "))
+		def := arg.Default
+		if arg.Env() && def == "" {
+			def = os.Getenv(arg.Name)
 		}
-		if arg.Default != "" {
-			fmt.Printf("  [%s] ", arg.Default)
-		} else {
-			fmt.Print("  > ")
+		shown := def
+		if shown == "" {
+			shown = "none"
 		}
-		line, _ := in.ReadString('\n')
-		answers[i] = strings.TrimSpace(line)
+		fmt.Fprintf(os.Stderr, "  %s %s ", dim("["+shown+"]"), "›")
+		line, err := in.ReadString('\n')
+		if err != nil {
+			os.Exit(130)
+		}
+		answers[i] = pickChoices(strings.TrimSpace(line), choices)
 		if answers[i] == "" {
-			answers[i] = arg.Default
+			answers[i] = def
 		}
 	}
-	return engine.TaskArgValues(args, answers)
+	fmt.Fprintln(os.Stderr)
+	return engine.TaskArgValues(t.Args, answers)
 }
 
-func taskDefaults(args []spec.TaskArg) []string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		if !a.Env() || os.Getenv(a.Name) == "" {
-			out[i] = a.Default
+// choiceList shows choices numbered, a few to a line; "" shows as (none).
+func choiceList(choices []string, multi bool) string {
+	var b strings.Builder
+	b.WriteString("    ")
+	col := 4
+	for i, c := range choices {
+		if c == "" {
+			c = "(none)"
+		}
+		item := fmt.Sprintf("%s %s", dim(fmt.Sprintf("%d)", i+1)), c)
+		n := len(fmt.Sprint(i+1)) + 2 + len([]rune(c)) + 3
+		if col+n > 100 && col > 4 {
+			b.WriteString("\n    ")
+			col = 4
+		}
+		b.WriteString(item + "   ")
+		col += n
+	}
+	if multi {
+		b.WriteString("\n    " + dim("several: space-separated names or numbers"))
+	}
+	return b.String()
+}
+
+// pickChoices turns numbers in an answer into the choices they list; other words, and a number
+// that is itself a choice, stay.
+func pickChoices(answer string, choices []string) string {
+	if answer == "" || len(choices) == 0 {
+		return answer
+	}
+	words := strings.Fields(answer)
+	for i, w := range words {
+		var n int
+		if slices.Contains(choices, w) {
+			continue
+		}
+		if _, err := fmt.Sscanf(w, "%d", &n); err == nil && fmt.Sprint(n) == w && n >= 1 && n <= len(choices) {
+			words[i] = choices[n-1]
 		}
 	}
-	return out
+	return strings.TrimSpace(strings.Join(words, " "))
+}
+
+// askYes asks a y/N question on the terminal.
+func askYes(q string) bool {
+	fmt.Fprintf(os.Stderr, "%s %s ", amber(q), dim("[y/N]"))
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
 }

@@ -70,3 +70,23 @@ func SetSecret(project, name, value string) error {
 	}
 	return os.Rename(tmp, f)
 }
+
+// SecretValues are the values the project's secrets resolve to, as Load expands them: the
+// environment, then `rig secret set`, then the default. Empty ones are left out.
+func (p *Project) SecretValues() map[string]string {
+	stored, _ := LoadSecrets(p.Name)
+	out := map[string]string{}
+	for n, s := range p.Secrets {
+		v, ok := os.LookupEnv(n)
+		if !ok {
+			v, ok = stored[n]
+		}
+		if !ok {
+			v = s.Default
+		}
+		if v != "" {
+			out[n] = v
+		}
+	}
+	return out
+}

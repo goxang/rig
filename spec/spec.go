@@ -268,9 +268,11 @@ func (p *Project) SectionMap() map[string]string {
 // Dashboard is a list of panels, or {vars:, panels:} when its queries use $variables.
 // Task is a list of shell steps, or {help, steps} to say what it is for.
 type Task struct {
-	Help  string    `yaml:"help"`
-	Args  []TaskArg `yaml:"args"`
-	Steps []string  `yaml:"steps"`
+	Help string    `yaml:"help"`
+	Args []TaskArg `yaml:"args"`
+	// Confirm asks "type yes" before the first step, on any environment; --yes answers it.
+	Confirm bool     `yaml:"confirm"`
+	Steps   []string `yaml:"steps"`
 }
 
 // TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).

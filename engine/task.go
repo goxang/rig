@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/internal/sh"
@@ -112,6 +114,45 @@ func TaskArgValues(args []spec.TaskArg, answers []string) []string {
 	return out
 }
 
+// PresetTaskArgsDefaults is what a task's args come to when nothing answers them: their defaults,
+// except an UPPER_CASE one already set in the environment, which passes through.
+func PresetTaskArgsDefaults(args []spec.TaskArg) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if !a.Env() || os.Getenv(a.Name) == "" {
+			out[i] = a.Default
+		}
+	}
+	return TaskArgValues(args, out)
+}
+
+// PresetTaskArgs maps name=value words that name one of the task's args onto it (whatever its
+// case), the args not named taking their defaults, and keeps the other words after them. named is
+// false when no word names an arg: words is then not touched.
+func PresetTaskArgs(args []spec.TaskArg, words []string) (out []string, named bool) {
+	answers := make([]string, len(args))
+	set := make([]bool, len(args))
+	var rest []string
+	for _, w := range words {
+		k, v, ok := strings.Cut(w, "=")
+		i := slices.IndexFunc(args, func(a spec.TaskArg) bool { return a.Name == k })
+		if !ok || i < 0 {
+			rest = append(rest, w)
+			continue
+		}
+		answers[i], set[i], named = v, true, true
+	}
+	if !named {
+		return words, false
+	}
+	for i, a := range args {
+		if !set[i] && (!a.Env() || os.Getenv(a.Name) == "") {
+			answers[i] = a.Default
+		}
+	}
+	return append(TaskArgValues(args, answers), rest...), true
+}
+
 var taskParam = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 // RunTask runs a task's steps in order with sh -c from the project directory, stopping at the first
@@ -155,6 +196,8 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 	// params come last so a CLI-passed NAME=value wins over a manifest var of the same name
 	env = append(env, params...)
 	args = positional
+	secrets := a.Spec.SecretValues()
+	start := time.Now()
 	for i, step := range steps {
 		var resolveErr error
 		line := svcRef.ReplaceAllStringFunc(step, func(ref string) string {
@@ -167,22 +210,44 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		if resolveErr != nil {
 			return fmt.Errorf("task %s, step %d: %w", name, i+1, resolveErr)
 		}
-		title, _, more := strings.Cut(strings.TrimSpace(step), "\n")
-		if more {
-			title += " …"
-		}
+		title := stepTitle(step, secrets)
 		fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
 		cmd := sh.New("sh", append([]string{"-c", line, name}, args...)...)
 		cmd.Dir = a.Spec.Dir
 		cmd.Env = env
+		began := time.Now()
 		if err := cmd.Attach(ctx, os.Stdin, out, out); err != nil {
 			if ctx.Err() != nil {
 				return fmt.Errorf("task %s stopped at step %d of %d (%s): interrupted", name, i+1, len(steps), title)
 			}
 			return fmt.Errorf("task %s, step %d (%s): %w", name, i+1, title, err)
 		}
+		if d := time.Since(began); d >= time.Second {
+			fmt.Fprintf(out, "  ✓ %s\n", d.Round(100*time.Millisecond))
+		}
+	}
+	if d := time.Since(start); len(steps) > 1 {
+		fmt.Fprintf(out, "✓ %s done in %s\n", name, d.Round(100*time.Millisecond))
 	}
 	return nil
+}
+
+// stepTitle is how a step shows while it runs: its first line, with secret values put back as
+// ${NAME}; the old "type yes" step of a task shows as what it does.
+func stepTitle(step string, secrets map[string]string) string {
+	title, _, more := strings.Cut(strings.TrimSpace(step), "\n")
+	if strings.HasPrefix(title, `[ -n "${RIG_YES`) {
+		return "confirm"
+	}
+	if more {
+		title += " …"
+	}
+	for n, v := range secrets {
+		if len(v) >= 3 {
+			title = strings.ReplaceAll(title, v, "${"+n+"}")
+		}
+	}
+	return title
 }
 
 // Var is a manifest variable and where its value comes from.

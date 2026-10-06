@@ -262,6 +262,14 @@ task instead: `rig task ship RIG_REF=feature-x TAG=v3` sets `$RIG_REF` and `$TAG
 manifest var or pre-set shell env of the same name, so a task never needs one pre-exported just to
 run it with different parameters.
 
+`args:` declares a task's inputs (`name`, `help`, `default`, `choices` or `from: services|hosts`,
+`multi`): on a terminal `rig task <name>` asks for each, and `name=value` presets one by name
+(`rig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
+first step on any environment. Neither asks with `--yes` or without a terminal (agents, CI, a step
+of another task). A protected environment asks once on a terminal instead of refusing without
+`--yes`. Steps print how long they took; secret values in a step's title show as `${NAME}`.
+`rig completion zsh|bash|fish` completes tasks, their args, services, components and `-e`.
+
 In the TUI, `T` runs any task; the KV screen's `F` lists the tasks named `kv-*` (filling the store from
 the project's config files, say).
 

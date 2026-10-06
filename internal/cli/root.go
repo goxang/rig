@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
@@ -109,6 +110,7 @@ Run rig with no arguments for the terminal UI.`,
 		c.GroupID = "infra"
 		root.AddCommand(c)
 	}
+	addCompletions(root)
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		defaultHelp(cmd, args)
@@ -146,6 +148,11 @@ func open() (*engine.App, error) {
 		return nil, err
 	}
 	a.Confirmed = g.yes
+	// a person at a terminal answers a protected environment's question instead of needing --yes;
+	// a task's nested rig inherits the answer as RIG_YES
+	if !g.yes && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
+		a.Ask = askYes
+	}
 	return a, nil
 }
 
