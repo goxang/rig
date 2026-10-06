@@ -405,6 +405,8 @@ type Host struct {
 	Addr     string
 	Roles    []string
 	Ready    bool
+	// Reason says why Ready is false, when the adapter knows (e.g. a probe error); empty otherwise.
+	Reason   string
 	OS       string
 	Kernel   string
 	CPUs     int

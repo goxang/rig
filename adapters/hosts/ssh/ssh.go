@@ -114,6 +114,7 @@ func (s *SSH) Hosts(ctx context.Context) ([]core.Host, error) {
 			defer cancel()
 			raw, err := sh.New("ssh", append(h.args(false), probe)...).Output(c)
 			if err != nil {
+				out[i].Reason = err.Error()
 				return
 			}
 			parse(string(raw), &out[i])

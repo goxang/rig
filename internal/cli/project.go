@@ -188,6 +188,9 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				state := green("● ready")
 				if !x.Ready {
 					state = red("✖ down")
+					if x.Reason != "" {
+						state += ": " + x.Reason
+					}
 				}
 				mem := 0.0
 				if x.MemTotal > 0 {

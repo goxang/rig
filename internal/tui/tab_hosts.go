@@ -212,7 +212,11 @@ func (t *hostsTab) view(m *model, w, h int) string {
 	}
 	if t.sel < len(t.hosts) {
 		x := t.hosts[t.sel]
-		b.WriteString("\n" + sDim.Render(truncate(fmt.Sprintf("%s  %s  %s · %s  %d cores  %s memory  %d pods (p)", x.Addr, strings.Join(x.Roles, ","), x.OS, x.Kernel, x.CPUs, bytesText(x.MemTotal), len(x.Pods)), inner)) + "\n")
+		detail := fmt.Sprintf("%s  %s  %s · %s  %d cores  %s memory  %d pods (p)", x.Addr, strings.Join(x.Roles, ","), x.OS, x.Kernel, x.CPUs, bytesText(x.MemTotal), len(x.Pods))
+		if !x.Ready && x.Reason != "" {
+			detail = x.Addr + "  " + x.Reason
+		}
+		b.WriteString("\n" + sDim.Render(truncate(detail, inner)) + "\n")
 		if hist := t.cpu[x.Name]; len(hist) > 1 && h-len(t.hosts)-8 > 4 {
 			pts := make([]core.Point, len(hist))
 			now := time.Now()
