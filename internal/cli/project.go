@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -227,7 +228,8 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		Use:   "task [name [args...]]",
 		Short: "run a task from rig.yaml (its shell steps, in order), or list them",
 		Example: `  rig task ship core shaparak              # positional args: $1... and $RIG_ARGS
-  rig task ship RIG_REF=feature-x TAG=v3   # NAME=value args: set that env var instead of pre-exporting it`,
+  rig task ship RIG_REF=feature-x TAG=v3   # NAME=value args: set that env var instead of pre-exporting it
+  rig task ship                            # on a terminal, asks for the args the task declares`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				var rows [][]string
@@ -237,7 +239,16 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				printTable(os.Stdout, []string{"TASK", "WHAT IT DOES"}, rows)
 				return nil
 			}
-			return a.RunTask(ctx, args[0], args[1:], os.Stdout)
+			rest := args[1:]
+			if t, ok := a.Tasks()[args[0]]; ok && len(rest) == 0 && len(t.Args) > 0 {
+				// a task run from another task's step (RIG_TASK set) takes its defaults, never asks
+				if !a.Confirmed && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+					rest = askTaskArgs(ctx, a, args[0], t.Args)
+				} else {
+					rest = engine.TaskArgValues(t.Args, taskDefaults(t.Args))
+				}
+			}
+			return a.RunTask(ctx, args[0], rest, os.Stdout)
 		}),
 	}
 
@@ -475,4 +486,45 @@ func readSecret(name string) (string, error) {
 	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stderr)
 	return string(raw), err
+}
+
+// askTaskArgs asks on the terminal for each arg a task declares; enter keeps the default.
+func askTaskArgs(ctx context.Context, a *engine.App, task string, args []spec.TaskArg) []string {
+	in := bufio.NewReader(os.Stdin)
+	answers := make([]string, len(args))
+	for i, arg := range args {
+		label := arg.Name
+		if arg.Help != "" {
+			label += ": " + arg.Help
+		}
+		fmt.Printf("%s › %s\n", task, label)
+		if c := a.TaskArgChoices(ctx, arg); len(c) > 0 {
+			more := ""
+			if arg.Multi {
+				more = " (several, space-separated)"
+			}
+			fmt.Printf("  choices%s: %s\n", more, strings.Join(c, " "))
+		}
+		if arg.Default != "" {
+			fmt.Printf("  [%s] ", arg.Default)
+		} else {
+			fmt.Print("  > ")
+		}
+		line, _ := in.ReadString('\n')
+		answers[i] = strings.TrimSpace(line)
+		if answers[i] == "" {
+			answers[i] = arg.Default
+		}
+	}
+	return engine.TaskArgValues(args, answers)
+}
+
+func taskDefaults(args []spec.TaskArg) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if !a.Env() || os.Getenv(a.Name) == "" {
+			out[i] = a.Default
+		}
+	}
+	return out
 }

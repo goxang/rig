@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
@@ -53,6 +54,62 @@ func (a *App) TaskNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// TaskArgChoices is what a task arg offers to pick from: its choices, or the services and groups,
+// or the hosts, of this environment.
+func (a *App) TaskArgChoices(ctx context.Context, arg spec.TaskArg) []string {
+	if len(arg.Choices) > 0 {
+		return arg.Choices
+	}
+	switch arg.From {
+	case "services":
+		groups, names := map[string]bool{}, []string{}
+		for n, svc := range a.Spec.Services {
+			names = append(names, n)
+			for _, g := range svc.Groups {
+				groups[g] = true
+			}
+		}
+		out := []string{"all"}
+		for g := range groups {
+			if a.Spec.Services[g] == nil {
+				out = append(out, g)
+			}
+		}
+		sort.Strings(out[1:])
+		sort.Strings(names)
+		return append(out, names...)
+	case "hosts":
+		h, _, err := Get[core.Hosts](a, core.KindHosts, "")
+		if err != nil {
+			return nil
+		}
+		list, _ := h.Hosts(ctx)
+		var out []string
+		for _, x := range list {
+			out = append(out, x.Name)
+		}
+		return out
+	}
+	return nil
+}
+
+// TaskArgValues turns the answers to a task's args, in order, into what RunTask takes: NAME=value for
+// an UPPER_CASE arg, the words of the answer for a positional one; empty answers are left out.
+func TaskArgValues(args []spec.TaskArg, answers []string) []string {
+	var out []string
+	for i, arg := range args {
+		if i >= len(answers) || strings.TrimSpace(answers[i]) == "" {
+			continue
+		}
+		if arg.Env() {
+			out = append(out, arg.Name+"="+strings.TrimSpace(answers[i]))
+		} else {
+			out = append(out, strings.Fields(answers[i])...)
+		}
+	}
+	return out
 }
 
 var taskParam = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -119,6 +176,9 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		cmd.Dir = a.Spec.Dir
 		cmd.Env = env
 		if err := cmd.Attach(ctx, os.Stdin, out, out); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("task %s stopped at step %d of %d (%s): interrupted", name, i+1, len(steps), title)
+			}
 			return fmt.Errorf("task %s, step %d (%s): %w", name, i+1, title, err)
 		}
 	}

@@ -4,6 +4,7 @@ package spec
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -267,9 +268,25 @@ func (p *Project) SectionMap() map[string]string {
 // Dashboard is a list of panels, or {vars:, panels:} when its queries use $variables.
 // Task is a list of shell steps, or {help, steps} to say what it is for.
 type Task struct {
-	Help  string   `yaml:"help"`
-	Steps []string `yaml:"steps"`
+	Help  string    `yaml:"help"`
+	Args  []TaskArg `yaml:"args"`
+	Steps []string  `yaml:"steps"`
 }
+
+// TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).
+// An UPPER_CASE name reaches the steps as that env var; a lower-case one as positional words ($1...,
+// $RIG_ARGS). Choices, or From (services: every service and group; hosts), offer a pick list.
+type TaskArg struct {
+	Name    string   `yaml:"name"`
+	Help    string   `yaml:"help"`
+	Default string   `yaml:"default"`
+	Choices []string `yaml:"choices"`
+	From    string   `yaml:"from"`
+	Multi   bool     `yaml:"multi"`
+}
+
+// Env is whether the arg is passed as NAME=value rather than as positional words.
+func (a TaskArg) Env() bool { return a.Name != "" && strings.ToUpper(a.Name) == a.Name }
 
 func (t *Task) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.SequenceNode {
