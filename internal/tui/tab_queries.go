@@ -304,7 +304,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 	keys := placeholder.FindAllStringSubmatch(q.Query, -1)
 	if len(keys) == 0 {
 		t.shownFor = name
-		return m.sched.run(m.ctx, name, q.Query)
+		return m.sched.run(m.work(), name, q.Query)
 	}
 	seen := map[string]bool{}
 	var parts []string
@@ -326,7 +326,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 			return nil
 		}
 		t.shownFor = name
-		return m.sched.run(m.ctx, name, text)
+		return m.sched.run(m.work(), name, text)
 	})
 	return nil
 }
@@ -348,7 +348,7 @@ func (t *queriesTab) newQuery(m *model, comp string) {
 			}
 		}
 		t.shownFor = name
-		return m.sched.run(m.ctx, name, v)
+		return m.sched.run(m.work(), name, v)
 	})
 }
 

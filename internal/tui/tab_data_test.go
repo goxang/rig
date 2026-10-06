@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,7 +32,7 @@ func TestDataEscapeFromQuery(t *testing.T) {
 	d := &dataTab{comps: []dataComp{c}, left: newGrid("l"), right: newGrid("dright"), paths: map[string][]string{}, focus: 1}
 	d.left.set([]grow{{id: "db"}})
 	d.query, d.queryAt = "select 1", []string{"x"}
-	m := &model{ai: &ai.Runner{}}
+	m := &model{ctx: context.Background(), ai: &ai.Runner{}}
 
 	d.key(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.prompt == nil || m.prompt.input.Value() != "select 1" {
@@ -40,5 +41,20 @@ func TestDataEscapeFromQuery(t *testing.T) {
 	m.key(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.prompt != nil || d.query != "" {
 		t.Fatalf("a second esc should leave the query, prompt %v query %q", m.prompt, d.query)
+	}
+}
+
+func TestCtrlCStopsWorkBeforeQuitting(t *testing.T) {
+	m := &model{ctx: context.Background()}
+	ctx := m.work()
+	m.busy = 1
+	if cmd := m.key(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd != nil {
+		t.Fatal("ctrl+c with work in flight should stop it, not quit")
+	}
+	if ctx.Err() == nil || m.busy != 0 {
+		t.Fatalf("work not stopped: err %v busy %d", ctx.Err(), m.busy)
+	}
+	if m.work().Err() != nil {
+		t.Fatal("the next operation needs a live context")
 	}
 }

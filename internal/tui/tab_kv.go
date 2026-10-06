@@ -118,7 +118,7 @@ func (t *kvTab) load(m *model) tea.Cmd {
 		t.err = "no kv component in this environment (add one: type: consul)"
 		return nil
 	}
-	a, gen, ctx, prefix, comp := m.app, m.gen, m.ctx, t.prefix, t.comp
+	a, gen, ctx, prefix, comp := m.app, m.gen, m.work(), t.prefix, t.comp
 	return func() tea.Msg {
 		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
 		if err != nil {
@@ -132,7 +132,7 @@ func (t *kvTab) load(m *model) tea.Cmd {
 }
 
 func (t *kvTab) fetch(m *model, key string) tea.Cmd {
-	a, gen, ctx, comp := m.app, m.gen, m.ctx, t.comp
+	a, gen, ctx, comp := m.app, m.gen, m.work(), t.comp
 	return func() tea.Msg {
 		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
 		if err != nil {
@@ -748,7 +748,7 @@ func (t *kvTab) saveTree(m *model, what string) tea.Cmd {
 
 // index reads every key and value of the store, one row per key and per field of a JSON value.
 func (t *kvTab) index(m *model) tea.Cmd {
-	a, gen, ctx, comp := m.app, m.gen, m.ctx, t.comp
+	a, gen, ctx, comp := m.app, m.gen, m.work(), t.comp
 	return func() tea.Msg {
 		kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
 		if err != nil {

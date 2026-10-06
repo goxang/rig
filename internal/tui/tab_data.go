@@ -293,7 +293,7 @@ func (t *dataTab) refresh(m *model) tea.Cmd {
 }
 
 func (t *dataTab) loadQueues(m *model) tea.Cmd {
-	a, gen, ctx := m.app, m.gen, m.ctx
+	a, gen, ctx := m.app, m.gen, m.work()
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
@@ -310,7 +310,7 @@ func (t *dataTab) loadQueues(m *model) tea.Cmd {
 }
 
 func (t *dataTab) loadView(m *model) tea.Cmd {
-	a, gen, ctx, comp, view := m.app, m.gen, m.ctx, t.current().name, t.qview
+	a, gen, ctx, comp, view := m.app, m.gen, m.work(), t.current().name, t.qview
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
@@ -347,7 +347,7 @@ func (t *dataTab) loadDetail(m *model, queue, kind string) tea.Cmd {
 		t.detail, t.payload = nil, nil
 	}
 	t.detailFor, t.detailKind, t.focus = queue, kind, 2
-	gen, ctx := m.gen, m.ctx
+	gen, ctx := m.gen, m.work()
 	return func() tea.Msg {
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -405,7 +405,7 @@ func (t *dataTab) load(m *model) tea.Cmd {
 	}
 	t.seq++
 	t.loading, t.err, t.marked = true, nil, nil
-	a, gen, seq, ctx, path := m.app, m.gen, t.seq, m.ctx, append([]string{}, t.paths[c.name]...)
+	a, gen, seq, ctx, path := m.app, m.gen, t.seq, m.work(), append([]string{}, t.paths[c.name]...)
 	query, queryAt := t.query, t.queryAt
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -701,7 +701,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			t.askQuery(m, c, at, "", "")
 			return nil
 		}
-		gen, ctx := m.gen, m.ctx
+		gen, ctx := m.gen, m.work()
 		rq, _ := v.(core.RowQuerier)
 		row, tb := -1, t.table
 		if r, ok := t.right.current(); ok && t.leaf && rq != nil {

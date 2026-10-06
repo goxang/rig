@@ -77,7 +77,7 @@ func (t *servicesTab) capture(m *model, svc, v string) tea.Cmd {
 		inst = f[2]
 	}
 	s := m.app.Spec.Services[svc]
-	a, gen, ctx := m.app, m.gen, m.ctx
+	a, gen, ctx := m.app, m.gen, m.work()
 	m.busy++
 	m.setStatus(fmt.Sprintf("profiling %s (%s, %s)…", svc, kind, dur), false)
 	return func() tea.Msg {

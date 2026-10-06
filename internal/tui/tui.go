@@ -7,10 +7,12 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -81,6 +83,10 @@ type model struct {
 	statusErr bool
 	statusAt  time.Time
 	busy      int
+	// workCtx is what one-off operations (queries, actions, loads) run under: ctrl+c ends them
+	// without leaving rig
+	workCtx  context.Context
+	stopWork context.CancelFunc
 
 	confirm *confirm
 	prompt  *prompt
@@ -391,14 +397,52 @@ func (m *model) openTab(i int) tea.Cmd {
 	return m.tabs[i].refresh(m)
 }
 
+// work is the context of the next one-off operation; ctrl+c cancels every one in flight.
+func (m *model) work() context.Context {
+	if m.workCtx == nil || m.workCtx.Err() != nil {
+		m.workCtx, m.stopWork = context.WithCancel(m.ctx)
+	}
+	return m.workCtx
+}
+
+// working says whether ctrl+c has something to stop: an operation, a query or a screen loading.
+func (m *model) working() bool {
+	if m.busy > 0 {
+		return true
+	}
+	if m.sched != nil {
+		m.sched.mu.Lock()
+		defer m.sched.mu.Unlock()
+		for _, r := range m.sched.running {
+			if r {
+				return true
+			}
+		}
+	}
+	for _, t := range m.tabs {
+		if d, ok := t.(*dataTab); ok && d.loading {
+			return true
+		}
+	}
+	return false
+}
+
+// failed is the footer line of an operation that ended with err; a ctrl+c is not a failure.
+func failed(label string, err error) statusMsg {
+	if errors.Is(err, context.Canceled) {
+		return statusMsg{text: label + ": stopped"}
+	}
+	return statusMsg{text: label + ": " + err.Error(), err: true}
+}
+
 // do runs a slow operation off the UI loop and reports its outcome in the footer.
 func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 	m.busy++
 	m.setStatus(label+"…", false)
-	ctx := m.ctx
+	ctx := m.work()
 	return func() tea.Msg {
 		if err := f(ctx); err != nil {
-			return statusMsg{text: label + ": " + err.Error(), err: true}
+			return failed(label, err)
 		}
 		return statusMsg{text: label + " ✓"}
 	}
@@ -414,12 +458,12 @@ func (m *model) needsConfirm(dangerous bool) bool {
 // act runs a change, asking first when needsConfirm says so; the answer also counts as the
 // confirmation a protected environment needs.
 func (m *model) act(label string, dangerous bool, f func(ctx context.Context) error) tea.Cmd {
-	a, ctx := m.app, core.WithConfirmed(m.ctx)
+	a, ctx := m.app, core.WithConfirmed(m.work())
 	run := func() tea.Msg {
 		a.Confirmed = true
 		defer func() { a.Confirmed = false }()
 		if err := f(ctx); err != nil {
-			return statusMsg{text: label + ": " + err.Error(), err: true}
+			return failed(label, err)
 		}
 		return statusMsg{text: label + " ✓"}
 	}
@@ -889,7 +933,18 @@ func stripHit(h hit, id string) (int, bool) {
 
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if k.String() == "ctrl+c" && (m.prompt == nil || !m.prompt.popup) {
-		return tea.Quit
+		if m.working() && m.stopWork != nil {
+			m.stopWork()
+			m.busy = 0
+			for _, t := range m.tabs {
+				if d, ok := t.(*dataTab); ok && d.loading {
+					d.loading, d.seq = false, d.seq+1
+				}
+			}
+			m.setStatus("stopped what was running; ctrl+c again quits", false)
+			return nil
+		}
+		return m.quit()
 	}
 	m.sel = nil
 	if m.confirm != nil {
@@ -1173,23 +1228,72 @@ func (m *model) pickTask(prefix string) {
 			return nil
 		}
 		name := chosen[0]
-		run := func() tea.Msg {
-			self, err := os.Executable()
-			if err != nil {
-				return statusMsg{text: err.Error(), err: true}
-			}
-			script := `"$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
-			cmd := exec.Command("sh", "-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name)
-			return execProcess(cmd, func(err error) tea.Msg {
-				if err != nil {
-					return statusMsg{text: "task " + name + ": " + err.Error(), err: true}
-				}
-				return statusMsg{text: "task " + name + " ✓"}
-			})()
-		}
-		m.confirm = &confirm{text: "run task " + name + " on " + m.app.Env.Name + "?", run: run}
+		args := m.app.Tasks()[name].Args
+		m.askTaskArgs(name, args, make([]string, 0, len(args)))
 		return nil
 	})
+}
+
+// askTaskArgs asks for the task's args one after another (a pick list where it offers choices, else
+// a line prefilled with the default), then confirms and runs it; esc anywhere drops the task.
+func (m *model) askTaskArgs(name string, args []spec.TaskArg, answers []string) {
+	if len(answers) == len(args) {
+		m.runTask(name, engine.TaskArgValues(args, answers))
+		return
+	}
+	arg := args[len(answers)]
+	label := name + " › " + arg.Name
+	if arg.Help != "" {
+		label += ": " + arg.Help
+	}
+	next := func(v string) tea.Cmd {
+		m.askTaskArgs(name, args, append(answers, v))
+		return nil
+	}
+	choices := m.app.TaskArgChoices(m.ctx, arg)
+	if len(choices) == 0 {
+		m.ask(label, arg.Default, next)
+		return
+	}
+	if arg.Multi {
+		m.pickMany(label+"  (space marks, enter takes)", choices, nil, strings.Fields(arg.Default), func(c []string) tea.Cmd {
+			if len(c) == 0 {
+				return nil
+			}
+			return next(strings.Join(c, " "))
+		})
+		return
+	}
+	m.pick(label, choices, nil, max(0, slices.Index(choices, arg.Default)), false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		return next(c[0])
+	})
+}
+
+// runTask confirms, then runs rig task in the terminal; ctrl+c stops the task, not the shell
+// that waits for enter after it.
+func (m *model) runTask(name string, args []string) {
+	run := func() tea.Msg {
+		self, err := os.Executable()
+		if err != nil {
+			return statusMsg{text: err.Error(), err: true}
+		}
+		script := `trap 'echo; echo "✖ stopped"' INT; "$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
+		cmd := exec.Command("sh", append([]string{"-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name}, args...)...)
+		return execProcess(cmd, func(err error) tea.Msg {
+			if err != nil {
+				return statusMsg{text: "task " + name + ": " + err.Error(), err: true}
+			}
+			return statusMsg{text: "task " + name + " ✓"}
+		})()
+	}
+	what := name
+	if len(args) > 0 {
+		what += " " + strings.Join(args, " ")
+	}
+	m.confirm = &confirm{text: "run task " + what + " on " + m.app.Env.Name + "?", run: run}
 }
 
 type namespacesMsg struct {
