@@ -58,5 +58,33 @@ echo "rig: installed $("$dir/rig" --version 2>/dev/null || echo rig) to $dir/rig
 
 case ":$PATH:" in
   *":$dir:"*) ;;
-  *) echo "rig: add $dir to your PATH, e.g.  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile" ;;
+  *)
+    # Detect shell and append to appropriate rc file
+    shell_name=$(basename "$SHELL" 2>/dev/null || echo "")
+    rc_file=""
+
+    case "$shell_name" in
+      bash) rc_file="$HOME/.bashrc" ;;
+      zsh) rc_file="$HOME/.zshrc" ;;
+      fish) rc_file="$HOME/.config/fish/config.fish" ;;
+    esac
+
+    if [ -n "$rc_file" ]; then
+      # Check if the directory is already in the rc file
+      if ! grep -q "$dir" "$rc_file" 2>/dev/null; then
+        mkdir -p "$(dirname "$rc_file")"
+        {
+          echo ""
+          echo "export PATH=\"$dir:\$PATH\""
+        } >> "$rc_file"
+        echo "rig: added $dir to PATH in $rc_file"
+        echo "  run 'source $rc_file' to update your current shell"
+      fi
+    else
+      # Shell not recognized or $SHELL not set, print instructions
+      echo "rig: unable to determine your shell; add $dir to PATH:" >&2
+      echo "  For bash: echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" >&2
+      echo "  For zsh:  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" >&2
+    fi
+    ;;
 esac
