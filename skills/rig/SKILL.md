@@ -54,6 +54,12 @@ pods, and forwards a port for local processes. A value used in several places (d
 goes in `vars:` once (`environments.<env>.vars` per environment) and is referenced as `${NAME}`.
 Secrets go in `${NAME}` with `secrets:`, never in the file.
 
+Tasks must be idempotent: running one twice (a retry, a rerun from history, an agent) must not break
+or duplicate anything. Use `IF NOT EXISTS` / `CREATE OR REPLACE`, `kubectl apply`, deletes that tolerate
+missing objects (`rm -f`, `--ignore-not-found`), reset state before rebuilding it, and verify the
+outcome (poll, retry, fail loudly) instead of trusting a `sleep`. Long logic goes in a script under
+`scripts/` that the task calls.
+
 ## Common asks, shortest path
 
 Read what rig already knows before searching the repository: `rig status <svc>`, `rig env`, `rig

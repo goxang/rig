@@ -40,6 +40,12 @@ Build and test with `GOTOOLCHAIN=local` (Go 1.23, deps pinned to the last 1.23 r
 - Work over a long list (every KV key, every hit) runs once per change, not per frame: cache what
   `view` needs (see `picker.visible`/`widths`), and debounce requests made while the cursor moves.
 
+## Tasks
+
+A task in rig.yaml (the examples, a project's) must be idempotent: a retry, a rerun or an agent runs it
+twice. Create if missing, delete tolerantly, reset before rebuilding, verify the outcome. See the tasks
+section of `docs/config.md`.
+
 ## Portability
 
 - Every host process goes through `internal/sh`: `sh.New(...)` for tools, `sh.Shell()` for a POSIX
