@@ -102,3 +102,13 @@ func TestFlattenKeepsAMultiLineQueryWhole(t *testing.T) {
 		t.Fatalf("flatten = %q", got)
 	}
 }
+
+func TestSplitNext(t *testing.T) {
+	rest, next := SplitNext("The answer.\n\nNEXT: restart parser\n")
+	if rest != "The answer." || next != "restart parser" {
+		t.Fatalf("%q %q", rest, next)
+	}
+	if rest, next := SplitNext("no suggestion"); rest != "no suggestion" || next != "" {
+		t.Fatalf("%q %q", rest, next)
+	}
+}

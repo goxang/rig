@@ -22,6 +22,8 @@ type Session struct {
 	Created   time.Time `json:"created"`
 	Updated   time.Time `json:"updated"`
 	Messages  []Message `json:"messages"`
+	// Next is what the last answer suggests the user asks next
+	Next string `json:"next,omitempty"`
 
 	dir string
 }

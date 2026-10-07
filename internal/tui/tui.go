@@ -120,9 +120,11 @@ type model struct {
 	confirm *confirm
 	// driving is rig_ui pressing keys for the AI: every change they start waits for the user
 	driving bool
-	prompt  *prompt
-	picker  *picker
-	help    bool
+	// yes is rig opened with --yes: a protected environment no longer asks before every change
+	yes    bool
+	prompt *prompt
+	picker *picker
+	help   bool
 	// helpScroll is lines down from the top of the help text; helpQuery, when set, is highlighted
 	// and jumped to with / and n
 	helpScroll int
@@ -382,7 +384,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	if t, err := LoadTheme(CurrentTheme()); err == nil {
 		applyTheme(t)
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
+	m := &model{ctx: ctx, app: a, yes: a.Confirmed, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
 	m.specAt = specTime(a)
@@ -582,10 +584,10 @@ func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 }
 
 // needsConfirm: only dangerous changes on a real Kubernetes cluster, and every change on a protected
-// environment, wait for enter. Local, docker and kind run at once.
+// environment (unless rig was opened with --yes), wait for enter. Local, docker and kind run at once.
 func (m *model) needsConfirm(dangerous bool) bool {
 	e := m.app.Env
-	return m.driving || e.Protected || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
+	return m.driving || e.Protected && !m.yes || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
 }
 
 // act runs a change, asking first when needsConfirm says so; the answer also counts as the
@@ -598,7 +600,7 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 	a, ctx := m.app, core.WithConfirmed(m.work())
 	run := func() tea.Msg {
 		a.Confirmed = true
-		defer func() { a.Confirmed = false }()
+		defer func() { a.Confirmed = m.yes }()
 		return m.runJob(ctx, label, f)
 	}
 	if !m.needsConfirm(dangerous) {
@@ -889,6 +891,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keepViews()
 		old, screen := m.app, m.tabs[m.active].name()
 		m.app, m.gen = msg.app, m.gen+1
+		m.app.Confirmed = m.yes
 		go old.Close()
 		m.services, m.svcBusy = nil, false
 		m.opened, m.refreshed = map[int]bool{}, map[int]time.Time{}
@@ -1036,6 +1039,14 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		}
 		if m.picker != nil {
 			return m.picker.key(m, key)
+		}
+		if m.showErrors {
+			if up {
+				m.jobScroll += 3
+			} else {
+				m.jobScroll = max(0, m.jobScroll-3)
+			}
+			return nil
 		}
 		if wh, ok := m.tabs[m.active].(wheeler); ok && !m.help && !m.showAlerts && !m.showErrors {
 			if z, ok := m.zoneAt(e.X, e.Y); ok {
@@ -1378,23 +1389,18 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		}
 	}
 	if box := m.envInfo; box != nil {
-		switch k.String() {
-		case "up", "k":
-			box.sel = max(0, box.sel-1)
-			return nil
-		case "down", "j":
-			box.sel = min(box.sel+1, len(box.lines)-1)
-			return nil
-		case "e", "enter":
-			return m.editEnvVar(box)
-		case "y":
+		if k.String() == "y" && !box.typing {
 			copyText(ansi.Strip(box.plainText()))
 			m.setStatus("copied the environment", false)
 			return nil
-		default:
-			m.envInfo = nil
-			return nil
 		}
+		switch edit, done := box.key(k); {
+		case edit:
+			return m.editEnvVar(box)
+		case done:
+			m.envInfo = nil
+		}
+		return nil
 	}
 	if m.help {
 		return m.helpKey(k)
@@ -1533,7 +1539,7 @@ func (m *model) quit() tea.Cmd {
 	if busy := m.busy - len(tasks); busy > 0 {
 		stops = append(stops, fmt.Sprintf("%d operations still working", busy))
 	}
-	if m.chat != nil && m.chat.busy {
+	if m.chat != nil && m.chat.running() > 0 {
 		stops = append(stops, "the assistant's turn")
 	}
 	leave := func() tea.Msg {
@@ -1589,7 +1595,7 @@ func (m *model) quit() tea.Cmd {
 				return err
 			})
 			if err != nil {
-				a.Confirmed = false
+				a.Confirmed = m.yes
 				return statusMsg{text: "stop generators: " + err.Error() + " (not quitting)", err: true}
 			}
 			return leave()
@@ -1766,21 +1772,28 @@ func (m *model) askTaskArgs(name string, args []spec.TaskArg, answers []string) 
 		m.ask(label, arg.Default, next)
 		return
 	}
+	def := arg.Default
+	if arg.From == "branches" && def == "" {
+		def = engine.WorkingTree
+	}
 	if arg.Multi {
-		m.pickMany(label+"  (space marks, enter takes)", choices, nil, strings.Fields(arg.Default), func(c []string) tea.Cmd {
+		m.pickMany(label+"  (space marks, enter takes)", choices, nil, strings.Fields(def), func(c []string) tea.Cmd {
 			if len(c) == 0 {
 				return nil
 			}
 			return next(strings.Join(c, " "))
 		})
-		return
+	} else {
+		m.pick(label, choices, nil, max(0, slices.Index(choices, def)), false, func(c []string) tea.Cmd {
+			if len(c) == 0 {
+				return nil
+			}
+			return next(c[0])
+		})
 	}
-	m.pick(label, choices, nil, max(0, slices.Index(choices, arg.Default)), false, func(c []string) tea.Cmd {
-		if len(c) == 0 {
-			return nil
-		}
-		return next(c[0])
-	})
+	if arg.From == "services" {
+		serviceTabs(m, strings.Fields(def))
+	}
 }
 
 // runTask runs a task in the background after a confirmation: the activity view (!) opens on it
@@ -2237,7 +2250,7 @@ func (m *model) interaction() (box, keys string) {
 	case m.picker != nil:
 		return "", " " + m.picker.hints()
 	case m.chat != nil && m.chat.open && m.chat.focus:
-		return "", keyHints([][2]string{{"enter", "send"}, {"/", "commands"}, {"tab", "ideas, completes a command"}, {"↑↓ wheel", "scroll"}, {"ctrl+x", "stop"}, {"esc", "hide"}, {"click left", "back to the screen"}})
+		return "", keyHints([][2]string{{"enter", "send"}, {"/", "commands"}, {"tab", "suggestion, completes a command"}, {"↑", "last sent"}, {"pgup pgdn wheel", "scroll"}, {"ctrl+x", "stop"}, {"esc", "hide"}, {"click left", "back to the screen"}})
 	}
 	// the first few keys of the screen only: ? lists them all, so the footer stays readable
 	n := footerHints
@@ -2385,7 +2398,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (ctrl+o there shows its steps)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < >, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"ctrl+r", "reload rig.yaml after you or the assistant edited it (filters stay)"}, {"S", "save this session: rig opens on it from now on, as you leave it, filters included (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, / searches, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"ctrl+r", "reload rig.yaml after you or the assistant edited it (filters stay)"}, {"S", "save this session: rig opens on it from now on, as you leave it, filters included (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

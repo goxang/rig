@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goxang/rig/internal/sh"
 )
 
 // What rig's MCP server reads to know it serves an assistant, and with which bounds.
@@ -98,12 +100,32 @@ func (r *Runner) Turn(ctx context.Context, s *Session, typed, screen string, on 
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// a stop must not wait for the backend's own children (its MCP servers) to let go of stdout
+	stopped := make(chan struct{})
+	defer close(stopped)
+	go func() {
+		select {
+		case <-ctx.Done():
+			sh.KillGroup(cmd)
+			_ = out.Close()
+		case <-stopped:
+		}
+	}()
+	s.Next = ""
 	var text []string
 	var tools []string
 	failed := ""
 	emit := func(e Event) {
 		switch e.Kind {
 		case "text":
+			var next string
+			if e.Text, next = SplitNext(e.Text); next != "" {
+				s.Next = next
+				on(Event{Kind: "next", Text: next})
+			}
+			if strings.TrimSpace(e.Text) == "" {
+				return
+			}
 			text = append(text, e.Text)
 		case "tool":
 			tools = append(tools, e.Text)
@@ -145,6 +167,16 @@ func (r *Runner) Turn(ctx context.Context, s *Session, typed, screen string, on 
 		return ErrTurnFailed
 	}
 	return nil
+}
+
+// SplitNext takes the "NEXT: ..." line the system prompt asks answers to end with off text.
+func SplitNext(text string) (rest, next string) {
+	t := strings.TrimRight(text, " \n")
+	i := strings.LastIndexByte(t, '\n') + 1
+	if v, ok := strings.CutPrefix(strings.TrimSpace(t[i:]), "NEXT:"); ok {
+		return strings.TrimRight(t[:i], "\n"), strings.Trim(strings.TrimSpace(v), "`\"")
+	}
+	return text, ""
 }
 
 // ErrTurnFailed is a turn whose failure was already reported as an error event.
@@ -239,6 +271,8 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 		cmd = exec.CommandContext(ctx, r.Setup.Bin, append(args, "--", msg)...)
 	}
 	cmd.Dir, cmd.Env = r.Scope.Dir, env
+	sh.OwnGroup(cmd)
+	cmd.Cancel = func() error { sh.KillGroup(cmd); return nil }
 	cmd.WaitDelay = 3 * time.Second
 	return cmd, nil
 }

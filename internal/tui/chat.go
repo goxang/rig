@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -23,31 +25,83 @@ import (
 	"github.com/goxang/rig/spec"
 )
 
-// chat is the assistant's drawer (@): a conversation bound to the environment on screen, sent with
+// chat is the assistant's drawer (@): conversations bound to the environment on screen, sent with
 // what the screen shows. Turns run the user's opencode or Claude Code; rig's MCP server is its hands.
+// The conversation on screen is the embedded convo; live holds every one this run still follows, so
+// several can run at once.
 type chat struct {
 	open, focus bool
 	runner      *ai.Runner
-	sess        *ai.Session
-	// msgs is the transcript as shown; the running turn owns sess until it ends
-	msgs    []ai.Message
+	*convo
+	live    []*convo
 	input   textarea.Model
-	busy    bool
-	cancel  context.CancelFunc
-	started time.Time
-	scroll  int
 	starter int
 	err     string
 	// all is ctrl+a's select-all of the draft: the next key copies, replaces or drops it
 	all bool
 	// cmdSel is the highlighted row of the command menu that opens while a / command is typed
 	cmdSel int
+	// hist are the messages sent, oldest first; histAt walks them with ↑↓ (len(hist): the draft)
+	hist      []string
+	histAt    int
+	histDraft string
+}
+
+// convo is one conversation as shown: its transcript, its running turn and what waits for it.
+type convo struct {
+	sess *ai.Session
+	// msgs is the transcript as shown; the running turn owns sess until it ends
+	msgs    []ai.Message
+	busy    bool
+	cancel  context.CancelFunc
+	started time.Time
+	scroll  int
+	// queue are messages typed while a turn runs, sent in order after it
+	queue []string
+	// next is what the last answer suggests asking next (tab takes it)
+	next string
+	// rendered caches each message's lines at width rw
+	rendered [][]string
+	rw       int
+}
+
+func (c *chat) find(s *ai.Session) *convo {
+	if c == nil {
+		return nil
+	}
+	for _, cv := range c.live {
+		if cv.sess == s {
+			return cv
+		}
+	}
+	return nil
+}
+
+// switchTo shows cv, keeping only the conversations still at work besides it.
+func (c *chat) switchTo(cv *convo) {
+	keep := []*convo{cv}
+	for _, o := range c.live {
+		if o != cv && (o.busy || len(o.queue) > 0) {
+			keep = append(keep, o)
+		}
+	}
+	c.live, c.convo = keep, cv
+}
+
+func (c *chat) running() int {
+	n := 0
+	for _, cv := range c.live {
+		if cv.busy {
+			n++
+		}
+	}
+	return n
 }
 
 type chatCmd struct{ name, args, help string }
 
 var chatCommands = []chatCmd{
-	{"/new", "", "start a new conversation"},
+	{"/new", "", "start a new conversation (a running one goes on in /sessions)"},
 	{"/sessions", "", "pick a conversation (ctrl+d closes one there)"},
 	{"/close", "", "forget this conversation"},
 	{"/stop", "", "stop the running turn (ctrl+x)"},
@@ -174,7 +228,7 @@ func (m *model) chatOpen() *chat {
 			return "  "
 		})
 		in.ShowLineNumbers = false
-		in.Placeholder = "ask anything · enter: send · alt+enter: newline · tab: ideas · /sessions"
+		in.Placeholder = chatPlaceholder
 		in.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter"))
 		editorTextarea(&in)
 		for _, st := range []*textarea.Style{&in.FocusedStyle, &in.BlurredStyle} {
@@ -182,7 +236,10 @@ func (m *model) chatOpen() *chat {
 			st.CursorLine = lipgloss.NewStyle()
 		}
 		in.SetHeight(chatInputHeight)
-		m.chat = &chat{input: in}
+		m.chat = &chat{input: in, convo: &convo{}}
+		m.chat.live = []*convo{m.chat.convo}
+		m.chat.hist = loadChatHistory(m.app.AIDir())
+		m.chat.histAt = len(m.chat.hist)
 	}
 	c := m.chat
 	if c.runner == nil {
@@ -198,15 +255,23 @@ func (m *model) chatOpen() *chat {
 
 func (c *chat) enabled() bool { return c.runner != nil && c.runner.Setup.Enabled() }
 
-// newSession starts a conversation on the environment on screen.
+// newSession starts a conversation on the environment on screen; one still running goes on.
 func (c *chat) newSession(m *model) {
-	c.sess, c.msgs, c.scroll, c.starter = nil, nil, 0, 0
+	cv := &convo{}
 	if c.enabled() {
-		c.sess = ai.NewSession(m.app.AIDir(), c.runner.Setup.Backend, m.app.Env.Name)
+		cv.sess = ai.NewSession(m.app.AIDir(), c.runner.Setup.Backend, m.app.Env.Name)
 	}
+	c.starter = 0
+	c.switchTo(cv)
 }
 
 func (c *chat) load(m *model, id string) error {
+	for _, cv := range c.live {
+		if cv.sess != nil && cv.sess.ID == id {
+			c.switchTo(cv)
+			return nil
+		}
+	}
 	s, err := ai.LoadSession(m.app.AIDir(), id)
 	if err != nil {
 		return err
@@ -214,16 +279,72 @@ func (c *chat) load(m *model, id string) error {
 	if s.Env != m.app.Env.Name {
 		return fmt.Errorf("conversation %s is on %s: switch there (E) first", s.ID, s.Env)
 	}
-	c.sess, c.msgs, c.scroll = s, append([]ai.Message{}, s.Messages...), 0
+	c.switchTo(&convo{sess: s, msgs: append([]ai.Message{}, s.Messages...), next: s.Next})
 	return nil
 }
 
-// reset follows an environment switch: the old conversation stays with its environment.
+// reset follows an environment switch: the old conversations stay with their environment.
 func (c *chat) reset() {
-	if c.cancel != nil {
-		c.cancel()
+	for _, cv := range c.live {
+		if cv.cancel != nil {
+			cv.cancel()
+		}
 	}
-	c.runner, c.sess, c.msgs, c.busy, c.scroll = nil, nil, nil, false, 0
+	c.runner, c.convo = nil, &convo{}
+	c.live = []*convo{c.convo}
+}
+
+const chatPlaceholder = "ask anything · enter send · alt+enter newline · ↑ history · tab ideas · / commands"
+
+// remember adds a sent message to the ↑ history, kept across runs.
+func (c *chat) remember(m *model, text string) {
+	if n := len(c.hist); n == 0 || c.hist[n-1] != text {
+		c.hist = append(c.hist, text)
+	}
+	if len(c.hist) > 200 {
+		c.hist = c.hist[len(c.hist)-200:]
+	}
+	c.histAt, c.histDraft = len(c.hist), ""
+	saveChatHistory(m.app.AIDir(), c.hist)
+}
+
+func chatHistoryFile(dir string) string { return filepath.Join(dir, "ai", "history.json") }
+
+func loadChatHistory(dir string) []string {
+	var h []string
+	if raw, err := os.ReadFile(chatHistoryFile(dir)); err == nil {
+		_ = json.Unmarshal(raw, &h)
+	}
+	return h
+}
+
+func saveChatHistory(dir string, h []string) {
+	raw, _ := json.Marshal(h)
+	_ = os.MkdirAll(filepath.Dir(chatHistoryFile(dir)), 0o700)
+	_ = os.WriteFile(chatHistoryFile(dir), raw, 0o600)
+}
+
+// recall walks the history: older (up) or newer; past the newest it gives the draft back.
+func (c *chat) recall(older bool) {
+	if c.histAt == len(c.hist) {
+		c.histDraft = c.input.Value()
+	}
+	switch {
+	case older && c.histAt > 0:
+		c.histAt--
+	case !older && c.histAt < len(c.hist):
+		c.histAt++
+	default:
+		return
+	}
+	v := c.histDraft
+	if c.histAt < len(c.hist) {
+		v = c.hist[c.histAt]
+	}
+	c.input.SetValue(v)
+	if older {
+		c.input.CursorStart()
+	}
 }
 
 func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
@@ -234,7 +355,13 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 	case "ctrl+a":
 		c.all = c.input.Value() != ""
 		return nil
-	case "ctrl+c", "ctrl+y", "ctrl+x":
+	case "ctrl+x":
+		if c.busy {
+			m.chatStop(c.convo)
+			return nil
+		}
+		fallthrough
+	case "ctrl+c", "ctrl+y":
 		text := c.input.Value()
 		if text == "" {
 			text = c.lastAnswer()
@@ -292,31 +419,36 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 	case "esc":
 		c.open, c.focus = false, false
 		return nil
-	case "ctrl+x":
-		if c.busy && c.cancel != nil {
-			c.cancel()
-		}
-		return nil
 	case "pgup":
 		c.scroll += 10
 		return nil
 	case "pgdown":
 		c.scroll = max(0, c.scroll-10)
 		return nil
-	case "up", "down":
-		// a multi-line draft keeps up/down for moving the cursor between its lines;
-		// otherwise they scroll the transcript, as before.
-		if c.input.LineCount() > 1 {
-			break
-		}
-		if k.String() == "up" {
-			c.scroll++
-		} else {
-			c.scroll = max(0, c.scroll-1)
-		}
+	case "shift+up", "ctrl+up":
+		c.scroll++
 		return nil
+	case "shift+down", "ctrl+down":
+		c.scroll = max(0, c.scroll-1)
+		return nil
+	case "up":
+		// in a multi-line draft up moves between its lines until the first one
+		if c.input.Line() == 0 {
+			c.recall(true)
+			return nil
+		}
+	case "down":
+		if c.input.Line() == c.input.LineCount()-1 {
+			c.recall(false)
+			return nil
+		}
 	case "tab":
 		v := c.input.Value()
+		if v == "" && c.next != "" {
+			c.input.SetValue(c.next)
+			c.input.CursorEnd()
+			return nil
+		}
 		ideas := m.ideas()
 		if len(ideas) > 0 && (v == "" || contains(ideas, v)) {
 			c.input.SetValue(ideas[c.starter%len(ideas)])
@@ -330,6 +462,9 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		c.input.SetValue("")
+		if !strings.HasPrefix(v, "/") || strings.HasPrefix(v, "/why") {
+			c.remember(m, v)
+		}
 		if f := strings.Fields(v); f[0] == "/why" {
 			return m.chatWhy(f[1:])
 		}
@@ -357,14 +492,11 @@ func (m *model) chatCommand(v string) tea.Cmd {
 	switch strings.Fields(v)[0] {
 	case "/new":
 		if c.busy {
-			m.setStatus("a turn is running: ctrl+x stops it", true)
-			return nil
+			m.setStatus("the last conversation goes on: /sessions brings it back", false)
 		}
 		c.newSession(m)
 	case "/stop":
-		if c.cancel != nil {
-			c.cancel()
-		}
+		m.chatStop(c.convo)
 	case "/close":
 		if c.busy {
 			m.setStatus("a turn is running: ctrl+x stops it", true)
@@ -515,17 +647,28 @@ func (m *model) pickChatSession() {
 		return
 	}
 	var ids, desc []string
+	sel := 0
 	for _, s := range ss {
 		if s.Env == m.app.Env.Name {
+			d := fmt.Sprintf("%s · %d msgs · %s", s.Updated.Format("01-02 15:04"), len(s.Messages), s.Title)
+			for _, cv := range m.chat.live {
+				if cv.sess != nil && cv.sess.ID == s.ID && cv.busy {
+					d = sAmber.Render("⟳ running ") + d
+				}
+			}
+			if m.chat.sess != nil && m.chat.sess.ID == s.ID {
+				d = sAccent.Render("● ") + d
+				sel = len(ids)
+			}
 			ids = append(ids, s.ID)
-			desc = append(desc, fmt.Sprintf("%s · %d msgs · %s", s.Updated.Format("01-02 15:04"), len(s.Messages), s.Title))
+			desc = append(desc, d)
 		}
 	}
 	if len(ids) == 0 {
 		m.setStatus("no conversations on "+m.app.Env.Name+" yet", false)
 		return
 	}
-	m.pick("conversations on "+m.app.Env.Name+" (ctrl+d closes one)", ids, desc, 0, false, func(c []string) tea.Cmd {
+	m.pick("conversations on "+m.app.Env.Name+" (ctrl+d closes one)", ids, desc, sel, false, func(c []string) tea.Cmd {
 		if len(c) == 0 {
 			return nil
 		}
@@ -536,10 +679,13 @@ func (m *model) pickChatSession() {
 		return nil
 	})
 	m.picker.del = func(id string) error {
-		if c := m.chat; c.sess != nil && c.sess.ID == id {
-			if c.busy {
-				return errors.New("its turn is running: ctrl+x stops it")
+		c := m.chat
+		for _, cv := range c.live {
+			if cv.sess != nil && cv.sess.ID == id && cv.busy {
+				return errors.New("its turn is running: open it and ctrl+x stops it")
 			}
+		}
+		if c.sess != nil && c.sess.ID == id {
 			c.newSession(m)
 		}
 		return ai.CloseSession(m.app.AIDir(), id)
@@ -566,6 +712,7 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 	if c.sess == nil {
 		c.newSession(m)
 	}
+	cv := c.convo
 	fix := args[0] == "--fix"
 	if fix {
 		args = args[1:]
@@ -575,11 +722,11 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 		return nil
 	}
 	what := strings.Join(args, " ")
-	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "/why " + what, At: time.Now()})
-	c.busy, c.started, c.scroll = true, time.Now(), 0
+	cv.msgs = append(cv.msgs, ai.Message{Role: "user", Text: "/why " + what, At: time.Now()})
+	cv.busy, cv.started, cv.scroll, cv.next = true, time.Now(), 0, ""
 	ctx, cancel := context.WithCancel(m.ctx)
-	c.cancel = cancel
-	r, s, a := c.runner, c.sess, m.app
+	cv.cancel = cancel
+	r, s, a := c.runner, cv.sess, m.app
 	return func() tea.Msg {
 		defer cancel()
 		inc, err := a.InvestigateSymptom(ctx, args, 15*time.Minute)
@@ -596,25 +743,31 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 	}
 }
 
+// chatSend sends text in the conversation on screen, or queues it while a turn runs there.
 func (m *model) chatSend(text string) tea.Cmd {
 	c := m.chat
 	if !c.enabled() {
 		m.setStatus("AI is off: rig ai config", true)
 		return nil
 	}
-	if c.busy {
-		m.setStatus("a turn is running: wait, or ctrl+x stops it", true)
-		return nil
-	}
 	if c.sess == nil {
 		c.newSession(m)
 	}
+	if c.busy {
+		c.queue = append(c.queue, text)
+		c.scroll = 0
+		return nil
+	}
+	return m.sendOn(c.convo, text)
+}
+
+func (m *model) sendOn(cv *convo, text string) tea.Cmd {
 	screen := m.screenContext()
-	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: text, At: time.Now()})
-	c.busy, c.started, c.scroll = true, time.Now(), 0
+	cv.msgs = append(cv.msgs, ai.Message{Role: "user", Text: text, At: time.Now()})
+	cv.busy, cv.started, cv.scroll, cv.next = true, time.Now(), 0, ""
 	ctx, cancel := context.WithCancel(m.ctx)
-	c.cancel = cancel
-	r, s := c.runner, c.sess
+	cv.cancel = cancel
+	r, s := m.chat.runner, cv.sess
 	return func() tea.Msg {
 		defer cancel()
 		err := r.Turn(ctx, s, text, screen, func(e ai.Event) { program.Send(chatEventMsg{s: s, e: e}) })
@@ -622,30 +775,54 @@ func (m *model) chatSend(text string) tea.Cmd {
 	}
 }
 
+// chatStop stops cv's turn; what was queued behind it comes back to the draft.
+func (m *model) chatStop(cv *convo) {
+	if cv.cancel != nil {
+		cv.cancel()
+	}
+	c := m.chat
+	if len(cv.queue) > 0 && cv == c.convo && c.input.Value() == "" {
+		c.input.SetValue(strings.Join(cv.queue, "\n"))
+		c.input.CursorEnd()
+	}
+	cv.queue = nil
+}
+
 func (m *model) chatUpdate(msg tea.Msg) (tea.Cmd, bool) {
 	c := m.chat
 	switch msg := msg.(type) {
 	case chatEventMsg:
-		if c != nil && msg.s == c.sess {
-			role := msg.e.Kind
-			if role == "text" {
-				role = "assistant"
+		if cv := c.find(msg.s); cv != nil {
+			switch msg.e.Kind {
+			case "next":
+				cv.next = msg.e.Text
+			case "text":
+				cv.msgs = append(cv.msgs, ai.Message{Role: "assistant", Text: msg.e.Text, At: time.Now()})
+			default:
+				cv.msgs = append(cv.msgs, ai.Message{Role: msg.e.Kind, Text: msg.e.Text, At: time.Now()})
 			}
-			c.msgs = append(c.msgs, ai.Message{Role: role, Text: msg.e.Text, At: time.Now()})
 		}
 		return nil, true
 	case chatDoneMsg:
-		if c != nil && msg.s == c.sess {
-			c.busy = false
+		var cmd tea.Cmd
+		if cv := c.find(msg.s); cv != nil {
+			cv.busy = false
 			if msg.err != nil && !errors.Is(msg.err, ai.ErrTurnFailed) {
-				c.msgs = append(c.msgs, ai.Message{Role: "error", Text: msg.err.Error()})
+				cv.msgs = append(cv.msgs, ai.Message{Role: "error", Text: msg.err.Error()})
 			}
-			took := time.Since(c.started).Round(100 * time.Millisecond)
-			c.msgs = append(c.msgs, ai.Message{Role: "took", Text: "took " + took.String(), At: time.Now()})
+			took := time.Since(cv.started).Round(100 * time.Millisecond)
+			cv.msgs = append(cv.msgs, ai.Message{Role: "took", Text: "took " + took.String(), At: time.Now()})
+			if len(cv.queue) > 0 && c.enabled() {
+				next := cv.queue[0]
+				cv.queue = cv.queue[1:]
+				cmd = m.sendOn(cv, next)
+			} else if cv != c.convo {
+				m.setStatus("the assistant answered in "+cv.sess.Title+": /sessions opens it", false)
+			}
 		}
 		// the assistant may have changed what the screens show
 		m.svcAt = time.Time{}
-		return m.tabs[m.active].refresh(m), true
+		return batch(cmd, m.tabs[m.active].refresh(m)), true
 	case bridgeMsg:
 		return m.bridge(msg), true
 	case aiAllowMsg:
@@ -913,6 +1090,46 @@ func (m *model) chatWidth(h int) int {
 	return m.paneSize("chat", splitGeo{total: m.w, minA: 36, minB: 30, fromEnd: true}, min(max(46, m.w*2/5), 90), 0, 0, h)
 }
 
+// transcript renders the conversation's messages in iw columns, once per message.
+func (cv *convo) transcript(iw int) []string {
+	if cv.rw != iw || len(cv.rendered) > len(cv.msgs) {
+		cv.rendered, cv.rw = nil, iw
+	}
+	bar := sAccent.Render("▌ ")
+	for _, msg := range cv.msgs[len(cv.rendered):] {
+		var lines []string
+		add := func(s string) { lines = append(lines, strings.Split(s, "\n")...) }
+		switch msg.Role {
+		case "user":
+			add("")
+			for _, l := range strings.Split(wordWrap(msg.Text, iw-2), "\n") {
+				add(bar + sTitle.Render(l))
+			}
+			add("")
+		case "assistant":
+			add(renderMarkdown(msg.Text, iw))
+			add("")
+		case "tool":
+			add(sDim.Render(wordWrap("  ⎿ "+msg.Text, iw)))
+		case "error":
+			add(sRed.Render(wordWrap("✖ "+msg.Text, iw)))
+		case "audit":
+			add(sAmber.Render(wordWrap("  "+msg.Text, iw)))
+		case "took":
+			add(sDim.Render("  ⏱ " + msg.Text))
+		}
+		for _, t := range msg.Tools {
+			add(sDim.Render(wordWrap("  ⎿ "+t, iw)))
+		}
+		cv.rendered = append(cv.rendered, lines)
+	}
+	var out []string
+	for _, l := range cv.rendered {
+		out = append(out, l...)
+	}
+	return out
+}
+
 func (c *chat) view(m *model, x, w, h int) string {
 	m.zone("chat", x, 0, w, h)
 	iw := w - 4
@@ -923,6 +1140,9 @@ func (c *chat) view(m *model, x, w, h int) string {
 	title += " · " + m.app.Env.Name
 	if m.app.Env.Protected {
 		title += " PROTECTED"
+	}
+	if c.sess != nil && c.sess.Title != "" {
+		title += " · " + c.sess.Title
 	}
 	var lines []string
 	add := func(s string) { lines = append(lines, strings.Split(s, "\n")...) }
@@ -945,31 +1165,23 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sDim.Render(wordWrap("· "+s, iw)))
 		}
 	}
-	for _, msg := range c.msgs {
-		switch msg.Role {
-		case "user":
-			add("")
-			add(sAccent.Render(wordWrap("› "+msg.Text, iw)))
-		case "assistant":
-			add(renderMarkdown(msg.Text, iw))
-		case "tool":
-			add(sDim.Render(wordWrap("  → "+msg.Text, iw)))
-		case "error":
-			add(sRed.Render(wordWrap("✖ "+msg.Text, iw)))
-		case "audit":
-			add(sAmber.Render(wordWrap("  "+msg.Text, iw)))
-		case "took":
-			add(sDim.Render("  ⏱ " + msg.Text))
-		}
-		for _, t := range msg.Tools {
-			add(sDim.Render(wordWrap("  → "+t, iw)))
-		}
-	}
-	status := sDim.Render("enter send · alt+enter newline · tab ideas · / commands · esc hide")
+	lines = append(lines, c.transcript(iw)...)
 	if c.busy {
-		status = sAmber.Render(fmt.Sprintf("⟳ working %s", time.Since(c.started).Round(time.Second))) + sDim.Render(" · ctrl+x stops")
-	} else if m.confirm != nil {
-		status = sAmber.Render("↓ answer the question below")
+		lines = append(lines, sAmber.Render(fmt.Sprintf("⟳ working %s", time.Since(c.started).Round(time.Second)))+sDim.Render(" · ctrl+x stops"))
+	}
+	for _, q := range c.queue {
+		add(sDim.Render(wordWrap("  ⧗ queued: "+q, iw)))
+	}
+	keys := "enter send · alt+enter newline · ↑ history · / commands · esc hide"
+	switch {
+	case m.confirm != nil:
+		keys = sAmber.Render("↓ answer the question below")
+	case c.busy:
+		keys = "enter queues · ctrl+x stops · /new starts another · pgup scrolls"
+	}
+	status := sDim.Render(keys)
+	if n := c.running(); n > 0 && (!c.busy || n > 1) {
+		status = sAmber.Render(fmt.Sprintf("%d running · ", n)) + status
 	}
 	var menuLines []string
 	if menu := cmdMenu(c.input.Value()); len(menu) > 0 && c.focus {
@@ -991,7 +1203,8 @@ func (c *chat) view(m *model, x, w, h int) string {
 		}
 		menuLines = append(menuLines, sDim.Render(" ↑↓ pick · tab completes · enter runs"))
 	}
-	room := max(1, h-4-(chatInputHeight-1)-len(menuLines))
+	// the transcript, then the input in a box of its own, then the keys
+	room := max(1, h-2-(chatInputHeight+2)-1-len(menuLines))
 	c.scroll = min(c.scroll, max(0, len(lines)-room))
 	end := len(lines) - c.scroll
 	start := max(0, end-room)
@@ -1001,12 +1214,26 @@ func (c *chat) view(m *model, x, w, h int) string {
 	} else if pad > 0 {
 		body += strings.Repeat("\n", pad)
 	}
-	c.input.SetWidth(iw - 3)
+	if c.scroll > 0 {
+		bl := strings.Split(body, "\n")
+		bl[len(bl)-1] = sAmber.Render(fmt.Sprintf("↓ %d more lines · pgdown", c.scroll))
+		body = strings.Join(bl, "\n")
+	}
+	c.input.Placeholder = chatPlaceholder
+	if c.next != "" {
+		c.input.Placeholder = c.next + "  (tab)"
+	}
+	c.input.SetWidth(iw - 2)
 	input := c.input.View()
 	if c.all {
-		input = sSel.Render(ansi.Wrap(c.input.Value(), iw-3, " "))
+		input = sSel.Render(ansi.Wrap(c.input.Value(), iw-2, " "))
 		input += strings.Repeat("\n", max(0, chatInputHeight-1-strings.Count(input, "\n")))
 	}
+	border := cPanel
+	if c.focus {
+		border = cAccent
+	}
+	input = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(0, 1).Width(iw).Render(input)
 	if len(menuLines) > 0 {
 		body += "\n" + strings.Join(menuLines, "\n")
 	}
@@ -1028,29 +1255,6 @@ func wordWrap(s string, w int) string {
 		return s
 	}
 	return lipgloss.NewStyle().Width(w).Render(s)
-}
-
-// renderMarkdown colours what matters in an answer: code, headings, list bullets.
-func renderMarkdown(s string, w int) string {
-	var out []string
-	code := false
-	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
-		t := strings.TrimSpace(l)
-		switch {
-		case strings.HasPrefix(t, "```"):
-			code = !code
-			continue
-		case code:
-			out = append(out, sGreen.Render(truncate("  "+l, w)))
-			continue
-		case strings.HasPrefix(t, "#"):
-			out = append(out, sTitle.Render(wordWrap(strings.TrimLeft(t, "# "), w)))
-			continue
-		}
-		l = strings.ReplaceAll(l, "**", "")
-		out = append(out, wordWrap(l, w))
-	}
-	return strings.Join(out, "\n")
 }
 
 // aiContexter says what a screen shows, for the assistant: selection first, then a sample of the data.

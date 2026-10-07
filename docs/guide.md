@@ -42,7 +42,8 @@ rig mcp                       # MCP server for AI agents
 
 `-e <env>` (or `$RIG_ENV`) picks the environment. A `protected: true` environment refuses changes
 without `--yes`; pushing over an existing image tag needs it too. A `readonly: true` one refuses them
-even with it. In the TUI the confirmation is the `--yes`.
+even with it. In the TUI the confirmation is the `--yes`; `rig --yes` opens it already confirmed, so a
+protected environment asks nothing more.
 
 ## Terminal UI
 
@@ -74,7 +75,7 @@ shows only when rig.yaml gives it something (no `kv` component, no KV screen); `
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
 `T` runs a task from rig.yaml in the background (`ctrl+o` on one shows its args and steps); a task keeps
 running when you quit rig, and a saved session reopened later follows it again or shows how it ended. `ctrl+e` shows the environment (variables with secrets hidden, each
-component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
+component's address and database; `/` searches it, `e` edits a variable), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) and pins it: from then on `rig` opens on it as you left it
 (`rig --fresh` starts clean and unpins; `rig resume` picks another),
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
@@ -86,11 +87,13 @@ On the Services screen, `d` deploys a tag or a whole image (the running one is f
 service's env, `F` opens its manifests (edit the file, or the live object on the cluster), and `b` runs
 any of build, push and deploy for the selected or marked services with a tag you choose, then shows the
 env each service deploys with (on Kubernetes, its live workload's) to change or add any first; its
-last row reaches the environment's deploy variables (database names, say).
+last row reaches the environment's deploy variables (database names, say). A build asks for the branch
+first (the working tree, or a local or remote branch built from a clean checkout), and a ship task's
+picker is the same one, groups and sections in tabs.
 
 What you start (a build, a deploy, a task) runs in the background: the line above the keys shows the
 running one and its last output line, and `!` opens the activity view with every operation of the
-session, the full output of the one picked (`y` copies it), `x` to stop it and the errors (`tab`). A
+session, the full output of the one picked (`y` copies it, the wheel scrolls), `x` to stop it and the errors (`tab`). A
 task opens that view on itself; when a step asks for input (the line above the keys says so), `enter`
 there types the answer. Several tasks can run at once. A question or an input opens in its own box
 above the keys, which then show the keys that box takes; `esc` on it returns to the picker or box it
@@ -107,7 +110,7 @@ assistant edited it (the status line says when the file changed). The help
 new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
 
 `ctrl+p` picks a colour theme, previewing each as you move (`rig theme` lists and sets them too):
-default, nord, dracula, gruvbox, catppuccin, mono, or your own. `rig theme --save mine nord` writes
+default, nord, dracula, gruvbox, catppuccin, clay, ember, mono, or your own. `rig theme --save mine nord` writes
 `~/.config/rig/themes/mine.yaml` to edit; a theme file sets `base:` and only the colours it changes,
 with `light:` for light terminals (without it, the default theme's light shades). Any colour too faint
 to read on the terminal, a bar or a cursor line is lightened or darkened just enough, so a theme of
@@ -148,6 +151,13 @@ or KV query runs once. A failure goes back to the AI with the error, up to three
 kubectl, HTTP and broker queries are never run to check.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
 AI or not.
+
+The chat renders the answers' markdown (lists, tables, code) wrapped to the box, and types in its own
+box under them. `enter` while the assistant works queues the message for after the answer; `ctrl+x`
+stops it (queued messages come back into the input). `↑` recalls what you sent before, `pgup`/`pgdn`
+(or `shift+↑↓`, the wheel) scroll, and the empty input suggests a next question: `tab` takes it.
+`/new` starts a fresh conversation even mid-answer: the other keeps running, `/sessions` brings it back,
+and several can run at once.
 
 In the chat, `/` opens a menu of its commands with what each does (`↑↓` picks, `tab` completes, `enter`
 runs; `/help` lists them). `/model` and `/effort` pick the chat's model (opencode's whole list, or opus/sonnet/haiku) and
