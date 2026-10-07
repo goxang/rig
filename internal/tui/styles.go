@@ -17,8 +17,10 @@ var (
 	cPurple = lipgloss.Color("#B877D9")
 	cText   = lipgloss.AdaptiveColor{Light: "#1F1F1F", Dark: "#D8D9DA"}
 	cDim    = lipgloss.AdaptiveColor{Light: "#7A7A7A", Dark: "#7B7F85"}
-	cPanel  = lipgloss.AdaptiveColor{Light: "#D0D0D0", Dark: "#2C3235"}
-	cBar    = lipgloss.AdaptiveColor{Light: "#ECECEC", Dark: "#181B1F"}
+	// cPlaceholder reads on both the panel and the cursor line's background
+	cPlaceholder = lipgloss.AdaptiveColor{Light: "#5A5A5A", Dark: "#A8ADB3"}
+	cPanel       = lipgloss.AdaptiveColor{Light: "#D0D0D0", Dark: "#2C3235"}
+	cBar         = lipgloss.AdaptiveColor{Light: "#ECECEC", Dark: "#181B1F"}
 
 	sTitle     = lipgloss.NewStyle().Bold(true).Foreground(cText)
 	sDim       = lipgloss.NewStyle().Foreground(cDim)

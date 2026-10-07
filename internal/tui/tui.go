@@ -138,6 +138,9 @@ type model struct {
 	// dragZone is the zone a press started a drag on; moves and the release go to its tab
 	dragZone string
 	sel      *selection
+	// inputDrag is the mouse selecting in the footer input, which starts at column inputX
+	inputDrag bool
+	inputX    int
 	// frame is the last screen drawn; bodyEnd the first row below the body
 	frame   string
 	bodyEnd int
@@ -164,9 +167,11 @@ type prompt struct {
 	took     time.Duration
 	// described is what the AI wrote for the "@?description" in describedFor, the input it saw
 	described, describedFor string
-	// popup draws the input as a box over the screen, wrapped (queries); all is ctrl+a's
-	// select-all, which the next key copies, replaces or drops
-	popup, all bool
+	// popup draws the input as a box over the screen, wrapped (queries)
+	popup bool
+	sel   textSel
+	// off is the first rune the one-line input shows
+	off int
 	// escape, when set, runs when esc drops the prompt
 	escape func() tea.Cmd
 }
@@ -493,8 +498,7 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 }
 
 func (m *model) ask(label, value string, submit func(string) tea.Cmd) {
-	in := textinput.New()
-	in.Prompt = ""
+	in := newInput()
 	in.SetValue(value)
 	in.CursorEnd()
 	in.Focus()
@@ -732,6 +736,19 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	m.hx, m.hy = e.X, e.Y
 	if m.dragZone != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.dragTo(e)
+	}
+	if p := m.prompt; p != nil && !p.popup {
+		if m.inputDrag && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
+			p.input.SetCursor(p.off + e.X - m.inputX)
+			m.inputDrag = e.Action != tea.MouseActionRelease
+			return nil
+		}
+		if z, ok := m.zoneAt(e.X, e.Y); ok && z.id == "prompt:input" && e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft {
+			p.input.SetCursor(p.off + z.x)
+			p.sel = textSel{on: true, anchor: p.input.Position()}
+			m.inputDrag, m.inputX = true, e.X-z.x
+			return nil
+		}
 	}
 	if m.sel != nil && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.selectTo(e)
@@ -998,7 +1015,7 @@ func stripHit(h hit, id string) (int, bool) {
 }
 
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
-	if k.String() == "ctrl+c" && (m.prompt == nil || !m.prompt.popup) {
+	if k.String() == "ctrl+c" && m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) {
 		if m.working() && m.stopWork != nil {
 			m.stopWork()
 			m.busy = 0
@@ -1052,10 +1069,14 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if m.prompt != nil {
-		if p := m.prompt; p.popup {
-			if cmd, done := m.popupKey(k); done {
-				return cmd
+		if before := m.prompt.input.Value(); editKey(&m.prompt.input, &m.prompt.sel, k) {
+			if s := k.String(); s == "ctrl+c" || s == "ctrl+y" || s == "ctrl+x" {
+				m.setStatus("copied", false)
 			}
+			if m.prompt.input.Value() != before {
+				return m.completeLater()
+			}
+			return nil
 		}
 		switch k.String() {
 		case "esc":
@@ -1094,14 +1115,6 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 		case "ctrl+t":
 			m.toggleAutocomplete()
-			return nil
-		case "ctrl+y":
-			v := m.prompt.input.Value()
-			if v == "" {
-				v = m.prompt.template
-			}
-			copyText(v)
-			m.setStatus("copied the query", false)
 			return nil
 		}
 		before := m.prompt.input.Value()
@@ -1649,7 +1662,7 @@ func (m *model) footer() string {
 		}
 	case m.prompt != nil && m.prompt.popup:
 		var hs []string
-		for _, h := range [][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a", "select all"}, {"ctrl+c ctrl+y", "copy"}, {"drag", "select text"}, {"tab", "take the AI's / the template"}} {
+		for _, h := range [][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a shift+←→", "select"}, {"ctrl+c ctrl+x ctrl+v", "copy cut paste"}, {"ctrl+⌫", "word"}, {"tab", "take the AI's / the template"}} {
 			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
 		}
 		line = " " + strings.Join(hs, "  ")
@@ -1737,7 +1750,8 @@ func (m *model) promptView() string {
 	}
 	if room := m.w - lipgloss.Width(head) - 3 - buttonsW; lipgloss.Width(text)+2 <= room {
 		p.input.Width = room
-		head += p.input.View()
+		m.zones = append(m.zones, zone{id: "prompt:input", x: lipgloss.Width(head), y: m.h - 2, w: room, h: 1})
+		head += inputView(p.input, p.sel, room, &p.off)
 		return above + head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-2)
 	}
 	p.input.Width = m.w - 4
@@ -1749,7 +1763,8 @@ func (m *model) promptView() string {
 		preview = preview[max(0, len(preview)-8):]
 	}
 	top := head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-3-len(preview))
-	return above + strings.Join(append(append([]string{top}, preview...), " "+p.input.View()), "\n")
+	m.zones = append(m.zones, zone{id: "prompt:input", x: 1, y: m.h - 2, w: p.input.Width, h: 1})
+	return above + strings.Join(append(append([]string{top}, preview...), " "+inputView(p.input, p.sel, p.input.Width, &p.off)), "\n")
 }
 
 const footerHints = 5
@@ -1856,7 +1871,7 @@ func (m *model) helpKey(k tea.KeyMsg) tea.Cmd {
 func (m *model) helpView(h int) string {
 	lines := m.helpLines()
 	inner := max(1, h-4) // border + padding
-	m.helpScroll = min(m.helpScroll, max(0, len(lines)-1))
+	m.helpScroll = min(m.helpScroll, max(0, len(lines)-inner))
 	end := min(len(lines), m.helpScroll+inner)
 	visible := append([]string{}, lines[m.helpScroll:end]...)
 	if m.helpQuery != "" {
@@ -1898,36 +1913,6 @@ func listKeys(k tea.KeyMsg, sel *int, n int) bool {
 	return true
 }
 
-// popupKey handles a popup prompt's own keys: select all, copy, and what a key does to a selection.
-func (m *model) popupKey(k tea.KeyMsg) (tea.Cmd, bool) {
-	p := m.prompt
-	value := p.input.Value()
-	if value == "" {
-		value = p.template
-	}
-	switch k.String() {
-	case "ctrl+a":
-		p.all = true
-		return nil, true
-	case "ctrl+c", "ctrl+y":
-		copyText(value)
-		m.setStatus("copied the query", false)
-		return nil, true
-	}
-	if !p.all {
-		return nil, false
-	}
-	p.all = false
-	switch k.Type {
-	case tea.KeyBackspace, tea.KeyDelete:
-		p.input.SetValue("")
-		return nil, true
-	case tea.KeyRunes, tea.KeySpace:
-		p.input.SetValue("")
-	}
-	return nil, false
-}
-
 // promptPopup is a popup prompt's box: the label, the whole input wrapped with its cursor, and
 // what the AI offers.
 func (m *model) promptPopup() string {
@@ -1939,10 +1924,8 @@ func (m *model) promptPopup() string {
 	}
 	runes := []rune(text)
 	pos := min(p.input.Position(), len(runes))
-	var body string
-	if p.all {
-		body = sSel.Render(text)
-	} else {
+	body := selectedView(p.input, p.sel, style)
+	if p.input.Value() == "" {
 		at := " "
 		if pos < len(runes) {
 			at = string(runes[pos])
@@ -1951,7 +1934,7 @@ func (m *model) promptPopup() string {
 		if pos < len(runes) {
 			after = string(runes[pos+1:])
 		}
-		body = style.Render(string(runes[:pos])) + sCursor.Render(at) + style.Render(after)
+		body = sCursor.Render(at) + style.Render(after)
 	}
 	body = ansi.Wrap(body, w-4, " ,")
 	var notes []string

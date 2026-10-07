@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
@@ -34,6 +35,8 @@ type chat struct {
 	scroll  int
 	starter int
 	err     string
+	// all is ctrl+a's select-all of the draft: the next key copies, replaces or drops it
+	all bool
 }
 
 type (
@@ -83,10 +86,20 @@ const chatInputHeight = 3
 func (m *model) chatOpen() *chat {
 	if m.chat == nil {
 		in := textarea.New()
-		in.Prompt = "› "
+		in.SetPromptFunc(2, func(line int) string {
+			if line == 0 {
+				return "› "
+			}
+			return "  "
+		})
 		in.ShowLineNumbers = false
 		in.Placeholder = "ask anything · enter: send · alt+enter: newline · tab: ideas · /sessions"
 		in.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter"))
+		editorTextarea(&in)
+		for _, st := range []*textarea.Style{&in.FocusedStyle, &in.BlurredStyle} {
+			st.Placeholder = lipgloss.NewStyle().Foreground(cPlaceholder)
+			st.CursorLine = lipgloss.NewStyle()
+		}
 		in.SetHeight(chatInputHeight)
 		m.chat = &chat{input: in}
 	}
@@ -134,6 +147,33 @@ func (c *chat) reset() {
 
 func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 	c := m.chat
+	all := c.all
+	c.all = false
+	switch k.String() {
+	case "ctrl+a":
+		c.all = c.input.Value() != ""
+		return nil
+	case "ctrl+c", "ctrl+y", "ctrl+x":
+		text := c.input.Value()
+		if text == "" {
+			text = c.lastAnswer()
+		}
+		copyText(text)
+		if k.String() == "ctrl+x" {
+			c.input.SetValue("")
+		}
+		m.setStatus("copied", false)
+		return nil
+	}
+	if all {
+		switch k.Type {
+		case tea.KeyBackspace, tea.KeyDelete, tea.KeyCtrlH:
+			c.input.SetValue("")
+			return nil
+		case tea.KeyRunes, tea.KeySpace, tea.KeyCtrlV:
+			c.input.SetValue("")
+		}
+	}
 	switch k.String() {
 	case "@":
 		if c.input.Value() != "" {
@@ -642,8 +682,8 @@ func (c *chat) view(m *model, x, w, h int) string {
 		status = sAmber.Render("↓ answer the question below")
 	}
 	room := max(1, h-4-(chatInputHeight-1))
-	end := max(0, len(lines)-c.scroll)
-	c.scroll = len(lines) - end
+	c.scroll = min(c.scroll, max(0, len(lines)-room))
+	end := len(lines) - c.scroll
 	start := max(0, end-room)
 	body := strings.Join(lines[start:end], "\n")
 	if pad := room - (end - start); pad > 0 && len(c.msgs) > 0 {
@@ -652,8 +692,22 @@ func (c *chat) view(m *model, x, w, h int) string {
 		body += strings.Repeat("\n", pad)
 	}
 	c.input.SetWidth(iw - 3)
-	body += "\n" + c.input.View() + "\n" + status
+	input := c.input.View()
+	if c.all {
+		input = sSel.Render(ansi.Wrap(c.input.Value(), iw-3, " "))
+		input += strings.Repeat("\n", max(0, chatInputHeight-1-strings.Count(input, "\n")))
+	}
+	body += "\n" + input + "\n" + status
 	return panel(title, body, w, h, c.focus)
+}
+
+func (c *chat) lastAnswer() string {
+	for i := len(c.msgs) - 1; i >= 0; i-- {
+		if c.msgs[i].Role == "assistant" {
+			return c.msgs[i].Text
+		}
+	}
+	return ""
 }
 
 func wordWrap(s string, w int) string {

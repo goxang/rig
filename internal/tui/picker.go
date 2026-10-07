@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -119,9 +120,16 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 			}
 		}
 	case "backspace":
-		if p.filter != "" {
-			p.filter = p.filter[:len(p.filter)-1]
+		if r := []rune(p.filter); len(r) > 0 {
+			p.filter = string(r[:len(r)-1])
 			p.sel = 0
+		}
+	case "ctrl+h", "ctrl+w", "alt+backspace":
+		r := []rune(p.filter)
+		p.filter, p.sel = string(r[:wordLeft(r, len(r))]), 0
+	case "ctrl+v":
+		if v, err := clipboard.ReadAll(); err == nil {
+			p.filter, p.sel = p.filter+strings.TrimSpace(v), 0
 		}
 	default:
 		if k.Type == tea.KeyRunes {
