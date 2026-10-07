@@ -6,6 +6,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // picker chooses one or several items from a list; typing filters it.
@@ -23,6 +24,8 @@ type picker struct {
 	del func(item string) error
 	// zx, zy is where the last frame drew the rows, for hover
 	zx, zy int
+	// at, when set, opens it as a dropdown under that body cell over the screen, not a centered box
+	at *[2]int
 }
 
 func (m *model) pick(title string, items, desc []string, sel int, multi bool, done func([]string) tea.Cmd) {
@@ -142,6 +145,9 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 
 func (p *picker) click(m *model, h hit) tea.Cmd {
 	if h.id != "picker" {
+		if p.at != nil {
+			m.picker = nil // a click beside a dropdown closes it
+		}
 		return nil
 	}
 	vis := p.visible()
@@ -223,4 +229,64 @@ func (p *picker) view(m *model, h int) string {
 	m.zone("picker", x+3, y+4, w, rows)
 	p.zx, p.zy = x+3, y+4
 	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
+// dropdown draws the picker as a list hanging under p.at over the screen's own view.
+func (p *picker) dropdown(m *model, base string, h int) string {
+	vis := p.visible()
+	x, y := p.at[0], p.at[1]
+	rows := min(len(vis), max(3, h-y-4))
+	p.off = scroll(p.sel, p.off, rows, len(vis))
+	w := 20
+	for _, i := range vis {
+		w = max(w, lipgloss.Width(p.items[i])+4)
+	}
+	w = min(w, m.w-x-4)
+	var b strings.Builder
+	if p.filter != "" {
+		b.WriteString(sDim.Render("filter ") + sAmber.Render(p.filter) + "\n")
+	}
+	for r := 0; r < rows && p.off+r < len(vis); r++ {
+		i := vis[p.off+r]
+		mark := ""
+		if p.multi {
+			mark = sDim.Render("○ ")
+			if p.marked[p.items[i]] {
+				mark = sGreen.Render("● ")
+			}
+		}
+		line := padRight(mark+p.items[i], w)
+		if p.off+r == p.sel {
+			line = highlight(sSelected, line, w)
+		} else if m.hovering(p.zx, p.zy+r, w, 1) {
+			line = highlight(sHover, line, w)
+		}
+		b.WriteString(line + "\n")
+	}
+	if len(vis) == 0 {
+		b.WriteString(sDim.Render("nothing matches") + "\n")
+	}
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Render(strings.TrimRight(b.String(), "\n"))
+	top := y + 1
+	if p.filter != "" {
+		top++
+	}
+	m.zone("picker", x+1, top, w, rows)
+	p.zx, p.zy = x+1, top
+	return overlayAt(base, box, x, y)
+}
+
+// overlayAt draws box over base with its top left corner at cell x, y.
+func overlayAt(base, box string, x, y int) string {
+	lines := strings.Split(base, "\n")
+	for i, bl := range strings.Split(box, "\n") {
+		for y+i >= len(lines) {
+			lines = append(lines, "")
+		}
+		under := lines[y+i]
+		left := ansi.Truncate(under, x, "")
+		left += strings.Repeat(" ", max(0, x-ansi.StringWidth(left)))
+		lines[y+i] = left + "\x1b[0m" + bl + "\x1b[0m" + ansi.Cut(under, x+ansi.StringWidth(bl), ansi.StringWidth(under))
+	}
+	return strings.Join(lines, "\n")
 }

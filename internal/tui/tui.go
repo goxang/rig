@@ -846,6 +846,9 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	}
 	h, ok := m.zoneAt(e.X, e.Y)
 	if !ok {
+		if m.picker != nil && m.picker.at != nil {
+			m.picker = nil
+		}
 		return nil
 	}
 	h.mod = e.Ctrl || e.Alt || e.Shift
@@ -1540,6 +1543,8 @@ func (m *model) View() string {
 		body = m.overlay(m.envInfo.view(bodyH), bodyH)
 	case m.prompt != nil && m.prompt.popup:
 		body = m.overlay(m.promptPopup(), bodyH)
+	case m.picker != nil && m.picker.at != nil:
+		body = m.picker.dropdown(m, m.tabs[m.active].view(m, m.w, bodyH), bodyH)
 	case m.picker != nil:
 		body = m.picker.view(m, bodyH)
 	case m.chat != nil && m.chat.open:

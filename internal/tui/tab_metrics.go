@@ -65,6 +65,8 @@ type placed struct {
 }
 
 type metricsTab struct {
+	// varX is where each variable's label starts on the header's variables line, for its dropdown
+	varX map[string]int
 	// source replaces the metrics component of panels that name none (m picks it)
 	source    string
 	dash      int
@@ -612,6 +614,7 @@ func (t *metricsTab) pickVar(m *model) {
 			}
 			return nil
 		})
+		m.picker.at = &[2]int{1, 3}
 	}
 }
 
@@ -644,9 +647,10 @@ func (t *metricsTab) pickValues(m *model, name string) {
 	}
 	if v.Multi {
 		m.pickMany("$"+name, items, nil, t.vars[dash][name], done)
-		return
+	} else {
+		m.pick("$"+name, items, nil, max(0, slices.Index(items, firstOf(t.vars[dash][name]))), false, done)
 	}
-	m.pick("$"+name, items, nil, max(0, slices.Index(items, firstOf(t.vars[dash][name]))), false, done)
+	m.picker.at = &[2]int{t.varX[name], 3}
 }
 
 func firstOf(s []string) string {
@@ -1068,6 +1072,10 @@ func (t *metricsTab) header(m *model, w int) string {
 	line1 := sAccent.Render(" ☰ ") + truncate(m.strip("mdash", 3, 0, names, t.dashIndex(m)), max(0, w-rw-3-lipgloss.Width(src))) + src
 	line1 += strings.Repeat(" ", max(0, w-lipgloss.Width(line1)-rw)) + right
 
+	line1 += "\n" + m.stripRule(3, w)
+	m.originY++
+	defer func() { m.originY-- }()
+
 	// variables, Grafana's second line
 	name, d := t.dashName(m), t.dashboard(m)
 	var line2 strings.Builder
@@ -1076,6 +1084,10 @@ func (t *metricsTab) header(m *model, w int) string {
 	for _, n := range d.VarOrder {
 		lab := sDim.Render("$"+n+" ") + sTitle.Render(varText(t.vars[name][n])) + sDim.Render(" ▾  ")
 		m.zone("mvar:"+n, x, 1, lipgloss.Width(lab), 1)
+		if t.varX == nil {
+			t.varX = map[string]int{}
+		}
+		t.varX[n] = x
 		x += lipgloss.Width(lab)
 		line2.WriteString(lab)
 	}
@@ -1094,7 +1106,9 @@ func (t *metricsTab) header(m *model, w int) string {
 func (t *metricsTab) view(m *model, w, h int) string {
 	t.init()
 	head := t.header(m, w)
-	h -= 2
+	h -= 3
+	m.originY++
+	defer func() { m.originY-- }()
 	items, ps := t.items(m)
 	if len(ps) == 0 {
 		return head + "\n" + lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center,

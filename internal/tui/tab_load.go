@@ -323,12 +323,15 @@ components:
 		}
 	}
 	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (⇧←→ i) · rate and config are shared by every instance"), rw)
+	strip += "\n" + m.stripRule(1, rw)
 	var right string
+	m.originY++
 	if id := t.inst[n]; id != "" {
-		right = t.instanceView(m, n, id, rw, h-1)
+		right = t.instanceView(m, n, id, rw, h-2)
 	} else {
-		right = t.allView(m, n, st, rw, h-1)
+		right = t.allView(m, n, st, rw, h-2)
 	}
+	m.originY--
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, lipgloss.JoinVertical(lipgloss.Left, strip, right))
 }
 

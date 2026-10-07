@@ -934,8 +934,8 @@ tests:
 	if total > 0 && t.running == name {
 		strip += "  " + progress(float64(total-counts[engine.TestRunning])/float64(total), 20)
 	}
-	strip = truncate(strip, w)
-	h--
+	strip = truncate(strip, w) + "\n" + m.stripRule(1, w)
+	h -= 2
 
 	if t.filter == filterBench {
 		return head + "\n" + strip + "\n" + t.benchView(m, r, benches, w, h)
@@ -945,18 +945,18 @@ tests:
 	var listW, listH, outX, outY, outW, outH int
 	switch {
 	case t.filter == filterBuild:
-		outY, outW, outH = 3, w, h
+		outY, outW, outH = 4, w, h
 	case w >= 160:
 		listW, listH = w*3/5, h
-		outX, outY, outW, outH = listW, 3, w-listW, h
+		outX, outY, outW, outH = listW, 4, w-listW, h
 	default:
 		listW, listH = w, max(6, h*11/20)
-		outY, outW, outH = 3+listH, w, h-listH
+		outY, outW, outH = 4+listH, w, h-listH
 	}
 	var listBox string
 	if listH > 0 {
 		t.list.set(rows)
-		listBox = panel(fmt.Sprintf("%s · %d shown", name, len(rows)), t.list.view(m, 1, 4, listW-2, listH-2, !t.outFocus), listW, listH, !t.outFocus)
+		listBox = panel(fmt.Sprintf("%s · %d shown", name, len(rows)), t.list.view(m, 1, 5, listW-2, listH-2, !t.outFocus), listW, listH, !t.outFocus)
 	}
 
 	lines := t.output(m)
@@ -1042,5 +1042,5 @@ func (t *testsTab) benchView(m *model, r *engine.TestRun, benches []engine.Bench
 	if len(rows) == 0 {
 		return panel(title, sDim.Render("no benchmarks in this run — B turns -bench on, then r"), w, h, true)
 	}
-	return panel(title, t.bench.view(m, 1, 4, w-2, h-2, true), w, h, true)
+	return panel(title, t.bench.view(m, 1, 5, w-2, h-2, true), w, h, true)
 }
