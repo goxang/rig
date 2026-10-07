@@ -73,7 +73,7 @@ func (t *testsTab) hints() [][2]string {
 		return [][2]string{{"↑↓ pgup pgdn", "scroll"}, {"g G", "top/end"}, {"y", "copy"}, {"esc o", "back"}}
 	}
 	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"l ctrl+←→", "suite (list, prev/next)"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
-		{"i", "filter: all, failed, passed, …"}, {"enter", "fold/output"}, {"+ -", "unfold/fold all"}, {"b", "benchmarks"}, {"h", "saved runs"}, {"w", "write report"}, {"y Y", "copy"}}
+		{"i", "filter: all, failed, passed, …"}, {"enter", "fold/output"}, {"+ -", "unfold/fold all"}, {"b", "benchmarks"}, {"h", "saved runs"}, {"w", "write report"}, {"W", "reporter: start, stop and save"}, {"y Y", "copy"}}
 }
 
 func (t *testsTab) init() {
@@ -204,6 +204,9 @@ func (t *testsTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 	}
 	o := t.options(m)
 	switch k.String() {
+	case "W":
+		saveReport(m, 15*time.Minute)
+		return nil
 	case "r":
 		return t.start(m, "tests "+name, []engine.TestJob{{Options: o}})
 	case "f":

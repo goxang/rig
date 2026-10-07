@@ -717,6 +717,18 @@
     "Report": {
       "additionalProperties": false,
       "properties": {
+        "every": {
+          "description": "Adds a timeline: each metric's value per interval of the window.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Md (default), json or xml; a file name's extension wins.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
         "help": {
           "type": [
             "string",
@@ -730,8 +742,28 @@
           },
           "type": "array"
         },
+        "queries": {
+          "items": {
+            "$ref": "#/definitions/ReportQuery"
+          },
+          "type": "array"
+        },
         "source": {
           "description": "The metrics component (default the first).",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "traces": {
+          "items": {
+            "$ref": "#/definitions/ReportTrace"
+          },
+          "type": "array"
+        },
+        "verbosity": {
+          "description": "Brief, normal (default) or full: how many series, rows and slow traces it keeps.",
           "type": [
             "string",
             "number",
@@ -776,6 +808,71 @@
           ]
         },
         "unit": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ReportQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ReportTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "description": "a duration: 500ms, 30s, 5m, 1h",
+          "type": "string"
+        },
+        "operation": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "service": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "title": {
           "type": [
             "string",
             "number",
@@ -1469,7 +1566,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/Report"
       },
-      "description": "metrics a run is measured by, saved as markdown: rig report, a suite's report:, the Load screen's W",
+      "description": "metrics, traces and queries a run is measured by, saved as md, json or xml: rig report start and stop, rig report, a suite's report:, the Load screen's W",
       "type": "object"
     },
     "secrets": {

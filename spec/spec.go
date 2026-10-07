@@ -480,6 +480,32 @@ type Report struct {
 	// Source is the metrics component (default the first).
 	Source  string         `yaml:"source"`
 	Metrics []ReportMetric `yaml:"metrics"`
+	Traces  []ReportTrace  `yaml:"traces"`
+	Queries []ReportQuery  `yaml:"queries"`
+	// Verbosity is brief, normal (default) or full: how many series, rows and slow traces it keeps.
+	Verbosity string `yaml:"verbosity"`
+	// Every adds a timeline: each metric's value per interval of the window.
+	Every time.Duration `yaml:"every"`
+	// Format is md (default), json or xml; a file name's extension wins.
+	Format string `yaml:"format"`
+}
+
+// ReportTrace counts the traces of a service (and operation, and slower than Min) in the window
+// with their error count and latency percentiles.
+type ReportTrace struct {
+	Title     string        `yaml:"title"`
+	Source    string        `yaml:"source"`
+	Service   string        `yaml:"service"`
+	Operation string        `yaml:"operation"`
+	Min       time.Duration `yaml:"min"`
+}
+
+// ReportQuery runs a reading query (or a saved one by name) once at the end of the window; ${from}
+// and ${to} in it become the window's bounds (RFC 3339).
+type ReportQuery struct {
+	Title  string `yaml:"title"`
+	Source string `yaml:"source"`
+	Query  string `yaml:"query"`
 }
 
 // ReportMetric is one query, summarised per series by Stats over the run's window: avg, min, max,

@@ -30,7 +30,7 @@ is out of date.
 | `queries` | saved queries (see below) |
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
 | `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
-| `reports` | metrics a run is measured by, saved as markdown: `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
+| `reports` | metrics, traces and queries a run is measured by, saved as md, json or xml: `rig report start` and `stop`, `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
 | `otel` | OpenTelemetry for every app and load service (see below) |
 | `ui` | `{tabs, mode, logs}`: the screens and their order (left out, every screen the project configures something for); `mode: simple` starts newcomers on fewer screens, columns and keys (`V` switches); `logs` (see below) |
 | `ai` | `{deny: [globs], instructions: text, ideas: {screen: [questions]}}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), notes it gets with every turn, and the questions tab offers in an empty chat per screen (`all` for every screen) |
@@ -229,16 +229,29 @@ reports:
   load:
     help: a load test
     source: prom                 # metrics component (default the first)
+    verbosity: normal            # brief, normal (default) or full: series, rows and slow traces kept
+    every: 1m                    # adds a timeline: each metric per minute of the window
+    format: md                   # md (default), json or xml; -o file.json wins
     metrics:
       - { title: requests/s, unit: /s, stats: [avg, max, p95], query: 'sum(rate(http_requests_total[1m]))' }
       - { title: p95 by service, unit: ms, legend: "{{service}}", query: '...' }
+    traces:
+      - { title: checkout, service: api, operation: POST /checkout, min: 0s }
+    queries:
+      - { title: failed orders, source: db, query: "SELECT status, count(*) FROM orders WHERE created_at >= '${from}' GROUP BY status" }
+      - { query: open-orders }   # a saved query, by name
 ```
 
 Each metric is a range query over the window, summarised per series by `stats`: `avg`, `min`, `max`,
-`last`, `p50`, `p90`, `p95`, `p99` (default `avg, max, last`). `rig report load --since 20m` (or
-`--from 14:05 --to 14:35`, `--source other-prom`, `-o file`) prints a markdown table and saves it under
-the project's data directory; the Load screen's `W` does the same for the time since you started the
-generator.
+`last`, `p50`, `p90`, `p95`, `p99` (default `avg, max, last`). A `traces:` entry counts the traces in the
+window with their errors, p50, p95, max and the slowest ones. A `queries:` entry runs once at the end of
+the window, `${from}` and `${to}` replaced by its bounds; a query that would change something is refused.
+
+`rig report load --since 20m` (or `--from 14:05 --to 14:35`, `--source other-prom`, `--verbosity full`,
+`--format json`, `-o file.xml`) prints the report and saves it under the project's data directory.
+`rig report start load`, then the tests or the load, then `rig report stop load` measures exactly that
+stretch. `W` on the Load and Tests screens does the same: start the reporter, `W` again stops it and
+saves the report, or measure a window until now.
 A rerun cuts each failed test back to its deepest parallel ancestor (an integration case's mode),
 else its top-level test, so the steps before it run again too.
 

@@ -30,7 +30,8 @@ rig logs -E '(?i)timeout' api # regex over logs
 rig alerts                    # what is over its thresholds
 rig test unit --race          # a test suite; --failed reruns the failures, -o file saves the report
 rig test ./pkg/x/...          # any packages, no suite needed
-rig report load --since 20m   # metrics of a load test (reports: in rig.yaml) as a markdown table
+rig report load --since 20m   # metrics, traces and queries of a load test (reports: in rig.yaml): md, json or xml
+rig report start load; rig test e2e; rig report stop load   # a report of exactly that run
 rig ns --create me            # Kubernetes: switch the environment to a new namespace (rig ns lists them)
 rig metrics targets -o f.json # services as Prometheus file_sd targets, for a local Prometheus
 rig resume last               # the TUI as a saved session (S) left it
