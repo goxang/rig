@@ -5,11 +5,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 type Cmd struct {
@@ -106,3 +109,36 @@ func Have(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
+
+// Shell is the POSIX shell that task steps, test commands and editors run in: sh, or on Windows the
+// one Git for Windows (or MSYS2, Cygwin) brings, since cmd.exe reads none of rig.yaml's steps.
+func Shell() string {
+	if runtime.GOOS != "windows" {
+		return "sh"
+	}
+	shellOnce.Do(func() {
+		for _, n := range []string{"sh", "bash"} {
+			if p, err := exec.LookPath(n); err == nil {
+				shellPath = p
+				return
+			}
+		}
+		for _, p := range []string{os.Getenv("ProgramFiles") + `\Git\bin\sh.exe`, os.Getenv("ProgramFiles(x86)") + `\Git\bin\sh.exe`,
+			os.Getenv("LOCALAPPDATA") + `\Programs\Git\bin\sh.exe`, `C:\msys64\usr\bin\sh.exe`, `C:\cygwin64\bin\sh.exe`} {
+			if _, err := os.Stat(p); err == nil {
+				shellPath = p
+				return
+			}
+		}
+		shellPath = "sh" // fails with exec's own "not found"; ErrNoShell says what to install
+	})
+	return shellPath
+}
+
+var (
+	shellOnce sync.Once
+	shellPath string
+)
+
+// ErrNoShell explains a missing shell on Windows.
+var ErrNoShell = errors.New("rig runs task steps and commands with a POSIX shell: install Git for Windows (it brings sh) or run rig in WSL")

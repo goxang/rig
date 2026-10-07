@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/manifest"
 	"github.com/goxang/rig/spec"
 )
@@ -130,7 +131,7 @@ func editManifest(m *model, o *manifest.Object, start []byte) tea.Cmd {
 	// an old mtime, so a save within the same second still shows
 	old := time.Now().Add(-time.Minute)
 	_ = os.Chtimes(file, old, old)
-	c := exec.Command("sh", "-c", editorCmd()+` "$1"`, "rig-edit", file)
+	c := exec.Command(sh.Shell(), "-c", editorCmd()+` "$1"`, "rig-edit", file)
 	return execProcess(c, func(err error) tea.Msg {
 		return manifestEditedMsg{obj: o, file: file, original: original, written: old, err: err}
 	})

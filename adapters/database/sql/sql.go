@@ -23,6 +23,7 @@ import (
 	_ "github.com/microsoft/go-mssqldb"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/plugin"
 	"github.com/goxang/rig/spec"
 )
@@ -394,7 +395,7 @@ func (d *DB) seed(ctx context.Context, seeds []Seed, out io.Writer) error {
 				db = d.dbName()
 			}
 			fmt.Fprintf(out, "seed: %s\n", s.Command)
-			cmd := exec.CommandContext(ctx, "sh", "-c", s.Command)
+			cmd := exec.CommandContext(ctx, sh.Shell(), "-c", s.Command)
 			cmd.Dir = d.env.Project().Dir
 			cmd.Env = append(os.Environ(), "RIG_DB_ADDR="+strings.TrimPrefix(addr, "tcp://"), "RIG_DB_NAME="+db)
 			cmd.Stdout, cmd.Stderr = out, out

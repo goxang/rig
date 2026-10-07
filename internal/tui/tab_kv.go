@@ -17,6 +17,7 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/sh"
 )
 
 // kvTab browses a key-value store folder by folder, shows a value, edits it (in $EDITOR or inline),
@@ -263,7 +264,7 @@ func editKV(m *model, comp, key string, value []byte) tea.Cmd {
 	_, _ = f.Write(pretty2(value))
 	f.Close()
 	file := f.Name()
-	c := exec.Command("sh", "-c", editorCmd()+` "$1"`, "rig-edit", file)
+	c := exec.Command(sh.Shell(), "-c", editorCmd()+` "$1"`, "rig-edit", file)
 	return execProcess(c, func(err error) tea.Msg {
 		return kvEditedMsg{comp: comp, key: key, file: file, original: value, err: err}
 	})

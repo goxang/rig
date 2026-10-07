@@ -216,7 +216,7 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		}
 		title := withArgs(stepTitle(step, secrets), args)
 		fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
-		cmd := sh.New("sh", append([]string{"-c", line, name}, args...)...)
+		cmd := sh.New(sh.Shell(), append([]string{"-c", line, name}, args...)...)
 		cmd.Dir = a.Spec.Dir
 		cmd.Env = env
 		began := time.Now()

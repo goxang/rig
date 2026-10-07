@@ -41,6 +41,17 @@ jobs:
           go-version-file: go.mod
       - run: go test -race -count=1 ./...
 
+  # not a gate yet: shows what breaks on Windows without holding releases back
+  test-windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 ./...
+
   version:
     runs-on: ubuntu-latest
     outputs:

@@ -4,6 +4,7 @@ package localhost
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"net/http"
 	"os"
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 )
+
 
 type Host struct{}
 
@@ -27,6 +30,10 @@ func (Host) Hosts(ctx context.Context) ([]core.Host, error) {
 	if raw, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
 		h.Kernel = strings.TrimSpace(string(raw))
 	}
+	if runtime.GOOS == "darwin" {
+		darwinStats(ctx, &h)
+		return []core.Host{h}, nil
+	}
 	mem := meminfo()
 	h.MemTotal = mem["MemTotal"]
 	h.MemUsed = mem["MemTotal"] - mem["MemAvailable"]
@@ -34,15 +41,53 @@ func (Host) Hosts(ctx context.Context) ([]core.Host, error) {
 	return []core.Host{h}, nil
 }
 
+// darwinStats reads what /proc gives on Linux from sysctl, vm_stat and ps.
+func darwinStats(ctx context.Context, h *core.Host) {
+	out := func(name string, args ...string) string {
+		raw, _ := exec.CommandContext(ctx, name, args...).Output()
+		return strings.TrimSpace(string(raw))
+	}
+	if f := strings.Fields(strings.Trim(out("sysctl", "-n", "vm.loadavg"), "{ }")); len(f) > 0 {
+		h.Load1, _ = strconv.ParseFloat(f[0], 64)
+	}
+	h.Kernel = out("uname", "-r")
+	h.MemTotal, _ = strconv.ParseInt(out("sysctl", "-n", "hw.memsize"), 10, 64)
+	page, pages := int64(4096), map[string]int64{}
+	for _, l := range strings.Split(out("vm_stat"), "\n") {
+		if strings.Contains(l, "page size of") {
+			if f := strings.Fields(l); len(f) >= 8 {
+				page, _ = strconv.ParseInt(f[7], 10, 64)
+			}
+		}
+		if k, v, ok := strings.Cut(l, ":"); ok {
+			pages[k], _ = strconv.ParseInt(strings.TrimSuffix(strings.TrimSpace(v), "."), 10, 64)
+		}
+	}
+	free := (pages["Pages free"] + pages["Pages inactive"] + pages["Pages speculative"]) * page
+	if h.MemTotal > 0 && free > 0 {
+		h.MemUsed = h.MemTotal - free
+	}
+	var total float64
+	for _, l := range strings.Split(out("ps", "-A", "-o", "%cpu="), "\n") {
+		v, _ := strconv.ParseFloat(strings.TrimSpace(l), 64)
+		total += v
+	}
+	h.CPUUsed = min(100, total/float64(max(1, h.CPUs)))
+}
+
 func (Host) Shell(ctx context.Context, _ string, command []string) (*exec.Cmd, error) {
 	if len(command) > 0 {
-		return exec.CommandContext(ctx, "sh", "-c", strings.Join(command, " ")), nil
+		return exec.CommandContext(ctx, sh.Shell(), "-c", strings.Join(command, " ")), nil
 	}
-	sh := os.Getenv("SHELL")
-	if sh == "" {
-		sh = "/bin/sh"
+	login := os.Getenv("SHELL")
+	switch {
+	case login != "":
+	case runtime.GOOS == "windows":
+		return exec.CommandContext(ctx, cmp.Or(os.Getenv("COMSPEC"), "cmd.exe")), nil
+	default:
+		login = "/bin/sh"
 	}
-	return exec.CommandContext(ctx, sh, "-l"), nil
+	return exec.CommandContext(ctx, login, "-l"), nil
 }
 
 func meminfo() map[string]int64 {

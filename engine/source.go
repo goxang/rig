@@ -55,7 +55,7 @@ func (a *App) Source(ctx context.Context, ref string) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
-	c := sh.New("sh", "-c", "git archive --format=tar "+commit+" | tar -x -C "+shellQuote(root))
+	c := sh.New(sh.Shell(), "-c", "git archive --format=tar "+commit+" | tar -x -C "+shellQuote(root))
 	c.Dir = top
 	if err := c.Run(ctx); err != nil {
 		return "", fmt.Errorf("export %s: %w", ref, err)

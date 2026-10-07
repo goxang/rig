@@ -29,14 +29,14 @@ func runCommand(ctx context.Context, s *spec.TestSuite, run *TestRun, dir string
 	os.Remove(junit) // a stale empty file must not read as "no tests"
 	defer os.Remove(junit)
 
-	cmd := exec.Command("sh", "-c", s.Command)
+	cmd := exec.Command(sh.Shell(), "-c", s.Command)
 	sh.OwnGroup(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), env...), "RIG_JUNIT="+junit)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	run.mu.Lock()
-	run.Commands = append(run.Commands, []string{"sh", "-c", s.Command})
+	run.Commands = append(run.Commands, []string{sh.Shell(), "-c", s.Command})
 	whole := run.get(s.Name, "", time.Now())
 	run.mu.Unlock()
 	if err := cmd.Start(); err != nil {

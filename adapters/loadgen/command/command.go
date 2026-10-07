@@ -50,7 +50,7 @@ func (g *Gen) run(ctx context.Context, script string) ([]byte, error) {
 	if script == "" {
 		return nil, core.ErrUnsupported
 	}
-	c := sh.New("sh", "-c", script)
+	c := sh.New(sh.Shell(), "-c", script)
 	c.Dir = g.env.Project().Dir
 	return c.Output(ctx)
 }
