@@ -3,8 +3,12 @@ package tui
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +17,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/goxang/rig/internal/sh"
 )
 
 // job is one operation started from the UI (a build, a deploy, a task): its output, kept while it
@@ -23,6 +29,10 @@ type job struct {
 	stop  context.CancelFunc
 	// stdin, when set, takes what the user types for the job (a task step that reads input)
 	stdin io.WriteCloser
+	// log and pid, for a task: it writes to log.log and keeps running when rig closes, so a
+	// session reopened later follows it again
+	log string
+	pid int
 
 	mu      sync.Mutex
 	end     time.Time
@@ -122,6 +132,65 @@ func (j *job) took() time.Duration {
 		end = time.Now()
 	}
 	return end.Sub(j.start).Round(time.Second)
+}
+
+// taskFiles makes the files a task writes: base.log its output, base.err and base.done how it ended.
+// Those of tasks started over a week ago go.
+func taskFiles() (base string, out *os.File, err error) {
+	dir := filepath.Join(os.TempDir(), "rig-tasks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", nil, err
+	}
+	old, _ := os.ReadDir(dir)
+	for _, e := range old {
+		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > 7*24*time.Hour {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+	base = filepath.Join(dir, strconv.FormatInt(time.Now().UnixNano(), 10))
+	out, err = os.OpenFile(base+".log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	return base, out, err
+}
+
+// follow copies the task's log into j until it ends, and says how it ended.
+func (j *job) follow() error {
+	f, err := os.Open(j.log + ".log")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for {
+		_, _ = io.Copy(j, f)
+		if code, err := os.ReadFile(j.log + ".done"); err == nil {
+			_, _ = io.Copy(j, f)
+			if strings.TrimSpace(string(code)) == "0" {
+				return nil
+			}
+			if raw, err := os.ReadFile(j.log + ".err"); err == nil {
+				return errors.New(strings.TrimSpace(string(raw)))
+			}
+			return errors.New("exit status " + string(code))
+		}
+		if !sh.Alive(j.pid) {
+			if _, err := os.Stat(j.log + ".done"); err == nil {
+				continue
+			}
+			_, _ = io.Copy(j, f)
+			return errors.New("ended without saying how: killed?")
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+// killOnStop stops the task's process group when the job is stopped while it runs; once the job
+// has finished, what the task left running in the background stays.
+func (j *job) killOnStop(ctx context.Context) {
+	go func() {
+		<-ctx.Done()
+		if j.running() {
+			sh.StopGroup(j.pid, true)
+		}
+	}()
 }
 
 type jobKey struct{}

@@ -1524,8 +1524,14 @@ func (m *model) quit() tea.Cmd {
 			}
 		}
 	}
-	if m.busy > 0 {
-		stops = append(stops, fmt.Sprintf("%d operations still working", m.busy))
+	var tasks []string
+	for _, j := range m.jobList() {
+		if j.log != "" && j.running() {
+			tasks = append(tasks, j.label)
+		}
+	}
+	if busy := m.busy - len(tasks); busy > 0 {
+		stops = append(stops, fmt.Sprintf("%d operations still working", busy))
 	}
 	if m.chat != nil && m.chat.busy {
 		stops = append(stops, "the assistant's turn")
@@ -1536,14 +1542,22 @@ func (m *model) quit() tea.Cmd {
 		}
 		return tea.QuitMsg{}
 	}
-	if len(stops) == 0 && len(gens) == 0 {
+	if len(stops) == 0 && len(gens) == 0 && len(tasks) == 0 {
 		return leave
 	}
 	var opts, desc []string
-	what := "stops " + strings.Join(stops, ", ")
-	if len(stops) == 0 {
-		what = ""
+	var said []string
+	if len(stops) > 0 {
+		said = append(said, "stops "+strings.Join(stops, ", "))
 	}
+	if len(tasks) > 0 {
+		left := "keeps running: " + strings.Join(tasks, ", ")
+		if m.session != nil {
+			left += " (this session shows how it ends)"
+		}
+		said = append(said, left)
+	}
+	what := strings.Join(said, "; ")
 	if len(gens) > 0 {
 		opts, desc = append(opts, "stop the load generators, then quit"), append(desc, strings.Join(gens, ", ")+" stop sending")
 		keep := "keeps sending: " + strings.Join(gens, ", ")
@@ -1783,24 +1797,33 @@ func (m *model) runTask(name string, args []string) {
 		if err != nil {
 			return func() tea.Msg { return statusMsg{text: err.Error(), err: true} }
 		}
-		ctx, j := m.startJob(m.work(), label)
-		cmd := exec.CommandContext(ctx, self, append([]string{"-f", file, "-e", env, "--yes", "task", name}, args...)...)
-		sh.Detached(cmd)
-		cmd.Cancel = func() error { sh.KillGroup(cmd); return nil }
-		cmd.WaitDelay = 3 * time.Second
-		in, err := cmd.StdinPipe()
-		if err != nil {
+		ctx, j := m.startJob(context.Background(), label)
+		fail := func(err error) tea.Cmd {
 			j.finish(err)
 			return func() tea.Msg { return statusMsg{text: label + ": " + err.Error(), err: true} }
 		}
-		j.stdin = in
+		base, out, err := taskFiles()
+		if err != nil {
+			return fail(err)
+		}
+		defer out.Close()
+		cmd := exec.Command(self, append([]string{"-f", file, "-e", env, "--yes", "task", name}, args...)...)
+		sh.Detach(cmd)
+		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+base+".err", "RIG_DONE_FILE="+base+".done", "NO_COLOR=1")
+		cmd.Stdout, cmd.Stderr = out, out
+		in, err := cmd.StdinPipe()
+		if err != nil {
+			return fail(err)
+		}
+		if err := cmd.Start(); err != nil {
+			return fail(err)
+		}
+		j.stdin, j.log, j.pid = in, base, cmd.Process.Pid
+		go func() { _ = cmd.Wait() }()
+		j.killOnStop(ctx)
 		m.showErrors, m.actErrors, m.jobSel, m.jobScroll = true, false, 0, 0
 		return func() tea.Msg {
-			errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d-%d.err", os.Getpid(), time.Now().UnixNano()))
-			defer os.Remove(errFile)
-			cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile, "NO_COLOR=1")
-			cmd.Stdout, cmd.Stderr = j, j
-			err := cmd.Run()
+			err := j.follow()
 			j.finish(err)
 			switch {
 			case err == nil:
@@ -1808,15 +1831,12 @@ func (m *model) runTask(name string, args []string) {
 			case ctx.Err() != nil:
 				return statusMsg{text: label + ": stopped"}
 			}
-			text := label + " failed"
-			if raw, rerr := os.ReadFile(errFile); rerr == nil {
-				text = strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n ", " ·")
-			}
+			text := strings.ReplaceAll(err.Error(), "\n ", " ·")
 			out := j.output()
 			if h := sh.Hint(strings.Join(out[max(0, len(out)-10):], "\n")); h != "" && !strings.Contains(text, h) {
 				text += "\n→ " + h
 			}
-			return statusMsg{text: text + " · ! shows its output", err: true}
+			return statusMsg{text: label + ": " + text + " · ! shows its output", err: true}
 		}
 	}
 	m.confirm = &confirm{text: "run " + label + " on " + m.app.Env.Name + "?", run: func() tea.Msg { return thenMsg(start) }}

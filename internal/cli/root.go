@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -47,18 +48,22 @@ func Execute() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	root := newRoot()
+	code := 0
 	if err := root.ExecuteContext(ctx); err != nil {
 		text := sh.WithHint(err.Error())
 		fmt.Fprintln(os.Stderr, red("error: ")+text)
 		if f := os.Getenv("RIG_ERROR_FILE"); f != "" {
 			_ = os.WriteFile(f, []byte(text), 0o600) // the UI that ran this shows it after the terminal closes
 		}
+		code = 1
 		if errors.Is(err, engine.ErrProtected) {
-			return 3
+			code = 3
 		}
-		return 1
 	}
-	return 0
+	if f := os.Getenv("RIG_DONE_FILE"); f != "" {
+		_ = os.WriteFile(f, []byte(strconv.Itoa(code)), 0o600) // a rig reopened after this task started reads how it ended
+	}
+	return code
 }
 
 func newRoot() *cobra.Command {

@@ -58,6 +58,9 @@ type savedJob struct {
 	End   time.Time `json:"end"`
 	Err   string    `json:"err,omitempty"`
 	Lines []string  `json:"lines,omitempty"`
+	// Log and Pid: a task still running when the session was saved, followed again on restore
+	Log string `json:"log,omitempty"`
+	Pid int    `json:"pid,omitempty"`
 }
 
 const savedJobLines = 300
@@ -137,9 +140,12 @@ func (m *model) snapshot() *Session {
 	for _, j := range m.jobList() {
 		end, _, err := j.state()
 		sj := savedJob{Label: j.label, Start: j.start, End: end, Lines: j.output()}
-		if end.IsZero() {
+		switch {
+		case end.IsZero() && j.log != "":
+			sj.Log, sj.Pid, sj.Lines = j.log, j.pid, nil
+		case end.IsZero():
 			sj.End, sj.Err = time.Now(), "still running when the session was saved"
-		} else if err != nil {
+		case err != nil:
 			sj.Err = err.Error()
 		}
 		sj.Lines = sj.Lines[max(0, len(sj.Lines)-savedJobLines):]
@@ -222,9 +228,15 @@ func (m *model) restore(s *Session) {
 	m.drafts, m.errLog, m.views = s.Drafts, s.Errors, s.Views
 	m.jobsMu.Lock()
 	for _, sj := range s.Activity {
-		j := &job{label: sj.Label, start: sj.Start, end: sj.End, lines: sj.Lines}
+		j := &job{label: sj.Label, start: sj.Start, end: sj.End, lines: sj.Lines, log: sj.Log, pid: sj.Pid}
 		if sj.Err != "" {
 			j.err = errors.New(sj.Err)
+		}
+		if sj.Log != "" && sj.End.IsZero() {
+			ctx, stop := context.WithCancel(context.Background())
+			j.stop = stop
+			j.killOnStop(ctx)
+			go func() { j.finish(j.follow()) }()
 		}
 		m.jobs = append(m.jobs, j)
 	}

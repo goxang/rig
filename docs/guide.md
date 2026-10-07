@@ -71,7 +71,8 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 (dashboards, apps/infra, objects/folders, saved/history, suites, filters) switch with `ctrl+←→` and are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
-`T` runs a task from rig.yaml in the background (`ctrl+o` on one shows its args and steps), `ctrl+e` shows the environment (variables with secrets hidden, each
+`T` runs a task from rig.yaml in the background (`ctrl+o` on one shows its args and steps); a task keeps
+running when you quit rig, and a saved session reopened later follows it again or shows how it ended. `ctrl+e` shows the environment (variables with secrets hidden, each
 component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) and pins it: from then on `rig` opens on it as you left it
 (`rig --fresh` starts clean and unpins; `rig resume` picks another),
