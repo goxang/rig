@@ -600,7 +600,7 @@ func (t *servicesTab) rows(m *model) []grow {
 			continue
 		}
 		groups := strings.Join(s.Groups, ",")
-		if f != "" && !strings.Contains(strings.ToLower(st.Service+" "+groups+" "+s.Role), f) {
+		if !fuzzy(st.Service+" "+groups+" "+s.Role, f) {
 			continue
 		}
 		cpu, mem, restarts := usage(st)

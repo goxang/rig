@@ -204,7 +204,7 @@ func (t *manifestsTab) objects() []*manifest.Object {
 		if t.tree && t.file != "" && o.File != t.file || !t.shown(o) {
 			continue
 		}
-		if t.filter == "" || strings.Contains(strings.ToLower(o.ID()+" "+o.File), strings.ToLower(t.filter)) {
+		if fuzzy(o.ID()+" "+o.File, t.filter) {
 			out = append(out, o)
 		}
 	}
@@ -248,7 +248,7 @@ func (t *manifestsTab) entries() []entry {
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		if t.filter != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(t.filter)) {
+		if !fuzzy(rel, t.filter) {
 			continue
 		}
 		if first, _, deeper := strings.Cut(rel, string(filepath.Separator)); deeper {

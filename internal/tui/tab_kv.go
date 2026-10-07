@@ -161,7 +161,7 @@ func (t *kvTab) entries() []grow {
 		if folder {
 			id += "/"
 		}
-		if seen[id] || f != "" && !strings.Contains(strings.ToLower(child), f) {
+		if seen[id] || !fuzzy(child, f) {
 			continue
 		}
 		seen[id] = true

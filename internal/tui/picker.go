@@ -52,8 +52,7 @@ func (m *model) pickMany(title string, items, desc, chosen []string, done func([
 }
 
 func (p *picker) visible() []int {
-	var out []int
-	f := strings.ToLower(p.filter)
+	var exact, loose []int
 	for i, it := range p.items {
 		if p.group > 0 && !p.groups[p.group].items[it] {
 			continue
@@ -62,11 +61,14 @@ func (p *picker) visible() []int {
 		if i < len(p.desc) {
 			d = p.desc[i]
 		}
-		if f == "" || strings.Contains(strings.ToLower(it+" "+d), f) {
-			out = append(out, i)
+		switch matchTier(it, d, p.filter) {
+		case 0:
+			exact = append(exact, i)
+		case 1:
+			loose = append(loose, i)
 		}
 	}
-	return out
+	return append(exact, loose...)
 }
 
 func (p *picker) finish(m *model) tea.Cmd {

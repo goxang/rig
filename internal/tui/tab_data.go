@@ -1117,7 +1117,7 @@ func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w,
 	return lipgloss.JoinVertical(lipgloss.Left, list, panel(dt, db, w, dh, t.focus == 2))
 }
 
-// globMatcher matches names case-insensitively: plain text anywhere in the name, or a glob
+// globMatcher matches names case-insensitively: plain text fuzzily (letters in order), or a glob
 // (*word*, prefix*) against the whole name.
 func globMatcher(p string) func(string) bool {
 	p = strings.ToLower(strings.TrimSpace(p))
@@ -1125,7 +1125,7 @@ func globMatcher(p string) func(string) bool {
 		return func(string) bool { return true }
 	}
 	if !strings.Contains(p, "*") {
-		return func(s string) bool { return strings.Contains(strings.ToLower(s), p) }
+		return func(s string) bool { return fuzzy(s, p) }
 	}
 	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\*`, ".*") + "$")
 	return func(s string) bool { return re.MatchString(strings.ToLower(s)) }

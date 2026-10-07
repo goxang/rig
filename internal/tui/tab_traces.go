@@ -124,7 +124,7 @@ func (t *tracesTab) rows() []grow {
 			continue
 		}
 		svcs := strings.Join(s.Services, ",")
-		if text != "" && !strings.Contains(strings.ToLower(s.Root+" "+svcs+" "+s.ID), text) {
+		if !fuzzy(s.Root+" "+svcs+" "+s.ID, text) {
 			continue
 		}
 		bar := lipgloss.NewStyle().Foreground(viz.Palette[2]).Render(strings.Repeat("▇", max(1, int(float64(s.Duration)/float64(maxDur)*16))))
