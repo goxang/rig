@@ -23,6 +23,7 @@ is out of date.
 | `environments` | below |
 | `components` | below; shared by every environment |
 | `dashboards` | `name: [panel, ...]` or `name: {help, vars, panels}` (see below) |
+| `flow` | `{help, source, nodes, links}`: the Flow screen, requests moving through the system (see below) |
 | `tests` | test suites for `rig test` and the Tests screen (see below) |
 | `sections` | `name: {help, services: [names, groups or roles]}`: the Services screen's parts, in this order; services in none show under `other` |
 | `manifests` | folders `rig manifests` and the Manifests screen read (default: the runtime's `manifests`, else the `kubernetes` imports). The screen lists only the objects a service deploys; `u` shows the rest |
@@ -176,6 +177,50 @@ In the TUI a click on a legend entry shows only that series (again: all), ctrl/a
 it; `v` (or a double click) opens a panel full screen with a sortable table legend (min, max, mean,
 last, value at the cursor), series filter `/`, stacking `s` and a cursor set by clicking the chart.
 The Services screen's `m` opens the first dashboard with a `$service` variable on that service.
+
+## flow
+
+The Flow screen draws the nodes as boxes in columns and the links between them, with packets moving
+at each link's rate (more and faster as it rises, on a log scale), failed ones in red. A node turns
+hot (amber) or overloaded (red, blinking) from its numbers, the header sums up what comes in and goes
+out, and `enter` or a click opens the node's page; `esc` or `⌫` there comes straight back.
+
+```yaml
+flow:
+  help: an order from the load generator to the shipping worker
+  source: prom                           # the metrics component (default: the first)
+  nodes:                                 # down each column in this order
+    orders: { kind: load, load: [orders], open: orders, max: 300 }
+    api:    { kind: service, max: 250, slow: 200,
+              rate: 'sum(rate(http_requests_total[1m]))',
+              errors: 'sum(rate(http_requests_total{code=~"5.."}[1m]))',
+              latency: '1000 * sum(rate(http_seconds_sum[1m])) / sum(rate(http_seconds_count[1m]))' }
+    queue:  { kind: queue }              # a queue component counts by itself: backlog and publish rate
+    worker: { kind: service, rate: 'sum(rate(shipped_total[1m]))', backlog: 'sum(rabbitmq_queue_messages)' }
+    db:     { kind: database, open: db }
+    bank:   { kind: external, label: Bank, open: dashboard:bank }
+  links:
+    - { from: orders, to: api, label: POST /orders }
+    - { from: api, to: queue, rate: 'sum(rate(orders_total[1m]))' }
+    - { from: queue, to: worker }
+    - { from: worker, to: db }
+    - { from: worker, to: bank, errors: 'sum(rate(bank_errors_total[1m]))' }
+```
+
+| node key | |
+|---|---|
+| `label`, `help` | shown on the box (default: the node's name) and under the picked one |
+| `kind` | the icon: `load` », `gateway` ◈, `service` ◆, `queue` ≡, `database` ▤, `cache` ◇, `external` ⇥ |
+| `column` | its column, 0 the left; left out, one right of its rightmost input (links back don't count) |
+| `open` | what `enter` or a click opens: a service (its page), a component (Load, Data, KV, ...), `dashboard:<name>`, or a screen (default: the node's name) |
+| `rate`, `errors`, `latency`, `backlog` | instant metrics queries: per second, per second, ms, items waiting |
+| `load` | load generators: their target rates are the offered load, and a node sending well below it runs hot |
+| `max` | what it handles per second: past 70% it runs hot, past 90% it is overloaded |
+| `slow` | latency (ms) past which it is overloaded (70% of it: hot) |
+
+A link's `rate` and `errors` are instant queries too; left out, a link carries its target's rate shared
+over the target's inputs (else its source's over its outputs). A node also runs hot on 1% errors
+(5%: overloaded), a backlog that keeps growing, and a service with no instance up is overloaded.
 
 ## tests
 

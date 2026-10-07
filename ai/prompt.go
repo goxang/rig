@@ -107,6 +107,7 @@ Input so far (cursor at the end):
 func DescribePrompt(hint, before, want string) string {
 	return `Write the input for a developer tool. Context: ` + hint + `
 The user typed the start of the input, then described in words what the rest should do. Reply with ONLY the whole input on one line, starting with exactly what they typed: no quotes, no code fences, no explanation.
+Use exactly the syntax the context gives, and the real names it lists (columns, fields, keys): a description that already reads like that syntax ("dest = pos") becomes its valid form with the full name ("Destination=Pos"), never loose words.
 Typed: ` + before + `
 Description of the rest: ` + want
 }

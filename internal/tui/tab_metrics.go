@@ -328,6 +328,16 @@ func (t *metricsTab) switchDash(m *model, i int) tea.Cmd {
 	return t.reload(m)
 }
 
+// showDash shows the dashboard called name.
+func (t *metricsTab) showDash(m *model, name string) tea.Cmd {
+	t.init()
+	if i := slices.Index(t.dashNames(m), name); i >= 0 {
+		return t.switchDash(m, i)
+	}
+	m.setStatus("no dashboard "+name, true)
+	return nil
+}
+
 // jump shows the first dashboard with a $service variable, set to service: the Services screen's g.
 func (t *metricsTab) jump(m *model, service string) tea.Cmd {
 	t.init()

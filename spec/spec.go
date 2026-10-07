@@ -26,6 +26,8 @@ type Project struct {
 	Environments map[string]*Environment `yaml:"environments"`
 	Components   map[string]*Component   `yaml:"components"`
 	Dashboards   map[string]*Dashboard   `yaml:"dashboards"`
+	// Flow is the Flow screen: requests travelling through the system as packets between nodes.
+	Flow *Flow `yaml:"flow"`
 	// Tests are named test suites: `rig test <name>` and the Tests screen.
 	Tests     map[string]*TestSuite `yaml:"tests"`
 	Manifests []string              `yaml:"manifests"`
@@ -91,7 +93,7 @@ type OTel struct {
 }
 
 // Screens are the UI's screens in their default order.
-var Screens = []string{"services", "logs", "metrics", "traces", "queries", "kv", "data", "load", "manifests", "hosts", "tests"}
+var Screens = []string{"services", "logs", "metrics", "traces", "queries", "kv", "data", "load", "flow", "manifests", "hosts", "tests"}
 
 type UI struct {
 	// Tabs are the screens shown, in order (number keys follow it); left out, every screen the
@@ -359,6 +361,60 @@ func stepHelp(comment, step string) string {
 		words = append(words, strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "#")))
 	}
 	return strings.TrimSpace(strings.Join(words, " "))
+}
+
+// Flow draws how requests travel: nodes (load generators, services, queues, databases, third
+// parties) in columns, links between them, packets moving at each link's measured rate.
+type Flow struct {
+	Help string `yaml:"help"`
+	// Source is the metrics component the queries ask (default: the first).
+	Source string               `yaml:"source"`
+	Nodes  map[string]*FlowNode `yaml:"nodes"`
+	Links  []FlowLink           `yaml:"links"`
+	// NodeOrder is Nodes as rig.yaml lists them: their order down a column.
+	NodeOrder []string `yaml:"-"`
+}
+
+func (f *Flow) UnmarshalYAML(n *yaml.Node) error {
+	type plain Flow
+	if err := n.Decode((*plain)(f)); err != nil {
+		return err
+	}
+	f.NodeOrder = mappingKeys(n, "nodes")
+	return nil
+}
+
+type FlowNode struct {
+	Label string `yaml:"label"`
+	Help  string `yaml:"help"`
+	// Kind picks the icon and colour: load, gateway, service, queue, database, cache, external.
+	Kind string `yaml:"kind"`
+	// Column places the node (0 is the left); left out, it follows the links (one right of its inputs).
+	Column *int `yaml:"column"`
+	// Open is what a click opens: a service, a component (Data, Load, KV...), dashboard:<name>, or a
+	// screen.
+	Open string `yaml:"open"`
+	// Rate, Errors, Latency (ms) and Backlog are instant metrics queries.
+	Rate    string `yaml:"rate"`
+	Errors  string `yaml:"errors"`
+	Latency string `yaml:"latency"`
+	Backlog string `yaml:"backlog"`
+	// Load names load generators: their target rates make the node's offered load.
+	Load []string `yaml:"load"`
+	// Max is what the node handles per second: past 70% it runs hot, past 90% it is overloaded.
+	Max float64 `yaml:"max"`
+	// Slow is a latency (ms) past which the node counts as overloaded.
+	Slow float64 `yaml:"slow"`
+}
+
+type FlowLink struct {
+	From  string `yaml:"from"`
+	To    string `yaml:"to"`
+	Label string `yaml:"label"`
+	// Rate and Errors are instant queries; Rate left out, the link carries its target's rate shared
+	// over the target's inputs.
+	Rate   string `yaml:"rate"`
+	Errors string `yaml:"errors"`
 }
 
 type Dashboard struct {

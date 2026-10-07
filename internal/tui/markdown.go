@@ -14,14 +14,17 @@ var (
 	mdTableSep = regexp.MustCompile(`^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$`)
 )
 
-// renderMarkdown draws an answer in w columns: every line wraps (code too, tabs expanded), so
-// nothing runs past the box.
+// codeBarText starts each code line; a copy drops it
+const codeBarText = "│ "
+
+// renderMarkdown draws an answer in w columns: text wraps, code keeps its lines (tabs expanded) so it
+// copies as written; the chat scrolls sideways over the wider ones.
 func renderMarkdown(s string, w int) string {
 	w = max(w, 10)
 	var out []string
 	add := func(lines ...string) { out = append(out, lines...) }
 	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(s, "\t", "    ")), "\n")
-	codeBar := lipgloss.NewStyle().Foreground(cPanel).Render("│ ")
+	codeBar := lipgloss.NewStyle().Foreground(cPanel).Render(codeBarText)
 	for i := 0; i < len(lines); i++ {
 		l := lines[i]
 		t := strings.TrimSpace(l)
@@ -32,9 +35,7 @@ func renderMarkdown(s string, w int) string {
 				add(sDim.Render(lang))
 			}
 			for i++; i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "```"); i++ {
-				for _, part := range strings.Split(ansi.Hardwrap(lines[i], w-2, true), "\n") {
-					add(codeBar + sGreen.Render(part))
-				}
+				add(codeBar + sGreen.Render(lines[i]))
 			}
 		case strings.HasPrefix(t, "|") && i+1 < len(lines) && mdTableSep.MatchString(strings.TrimSpace(lines[i+1])):
 			var rows [][]string

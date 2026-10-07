@@ -87,6 +87,13 @@ func (t *loadTab) hints() [][2]string {
 		{"i", "instance shown"}, {"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}, {"W", "save a metrics report"}, {"z click", "chart full size"}}
 }
 
+// pick selects the generator called name and keeps it selected.
+func (t *loadTab) pick(name string) {
+	if i := slices.Index(t.names, name); i >= 0 {
+		t.sel, t.follow = i, false
+	}
+}
+
 func (t *loadTab) open(m *model) tea.Cmd {
 	t.names = m.app.Names(core.KindLoad)
 	t.hist = map[string]*loadHist{}
@@ -338,9 +345,10 @@ components:
 			}
 		}
 		_, typ, _ := m.app.Kind(n)
-		rows = append(rows, []string{dot, n, typ, rate, actual, fails})
+		rows = append(rows, []string{dot, "  " + n, typ, rate, actual, fails})
 	}
 	t.sel = min(t.sel, len(rows)-1)
+	rows[t.sel][1] = "▶ " + t.names[t.sel]
 	title := fmt.Sprintf("generators · %d", len(t.names))
 	if running > 0 {
 		title += sGreen.Render(fmt.Sprintf(" · %d running", running)) + sDim.Render(" · sending "+viz.Human(sending, "/s"))
@@ -368,7 +376,8 @@ components:
 			labels[i] = fmt.Sprintf("all instances (%d)", len(ids)-1)
 		}
 	}
-	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (ctrl+←→ i) · rate and config are shared by every instance"), rw)
+	head := sAccent.Render(" ▶ "+n) + sDim.Render(" │")
+	strip := truncate(head+" "+m.strip("load:inst", lw+1+lipgloss.Width(head), 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (ctrl+←→ i) · rate and config are shared by every instance"), rw)
 	strip += "\n" + m.stripRule(1, rw)
 	var right string
 	m.originY++

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +38,7 @@ type dataTab struct {
 
 	filter   string
 	restored map[string][]string
+	want     string // the component to select once the list arrives
 	// picked is the row last opened at each place of a walk, so going back lands on it; restore
 	// is the one the next fill selects
 	picked  map[string]string
@@ -123,15 +123,15 @@ func (t *dataTab) hints() [][2]string {
 	case t.focus == 2:
 		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
 	case c.kind == string(core.KindMessaging) && t.qview > 0:
-		return [][2]string{{"ctrl+←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
+		return [][2]string{{"ctrl+←→", "queues, exchanges, bindings, ..."}, {"/", "filter: words, col=value"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"enter", "queue details"}, {"m", "peek messages"}, {"space a", "mark, mark all"}, {"P", "purge marked/selected"}, {"X", "purge every queue shown"},
-			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"ctrl+←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
+			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"ctrl+←→", "exchanges, bindings, connections, ..."}, {"/", "filter: words, col=value"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
 	}
 	if t.query != "" {
-		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"ctrl+alt+←→↑↓", "sort"}}
+		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter: words, col=value"}, {"ctrl+alt+←→↑↓", "sort"}}
 	}
-	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"ctrl+alt+←→↑↓", "sort"}}
+	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter: words, col=value"}, {"r", "reload"}, {"ctrl+alt+←→↑↓", "sort"}}
 	if t.editable(c) {
 		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
 	}
@@ -271,6 +271,25 @@ func index(xs []string, x string) int {
 	return 0
 }
 func (t *dataTab) interval() time.Duration { return 5 * time.Second }
+
+// pick selects component name, now or once the component list is in.
+func (t *dataTab) pick(m *model, name string) tea.Cmd {
+	t.want = name
+	if len(t.comps) == 0 {
+		return nil
+	}
+	t.selectWanted()
+	return t.show(m)
+}
+
+func (t *dataTab) selectWanted() {
+	for i, r := range t.left.rows {
+		if r.id == t.want {
+			t.left.sel, t.focus = i, 0
+		}
+	}
+	t.want = ""
+}
 
 func (t *dataTab) open(m *model) tea.Cmd {
 	t.depth, t.paths = map[string][]float64{}, map[string][]string{}
@@ -472,6 +491,7 @@ func (t *dataTab) update(m *model, msg tea.Msg) tea.Cmd {
 			rows = append(rows, grow{id: c.name, cells: []string{c.name, sDim.Render(c.kind)}})
 		}
 		t.left.set(rows)
+		t.selectWanted()
 		return t.show(m)
 	case queuesMsg:
 		if msg.gen != m.gen {
@@ -553,15 +573,15 @@ func (t *dataTab) show(m *model) tea.Cmd {
 // fill puts what the selected component holds, filtered, into the right grid.
 func (t *dataTab) fill() {
 	c := t.current()
-	match := globMatcher(t.filter)
 	tbl := t.table
 	if c.kind == string(core.KindMessaging) && t.qview > 0 {
 		tbl = t.qtable
 	}
 	if c.kind == string(core.KindMessaging) && t.qview == 0 {
+		match := rowMatcher(t.filter, []string{"name"})
 		var rows []grow
 		for _, q := range t.queues[c.name] {
-			if !match(q.Name) {
+			if !match([]string{q.Name}) {
 				continue
 			}
 			name := q.Name
@@ -595,9 +615,10 @@ func (t *dataTab) fill() {
 	} else {
 		t.right.cols = cols
 	}
+	match := rowMatcher(t.filter, tbl.Columns)
 	var rows []grow
 	for i, r := range tbl.Rows {
-		if len(r) == 0 || !match(r[0]) {
+		if len(r) == 0 || !match(r) {
 			continue
 		}
 		id := strconv.Itoa(i) + "\x00" + r[0]
@@ -669,7 +690,9 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "/":
-		m.askAI("filter (text, or a glob like *word*)", t.filter, "a filter of names (queues, tables, keys): either "+fuzzyHint+", or one glob with * matching the whole name", func(v string) tea.Cmd {
+		cols, rows := t.filterRows()
+		hint := rowFilterHint + "; the columns: " + strings.Join(cols, ", ") + within("first rows", sampleRows(rows, 30))
+		m.askChecked("filter: words, *glob*, or column=value column!=value column~text", t.filter, hint, keepsSome(cols, rows), func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)
 			t.fill()
 			return nil
@@ -842,7 +865,7 @@ func (t *dataTab) queueKey(m *model, k tea.KeyMsg) (tea.Cmd, bool) {
 	case "X":
 		var names []string
 		for _, q := range t.queues[t.current().name] {
-			if q.Messages > 0 && globMatcher(t.filter)(q.Name) {
+			if q.Messages > 0 && rowMatcher(t.filter, []string{"name"})([]string{q.Name}) {
 				names = append(names, q.Name)
 			}
 		}
@@ -1117,18 +1140,36 @@ func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w,
 	return lipgloss.JoinVertical(lipgloss.Left, list, panel(dt, db, w, dh, t.focus == 2))
 }
 
-// globMatcher matches names case-insensitively: plain text fuzzily (letters in order), or a glob
-// (*word*, prefix*) against the whole name.
-func globMatcher(p string) func(string) bool {
-	p = strings.ToLower(strings.TrimSpace(p))
-	if p == "" {
-		return func(string) bool { return true }
+// filterRows are the columns and rows / filters: the queue names, or the table shown.
+func (t *dataTab) filterRows() ([]string, [][]string) {
+	c := t.current()
+	if c.kind == string(core.KindMessaging) && t.qview == 0 {
+		var rows [][]string
+		for _, q := range t.queues[c.name] {
+			rows = append(rows, []string{q.Name})
+		}
+		return []string{"name"}, rows
 	}
-	if !strings.Contains(p, "*") {
-		return func(s string) bool { return fuzzy(s, p) }
+	if c.kind == string(core.KindMessaging) {
+		return t.qtable.Columns, t.qtable.Rows
 	}
-	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\*`, ".*") + "$")
-	return func(s string) bool { return re.MatchString(strings.ToLower(s)) }
+	return t.table.Columns, t.table.Rows
+}
+
+// sampleRows renders up to n rows as "a | b | c", each cut short, for the AI to match against.
+func sampleRows(rows [][]string, n int) []string {
+	var out []string
+	for i, r := range rows {
+		if i == n {
+			break
+		}
+		cells := make([]string, len(r))
+		for j, c := range r {
+			cells[j] = truncate(c, 30)
+		}
+		out = append(out, strings.Join(cells, " | "))
+	}
+	return out
 }
 
 func (t *dataTab) atRoot() bool { return t.focus == 0 && t.query == "" && t.filter == "" }

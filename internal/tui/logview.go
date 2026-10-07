@@ -198,8 +198,7 @@ func (v *logView) layout(m *model, x, y, w, h int, line func(core.LogLine) strin
 	for i := len(v.lines) - v.scroll - 1; i >= 0 && len(rows) < h; i-- {
 		s := line(v.lines[i])
 		if a, z, ok := v.span(i); ok {
-			p := ansi.Strip(s)
-			s = ansi.Cut(p, 0, a) + sSel.Render(ansi.Cut(p, a, z)) + ansi.Cut(p, z, ansi.StringWidth(p))
+			s = paintSpan(s, a, z)
 		}
 		parts := []string{s}
 		if v.wrap && w > 0 {
@@ -223,7 +222,11 @@ func (v *logView) span(i int) (int, int, bool) {
 	if !v.dragged {
 		return 0, 0, false
 	}
-	lo, hi := v.anchor, v.head
+	return selSpan(v.anchor, v.head, i)
+}
+
+// selSpan is the columns [a, z) of line i between two drag ends, in either order.
+func selSpan(lo, hi lpos, i int) (int, int, bool) {
 	if hi.line < lo.line || hi.line == lo.line && hi.col < lo.col {
 		lo, hi = hi, lo
 	}
@@ -238,6 +241,12 @@ func (v *logView) span(i int) (int, int, bool) {
 		z = hi.col + 1
 	}
 	return a, z, true
+}
+
+// paintSpan shows columns [a, z) of s selected; the line loses its colours, as a terminal's does.
+func paintSpan(s string, a, z int) string {
+	p := ansi.Strip(s)
+	return ansi.Cut(p, 0, a) + sSel.Render(ansi.Cut(p, a, z)) + ansi.Cut(p, z, ansi.StringWidth(p))
 }
 
 func (v *logView) selection() string {

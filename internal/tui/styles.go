@@ -259,7 +259,7 @@ func table(cols []string, widths []int, rows [][]string, sel, offset, h int) str
 		}
 		line := strings.Join(cells, " ")
 		if i == sel {
-			line = sSelected.Render(line)
+			line = highlight(sCursor, line, lipgloss.Width(line))
 		}
 		b.WriteString(line + "\n")
 	}

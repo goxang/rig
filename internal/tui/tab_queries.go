@@ -250,7 +250,9 @@ type queriesTab struct {
 	langs     map[string]string
 	adhocSeq  int
 	resultFor string
-	history   bool // H: every run of this session instead of the query list
+	shown     core.Table
+	filter    string // / on the result: rowMatcher terms, cleared when another result shows
+	history   bool   // H: every run of this session instead of the query list
 	hist      *grid
 }
 
@@ -258,7 +260,7 @@ func (t *queriesTab) name() string { return "Queries" }
 func (t *queriesTab) typing() bool { return false }
 func (t *queriesTab) hints() [][2]string {
 	if t.focusRes {
-		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort, order"}}
+		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"/", "filter: words, col=value"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort, order"}}
 	}
 	if t.history {
 		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H ctrl+←→", "back to queries"}}
@@ -366,6 +368,16 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 	case tea.KeyMsg:
 		if t.focusRes {
+			switch msg.String() {
+			case "/":
+				t.askFilter(m)
+				return nil
+			case "esc":
+				if t.filter != "" {
+					t.filter = ""
+					return nil
+				}
+			}
 			if msg.String() == "left" || msg.String() == "esc" {
 				t.focusRes = false
 				return nil
@@ -617,6 +629,9 @@ func (t *queriesTab) savedView(m *model, w, h int) string {
 	default:
 		t.setResult(name, r.table)
 		title = fmt.Sprintf("%s · %d rows · %s · %s ago", name, len(r.table.Rows), r.took.Round(time.Millisecond), shortAge(time.Since(r.at)))
+		if t.filter != "" {
+			title += fmt.Sprintf(" · filter %s: %d", t.filter, len(t.result.rows))
+		}
 		lines := strings.Split(wordWrap("› "+strings.Join(strings.Fields(q.Query), " "), w-4), "\n")
 		if len(lines) > 3 {
 			lines = append(lines[:2], truncate(lines[2], w-6)+"…")
@@ -653,13 +668,26 @@ func (t *queriesTab) setResult(name string, tb core.Table) {
 	}
 	if len(t.result.cols) != len(cols) || name != t.resultFor {
 		t.result = newGrid("result", cols...)
-		t.resultFor = name
+		t.resultFor, t.filter = name, ""
 	}
-	rows := make([]grow, len(tb.Rows))
+	t.shown = tb
+	match := rowMatcher(t.filter, tb.Columns)
+	var rows []grow
 	for i, r := range tb.Rows {
-		rows[i] = grow{id: strconv.Itoa(i) + "|" + strings.Join(r, "|"), cells: r}
+		if match(r) {
+			rows = append(rows, grow{id: strconv.Itoa(i) + "|" + strings.Join(r, "|"), cells: r})
+		}
 	}
 	t.result.set(rows)
+}
+
+func (t *queriesTab) askFilter(m *model) {
+	tb := t.shown
+	hint := rowFilterHint + "; the columns: " + strings.Join(tb.Columns, ", ") + within("first rows", sampleRows(tb.Rows, 30))
+	m.askChecked("filter rows: words, *glob*, or column=value column!=value column~text", t.filter, hint, keepsSome(tb.Columns, tb.Rows), func(v string) tea.Cmd {
+		t.filter = strings.TrimSpace(v)
+		return nil
+	})
 }
 
 // copyResult puts the shown result on the clipboard: y the selected row, Y every row.

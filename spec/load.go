@@ -268,6 +268,15 @@ func (p *Project) validate() error {
 			}
 		}
 	}
+	if f := p.Flow; f != nil {
+		for i, l := range f.Links {
+			for _, end := range []string{l.From, l.To} {
+				if f.Nodes[end] == nil {
+					errs = append(errs, fmt.Sprintf("flow.links[%d]: unknown node %q", i, end))
+				}
+			}
+		}
+	}
 	if _, err := p.Order(p.ServiceNames()); err != nil {
 		errs = append(errs, err.Error())
 	}

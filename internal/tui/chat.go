@@ -45,6 +45,16 @@ type chat struct {
 	hist      []string
 	histAt    int
 	histDraft string
+	// hoff scrolls the transcript sideways over code wider than the box
+	hoff int
+	// a drag over the transcript selects by line and column and scrolls past an edge; rows is the
+	// line drawn on each body row (-1 for padding), lines what they index, bx..bh the body's box
+	anchor, head   lpos
+	selecting      bool
+	dragged        bool
+	rows           []int
+	lines          []string
+	bx, by, bw, bh int
 }
 
 // convo is one conversation as shown: its transcript, its running turn and what waits for it.
@@ -199,6 +209,7 @@ var screenStarters = map[string][]string{
 	"Queries":   {"add a query that counts failed transactions in the last 5 minutes and schedule it every 30s", "explain this result"},
 	"Metrics":   {"explain what these panels show right now", "add a query for the p99 latency of each service"},
 	"Traces":    {"why is this trace slow?", "which service fails in this trace?"},
+	"Flow":      {"where is the bottleneck right now?", "why is the picked node hot?"},
 	"Load":      {"what limits the throughput right now?", "raise the rate one step and watch the error rate"},
 	"Tests":     {"why do these tests fail?"},
 	"Manifests": {"what is broken in these manifests?"},
@@ -430,6 +441,12 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "shift+down", "ctrl+down":
 		c.scroll = max(0, c.scroll-1)
+		return nil
+	case "shift+left":
+		c.hoff = max(0, c.hoff-8)
+		return nil
+	case "shift+right":
+		c.hoff += 8
 		return nil
 	case "up":
 		// in a multi-line draft up moves between its lines until the first one
@@ -1208,17 +1225,42 @@ func (c *chat) view(m *model, x, w, h int) string {
 	c.scroll = min(c.scroll, max(0, len(lines)-room))
 	end := len(lines) - c.scroll
 	start := max(0, end-room)
-	body := strings.Join(lines[start:end], "\n")
+	bw := w - 2
+	widest := 0
+	for _, l := range lines[start:end] {
+		widest = max(widest, ansi.StringWidth(l))
+	}
+	c.hoff = min(c.hoff, max(0, widest-bw))
+	c.lines, c.rows = lines, c.rows[:0]
+	var rows []string
+	blank := func() { rows, c.rows = append(rows, ""), append(c.rows, -1) }
 	if pad := room - (end - start); pad > 0 && len(c.msgs) > 0 {
-		body = strings.Repeat("\n", pad) + body
-	} else if pad > 0 {
-		body += strings.Repeat("\n", pad)
+		for range pad {
+			blank()
+		}
+	}
+	for i := start; i < end; i++ {
+		l := lines[i]
+		if a, z, ok := c.span(i); ok {
+			l = paintSpan(l, a, z)
+		}
+		if c.hoff > 0 {
+			l = ansi.TruncateLeft(l, c.hoff, "")
+		}
+		rows, c.rows = append(rows, ansi.Truncate(l, bw, "")), append(c.rows, i)
+	}
+	for len(rows) < room {
+		blank()
 	}
 	if c.scroll > 0 {
-		bl := strings.Split(body, "\n")
-		bl[len(bl)-1] = sAmber.Render(fmt.Sprintf("↓ %d more lines · pgdown", c.scroll))
-		body = strings.Join(bl, "\n")
+		rows[len(rows)-1] = sAmber.Render(fmt.Sprintf("↓ %d more lines · pgdown", c.scroll))
 	}
+	if c.hoff > 0 || widest > bw {
+		title += fmt.Sprintf(" · ⇢%d shift+←→", c.hoff)
+	}
+	body := strings.Join(rows, "\n")
+	c.bx, c.by, c.bw, c.bh = x+1, m.originY+1, bw, room
+	m.zone("chat:body", x+1, 1, bw, room)
 	c.input.Placeholder = chatPlaceholder
 	if c.next != "" {
 		c.input.Placeholder = c.next + "  (tab)"
@@ -1239,6 +1281,72 @@ func (c *chat) view(m *model, x, w, h int) string {
 	}
 	body += "\n" + input + "\n" + status
 	return panel(title, body, w, h, c.focus)
+}
+
+func (c *chat) span(i int) (int, int, bool) {
+	if !c.dragged {
+		return 0, 0, false
+	}
+	return selSpan(c.anchor, c.head, i)
+}
+
+// drag selects transcript text from the press to the mouse and copies it on release; past an edge
+// it scrolls that way, so a selection can run longer and wider than the box.
+func (c *chat) drag(m *model, x, y int, phase dragPhase) {
+	if phase == dragMove && c.selecting {
+		switch {
+		case x >= c.bw-1:
+			c.hoff += 4
+		case x <= 0 && c.hoff > 0:
+			c.hoff = max(0, c.hoff-4)
+		}
+		switch {
+		case y < 0:
+			c.scroll++
+		case y >= c.bh && c.scroll > 0:
+			c.scroll--
+		}
+	}
+	line := -1
+	for r := min(max(y, 0), len(c.rows)-1); r >= 0 && r < len(c.rows); r++ {
+		if line = c.rows[r]; line >= 0 {
+			break
+		}
+	}
+	if line < 0 {
+		c.selecting = false
+		return
+	}
+	at := lpos{line, min(max(x, 0), c.bw-1) + c.hoff}
+	switch phase {
+	case dragPress:
+		c.anchor, c.head, c.selecting, c.dragged = at, at, true, false
+	case dragMove:
+		if c.selecting && at != c.anchor {
+			c.head, c.dragged = at, true
+		}
+	case dragRelease:
+		if c.selecting && c.dragged {
+			if text := c.selection(); text != "" {
+				copyText(text)
+				m.setStatus("copied", false)
+			}
+		}
+		c.selecting, c.dragged = false, false
+	}
+}
+
+func (c *chat) selection() string {
+	var out []string
+	for i := min(c.anchor.line, c.head.line); i <= max(c.anchor.line, c.head.line) && i < len(c.lines); i++ {
+		a, z, _ := c.span(i)
+		l := strings.TrimRight(ansi.Cut(ansi.Strip(c.lines[i]), a, z), " ")
+		if a == 0 {
+			l = strings.TrimPrefix(strings.TrimPrefix(l, codeBarText), "▌ ")
+		}
+		out = append(out, l)
+	}
+	return strings.Trim(strings.Join(out, "\n"), "\n")
 }
 
 func (c *chat) lastAnswer() string {

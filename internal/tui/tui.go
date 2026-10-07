@@ -250,7 +250,7 @@ type (
 func allTabs() map[string]tab {
 	return map[string]tab{"services": &servicesTab{}, "logs": &logsTab{}, "metrics": &metricsTab{}, "traces": &tracesTab{},
 		"queries": &queriesTab{}, "kv": &kvTab{}, "data": &dataTab{}, "load": &loadTab{}, "manifests": &manifestsTab{},
-		"hosts": &hostsTab{}, "tests": &testsTab{}}
+		"hosts": &hostsTab{}, "tests": &testsTab{}, "flow": &flowTab{}}
 }
 
 // advanced are the screens the simple view leaves out (unless ui.tabs names them).
@@ -321,6 +321,8 @@ func configured(a *engine.App, n string) bool {
 	}
 	rt := a.Env.Runtime.Type
 	switch n {
+	case "flow":
+		return a.Spec.Flow != nil && len(a.Spec.Flow.Nodes) > 0
 	case "metrics":
 		if len(a.Spec.Dashboards) > 0 || has(core.KindMetrics) {
 			return true
@@ -459,8 +461,11 @@ func execProcess(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
 
 func tick() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
 
-// crumb is a jump from screen from to screen to.
-type crumb struct{ from, to int }
+// crumb is a jump from screen from to screen to; a direct one goes back on the first esc.
+type crumb struct {
+	from, to int
+	direct   bool
+}
 
 // rooted is a screen that knows whether esc has nothing left to close in it.
 type rooted interface{ atRoot() bool }
@@ -470,7 +475,16 @@ func (m *model) jump(i int) tea.Cmd {
 	trail, from := m.trail, m.active
 	cmd := m.openTab(i)
 	if from != i {
-		m.trail = append(trail, crumb{from, i})
+		m.trail = append(trail, crumb{from: from, to: i})
+	}
+	return cmd
+}
+
+// jumpDirect is jump whose esc or backspace comes straight back, whatever is open on screen i.
+func (m *model) jumpDirect(i int) tea.Cmd {
+	cmd := m.jump(i)
+	if n := len(m.trail); n > 0 && m.trail[n-1].to == i {
+		m.trail[n-1].direct = true
 	}
 	return cmd
 }
@@ -481,7 +495,7 @@ func (m *model) back() (tea.Cmd, bool) {
 	if n == 0 || m.trail[n-1].to != m.active {
 		return nil, false
 	}
-	if r, ok := m.tabs[m.active].(rooted); ok && !r.atRoot() {
+	if r, ok := m.tabs[m.active].(rooted); ok && !r.atRoot() && !m.trail[n-1].direct {
 		return nil, false
 	}
 	rest, c := m.trail[:n-1], m.trail[n-1]
@@ -971,8 +985,24 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 			return nil
 		}
 	}
+	if c := m.chat; c != nil && c.selecting && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
+		phase := dragMove
+		if e.Action == tea.MouseActionRelease {
+			phase = dragRelease
+		}
+		c.drag(m, e.X-c.bx, e.Y-c.by, phase)
+		return nil
+	}
 	if m.sel != nil && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.selectTo(e)
+	}
+	if c := m.chat; c != nil && c.open && m.picker == nil && e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft {
+		if z, ok := m.zoneAt(e.X, e.Y); ok && z.id == "chat:body" {
+			c.focus = true
+			c.input.Focus()
+			c.drag(m, z.x, z.y, dragPress)
+			return nil
+		}
 	}
 	if e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft && e.Y != 1 {
 		m.selectStart(e.X, e.Y)
@@ -994,8 +1024,14 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	}
 	if c := m.chat; c != nil && c.open && m.picker == nil && !m.help && !m.showAlerts && !m.showErrors && e.Action == tea.MouseActionPress {
 		z, ok := m.zoneAt(e.X, e.Y)
-		inChat := ok && z.id == "chat"
+		inChat := ok && (z.id == "chat" || z.id == "chat:body")
 		switch {
+		case inChat && (e.Button == tea.MouseButtonWheelLeft || e.Shift && e.Button == tea.MouseButtonWheelUp):
+			c.hoff = max(0, c.hoff-4)
+			return nil
+		case inChat && (e.Button == tea.MouseButtonWheelRight || e.Shift && e.Button == tea.MouseButtonWheelDown):
+			c.hoff += 4
+			return nil
 		case inChat && e.Button == tea.MouseButtonWheelUp:
 			c.scroll += 3
 			return nil
@@ -2387,6 +2423,7 @@ var screenHelp = map[string]string{
 	"Data":      "walk databases, queues and caches; edit or delete rows and keys",
 	"KV":        "the config store (Consul): browse, edit and delete keys right in it; F loads the config files",
 	"Load":      "load generators: start, stop, change the rate, watch what they send",
+	"Flow":      "requests moving through the system at their measured rates; hot and overloaded parts marked, enter opens one",
 	"Hosts":     "the machines the environment runs on: CPU, memory, disk, a shell",
 	"Manifests": "what runs on the cluster, or the project's manifest files (c): objects, links, issues, edit, apply",
 	"Tests":     "the test suites of rig.yaml: run, rerun failures, reports",

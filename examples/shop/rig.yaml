@@ -69,6 +69,23 @@ dashboards:
     - { title: api latency (avg), query: '1000 * sum(rate(http_request_duration_seconds_sum[1m])) / sum(rate(http_request_duration_seconds_count[1m]))', unit: ms }
     - { title: requests/s by code, query: 'sum by (code) (rate(http_requests_total[1m]))', unit: /s, legend: "{{code}}" }
 
+flow:
+  help: an order from the load generator to the shipping worker
+  nodes:
+    orders: { kind: load, label: load, load: [orders], open: orders, max: 300 }
+    api:    { kind: service, rate: 'sum(rate(http_requests_total[1m]))', errors: 'sum(rate(http_requests_total{code=~"5.."}[1m]))', latency: '1000 * sum(rate(http_request_duration_seconds_sum[1m])) / sum(rate(http_request_duration_seconds_count[1m]))', max: 250, slow: 200 }
+    cache:  { kind: cache, label: redis }
+    db:     { kind: database, label: postgres }
+    queue:  { kind: queue, label: rabbitmq }
+    worker: { kind: service, rate: 'sum(rate(shop_shipped_total[1m]))', errors: 'sum(rate(shop_shipped_total{result="failed"}[1m]))', max: 200 }
+  links:
+    - { from: orders, to: api, label: POST /orders }
+    - { from: api, to: cache }
+    - { from: api, to: db, rate: 'sum(rate(shop_orders_total[1m]))' }
+    - { from: api, to: queue, rate: 'sum(rate(shop_orders_total[1m]))' }
+    - { from: queue, to: worker }
+    - { from: worker, to: db }
+
 alerts:
   - { name: shipping failures, source: prom, query: 'sum(rate(shop_shipped_total{result="failed"}[1m]))', warn: 1, crit: 5, unit: /s }
   - { name: orders waiting, source: queue, query: "queues name messages", warn: 100, crit: 1000 }

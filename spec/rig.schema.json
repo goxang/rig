@@ -371,6 +371,178 @@
       },
       "type": "object"
     },
+    "Flow": {
+      "additionalProperties": false,
+      "properties": {
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "links": {
+          "items": {
+            "$ref": "#/definitions/FlowLink"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "$ref": "#/definitions/FlowNode"
+          },
+          "type": "object"
+        },
+        "source": {
+          "description": "The metrics component the queries ask (default: the first).",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FlowLink": {
+      "additionalProperties": false,
+      "properties": {
+        "errors": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "rate": {
+          "description": "And Errors are instant queries; Rate left out, the link carries its target's rate shared over the target's inputs.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "to": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FlowNode": {
+      "additionalProperties": false,
+      "properties": {
+        "backlog": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "column": {
+          "description": "Places the node (0 is the left); left out, it follows the links (one right of its inputs).",
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "errors": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "help": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "kind": {
+          "description": "Picks the icon and colour: load, gateway, service, queue, database, cache, external.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "latency": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "load": {
+          "description": "Names load generators: their target rates make the node's offered load.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "max": {
+          "description": "What the node handles per second: past 70% it runs hot, past 90% it is overloaded.",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "open": {
+          "description": "What a click opens: a service, a component (Data, Load, KV...), dashboard:\u003cname\u003e, or a screen.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "rate": {
+          "description": "Rate, Errors, Latency (ms) and Backlog are instant metrics queries.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "slow": {
+          "description": "A latency (ms) past which the node counts as overloaded.",
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "LogsUI": {
       "additionalProperties": false,
       "properties": {
@@ -1505,6 +1677,14 @@
         "$ref": "#/definitions/Environment"
       },
       "type": "object"
+    },
+    "flow": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Flow"
+        }
+      ],
+      "description": "The Flow screen: requests travelling through the system as packets between nodes."
     },
     "help": {
       "description": "Shown by `rig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `rig -h` shows only its own generic help.",

@@ -15,7 +15,7 @@ func TestPrintable(t *testing.T) {
 	}
 }
 
-func TestGlobMatcher(t *testing.T) {
+func TestNameFilter(t *testing.T) {
 	cases := []struct {
 		p, s string
 		want bool
@@ -24,7 +24,7 @@ func TestGlobMatcher(t *testing.T) {
 		{"parser*", "dispatcher.parser", false}, {"*.request.*", "parser.settlement.Request.*.*.*", true},
 	}
 	for _, c := range cases {
-		if got := globMatcher(c.p)(c.s); got != c.want {
+		if got := rowMatcher(c.p, []string{"name"})([]string{c.s}); got != c.want {
 			t.Errorf("%q ~ %q = %v", c.p, c.s, got)
 		}
 	}
