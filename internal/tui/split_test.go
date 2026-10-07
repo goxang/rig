@@ -7,7 +7,9 @@ import (
 )
 
 func TestSplitDragIsKept(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("AppData", cfg)
 	t.Setenv("HOME", t.TempDir())
 	m := &model{}
 	if got := m.paneSize("kv", splitGeo{total: 100, minA: 20, minB: 30}, 40, 0, 0, 10); got != 40 {

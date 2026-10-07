@@ -211,7 +211,9 @@ func TestOnlyByRole(t *testing.T) {
 }
 
 func TestSecretsResolve(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("AppData", cfg) // os.UserConfigDir on Windows
 	dir := t.TempDir()
 	f := filepath.Join(dir, "rig.yaml")
 	y := "project: p\nsecrets:\n  PW: { default: dflt }\n  TOKEN: {}\nservices:\n  a: { image: x, env: { P: \"${PW}\", T: \"${TOKEN}\" } }\nenvironments:\n  e: { runtime: { type: local } }\ndefault: e\n"
