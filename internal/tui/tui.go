@@ -1287,7 +1287,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			if err != nil {
 				m.setStatus("save session: "+err.Error(), true)
 			} else {
-				m.setStatus("session saved: rig resume "+id+" (quitting with q keeps it current)", false)
+				m.setStatus("session "+id+" saved: rig opens on it from now on, as you leave it (rig --fresh starts clean)", false)
 			}
 			return nil
 		case "?", "f1":
@@ -2052,7 +2052,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output, and the errors (tab); y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output, and the errors (tab); y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

@@ -123,7 +123,10 @@ func (m *model) saveSession() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.ID, os.WriteFile(filepath.Join(dir, s.ID+".json"), raw, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, s.ID+".json"), raw, 0o644); err != nil {
+		return "", err
+	}
+	return s.ID, os.WriteFile(pinFile(m.app.Spec.Dir), []byte(s.ID), 0o644)
 }
 
 // restore puts a saved session back into freshly opened screens.
@@ -239,8 +242,29 @@ func (s Session) Summary() string {
 
 // CloseSession forgets a saved session.
 func CloseSession(projectDir, id string) error {
+	if p, _ := Pinned(projectDir); p == id {
+		Unpin(projectDir)
+	}
 	return os.Remove(filepath.Join(sessionDir(projectDir), id+".json"))
 }
+
+func pinFile(projectDir string) string { return filepath.Join(sessionDir(projectDir), "pinned") }
+
+// Pinned is the session rig opens on (the last one S saved) and its environment; "" for none.
+func Pinned(projectDir string) (id, env string) {
+	raw, err := os.ReadFile(pinFile(projectDir))
+	if err != nil {
+		return "", ""
+	}
+	s, err := LoadSession(projectDir, strings.TrimSpace(string(raw)))
+	if err != nil {
+		return "", ""
+	}
+	return s.ID, s.Env
+}
+
+// Unpin has rig open fresh again.
+func Unpin(projectDir string) { _ = os.Remove(pinFile(projectDir)) }
 
 // PickSession is `rig resume`'s chooser: rows are id, kind, saved, what; enter picks one, d closes
 // the selected one (through close), q leaves. It returns the picked row, -1 for none.

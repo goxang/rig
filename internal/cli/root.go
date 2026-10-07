@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -36,6 +37,9 @@ var (
 	Sessions func(projectDir string) ([][]string, error)
 	// CloseUISession forgets a saved UI session.
 	CloseUISession func(projectDir, id string) error
+	// Pinned is the saved session rig opens on, Unpin forgets that choice.
+	Pinned func(projectDir string) (id, env string)
+	Unpin  func(projectDir string)
 )
 
 func Execute() int {
@@ -68,6 +72,11 @@ Run rig with no arguments for the terminal UI.`,
 		SilenceErrors: true,
 		Version:       Version,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if UI != nil && Pinned != nil {
+				if done, err := openPinned(cmd.Context(), fresh); done {
+					return err
+				}
+			}
 			remembered := false
 			if g.env == "" && os.Getenv("RIG_ENV") == "" && UI != nil {
 				g.env = engine.LastEnv(g.file)
@@ -89,6 +98,7 @@ Run rig with no arguments for the terminal UI.`,
 			return UI(cmd.Context(), a)
 		},
 	}
+	root.Flags().BoolVar(&fresh, "fresh", false, "open the UI clean instead of on the session S saved last (and stop opening on it)")
 	root.PersistentFlags().StringVarP(&g.file, "file", "f", "", "project file (default: rig.yaml found from here up, or $RIG_FILE)")
 	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default; the UI opens on the one it last showed)")
 	root.PersistentFlags().StringVar(&engine.NamespaceOverride, "namespace", "", "Kubernetes namespace for this run, instead of the environment's (rig ns switches it for good)")
@@ -132,6 +142,35 @@ Run rig with no arguments for the terminal UI.`,
 		}
 	})
 	return root
+}
+
+var fresh bool
+
+// openPinned opens the UI on the session S saved last, when there is one for this environment;
+// --fresh forgets it instead. done says the UI ran (or failed to start).
+func openPinned(ctx context.Context, fresh bool) (done bool, err error) {
+	file := g.file
+	if file == "" {
+		if file, err = spec.Find("."); err != nil {
+			return false, nil
+		}
+	}
+	dir := filepath.Dir(file)
+	if fresh {
+		Unpin(dir)
+		return false, nil
+	}
+	id, env := Pinned(dir)
+	if id == "" || g.env != "" && g.env != env || os.Getenv("RIG_ENV") != "" && os.Getenv("RIG_ENV") != env {
+		return false, nil
+	}
+	fmt.Fprintln(os.Stderr, dim("opening session "+id+" (rig --fresh starts clean)"))
+	return true, Resume(ctx, func(e string) (*engine.App, error) {
+		if g.env == "" {
+			g.env = e
+		}
+		return open()
+	}, dir, id)
 }
 
 // printProjectHelp shows the current project's own rig.yaml `help:` text, if it set one —

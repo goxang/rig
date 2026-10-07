@@ -73,7 +73,8 @@ shows only when rig.yaml gives it something (no `kv` component, no KV screen); `
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
 `T` runs a task from rig.yaml in the background, `ctrl+e` shows the environment (variables with secrets hidden, each
 component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
-`m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
+`m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) and pins it: from then on `rig` opens on it as you left it
+(`rig --fresh` starts clean and unpins; `rig resume` picks another),
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
 the terminal can select text; the header shows alerts (`A`). `q q` (or `ctrl+c ctrl+c`) quits, at once unless a test run or an
 operation is still going, or load generators are sending: those stop with rig (tests, queries, port

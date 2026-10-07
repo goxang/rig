@@ -47,6 +47,7 @@ func main() {
 	cli.AIChat = tui.Chat
 	cli.PickSession = tui.PickSession
 	cli.CloseUISession = tui.CloseSession
+	cli.Pinned, cli.Unpin = tui.Pinned, tui.Unpin
 	cli.Sessions = func(dir string) ([][]string, error) {
 		ss, err := tui.ListSessions(dir)
 		var rows [][]string
