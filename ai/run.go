@@ -28,6 +28,8 @@ const (
 	EnvSock      = "RIG_AI_SOCK"
 	EnvProtected = "RIG_AI_PROTECTED"
 	EnvKube      = "RIG_AI_KUBE"
+	// EnvBareTools has the MCP server list its tools without the rig_ prefix (opencode adds the server's name)
+	EnvBareTools = "RIG_MCP_BARE"
 )
 
 var proxyVars = []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY", "no_proxy"}
@@ -286,7 +288,12 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 		mcp[name] = map[string]any{"enabled": false}
 	}
 	if mcpArgv != nil {
-		mcp["rig"] = map[string]any{"type": "local", "command": mcpArgv, "environment": mcpEnv, "enabled": true}
+		env := map[string]string{EnvBareTools: "1"}
+		for k, v := range mcpEnv {
+			env[k] = v
+		}
+		// rig render, builds and kubectl through tools take longer than opencode's default 5s
+		mcp["rig"] = map[string]any{"type": "local", "command": mcpArgv, "environment": env, "enabled": true, "timeout": 300000}
 	}
 	cfg["mcp"] = mcp
 	model := r.Setup.Model

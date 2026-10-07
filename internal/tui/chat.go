@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -953,6 +954,12 @@ func (t *servicesTab) aiContext(m *model) string {
 		st := t.status(m, n)
 		fmt.Fprintf(&b, "%s: %s ready %d/%d image %s %s\n", n, st.State, st.Ready, st.Desired, st.Image, st.Message)
 	}
+	for i, n := range names {
+		if i == 3 {
+			break
+		}
+		b.WriteString(serviceFacts(m, n))
+	}
 	var bad []string
 	for _, s := range m.services {
 		if s.State == core.StateFailed || s.State == core.StateDegraded {
@@ -964,6 +971,62 @@ func (t *servicesTab) aiContext(m *model) string {
 	}
 	if t.lt != nil && t.open_ != "" {
 		b.WriteString("its log, last lines:\n" + logSample(t.lt.log.lines, 60))
+	}
+	return b.String()
+}
+
+// serviceFacts is what rig knows of a service: its definition and, on Kubernetes, the manifest a
+// deploy applies or where one would go, so the assistant need not search the repository for it.
+func serviceFacts(m *model, n string) string {
+	s := m.app.Spec.Services[n]
+	if s == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s in rig.yaml: role %s", n, s.Role)
+	if s.Image != "" {
+		b.WriteString(", image " + s.Image)
+	}
+	if s.Build != nil {
+		switch {
+		case s.Build.Go != "":
+			b.WriteString(", build go " + s.Build.Go)
+		case s.Build.Dockerfile != "":
+			b.WriteString(", build dockerfile " + s.Build.Dockerfile)
+		}
+	}
+	if len(s.Ports) > 0 {
+		fmt.Fprintf(&b, ", ports %v", s.Ports)
+	}
+	if len(s.Groups) > 0 {
+		b.WriteString(", groups " + strings.Join(s.Groups, ","))
+	}
+	if len(s.DependsOn) > 0 {
+		b.WriteString(", depends on " + strings.Join(s.DependsOn, ","))
+	}
+	b.WriteString("\n")
+	if k, ok := m.k8s(); ok {
+		objs, w, err := k.Objects(s)
+		switch {
+		case err != nil:
+			fmt.Fprintf(&b, "%s manifests: %v\n", n, err)
+		case w != nil:
+			var files []string
+			for _, o := range objs {
+				if rel, err := filepath.Rel(m.app.Spec.Dir, o.File); err == nil && !slices.Contains(files, rel) {
+					files = append(files, rel)
+				}
+			}
+			fmt.Fprintf(&b, "%s manifests: %s (%d objects); a deploy applies them with $TAG and the env filled in\n", n, strings.Join(files, ", "), len(objs))
+		default:
+			dirs := m.app.ManifestDirs()
+			for i, d := range dirs {
+				if rel, err := filepath.Rel(m.app.Spec.Dir, d); err == nil {
+					dirs[i] = rel
+				}
+			}
+			fmt.Fprintf(&b, "%s manifests: none, so a deploy generates a plain Deployment. Its own manifest goes in %s, named after the workload (metadata.name %s, image $REGISTRY/<image>:$TAG); copy a sibling service's file there as the start\n", n, strings.Join(dirs, " or "), n)
+		}
 	}
 	return b.String()
 }

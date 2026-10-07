@@ -70,6 +70,15 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 	for _, t := range tools {
 		byName[t.Name] = t
 	}
+	listed := tools
+	// opencode names a server's tools <server>_<tool>: served bare, rig_status stays rig_status there
+	if os.Getenv(ai.EnvBareTools) != "" {
+		listed = make([]mcpTool, len(tools))
+		for i, t := range tools {
+			t.Name = strings.TrimPrefix(t.Name, "rig_")
+			listed[i] = t
+		}
+	}
 	enc := json.NewEncoder(out)
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
@@ -101,7 +110,7 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 		case "ping":
 			resp.Result = map[string]any{}
 		case "tools/list":
-			resp.Result = map[string]any{"tools": tools}
+			resp.Result = map[string]any{"tools": listed}
 		case "tools/call":
 			var p struct {
 				Name      string         `json:"name"`
@@ -112,6 +121,9 @@ func serveMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 				break
 			}
 			t, ok := byName[p.Name]
+			if !ok {
+				t, ok = byName["rig_"+p.Name]
+			}
 			if !ok {
 				resp.Error = &rpcErr{Code: -32602, Message: "unknown tool " + p.Name}
 				break
