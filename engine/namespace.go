@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/goxang/rig/internal/kubectx"
 	"github.com/goxang/rig/internal/sh"
 )
 
@@ -96,6 +97,7 @@ func (a *App) UseNamespace(ns string) error {
 func (a *App) kubeContext() string {
 	var o struct {
 		Context string `yaml:"context"`
+		Server  string `yaml:"server"`
 		Cluster string `yaml:"cluster"`
 	}
 	_ = a.Env.Runtime.Decode(&o)
@@ -104,6 +106,9 @@ func (a *App) kubeContext() string {
 			o.Cluster = "rig"
 		}
 		return "kind-" + o.Cluster
+	}
+	if c, err := kubectx.Resolve(o.Context, o.Server); err == nil {
+		return c
 	}
 	return o.Context
 }

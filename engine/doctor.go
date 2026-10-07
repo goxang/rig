@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/kubectx"
 	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
@@ -107,25 +108,25 @@ func runtimeFix(typ string) string {
 func (a *App) contextCheck(ctx context.Context) Check {
 	var opt struct {
 		Context string `yaml:"context"`
+		Server  string `yaml:"server"`
 		Cluster string `yaml:"cluster"`
 	}
 	_ = a.Env.Runtime.Decode(&opt)
 	if opt.Context == "" && opt.Cluster != "" {
 		opt.Context = "kind-" + opt.Cluster
 	}
-	if opt.Context == "" {
+	if opt.Context == "" && opt.Server == "" {
 		return Check{Name: "kube context", Status: CheckWarn, Detail: "the environment names none"}
 	}
-	raw, err := sh.New("kubectl", "config", "get-contexts", "-o", "name").Output(ctx)
-	if err != nil {
+	if err := sh.New("kubectl", "config", "get-contexts", "-o", "name").Run(ctx); err != nil {
 		return Check{Name: "kube context", Status: CheckFail, Detail: firstLine(err), Fix: "check ~/.kube/config (or $KUBECONFIG)"}
 	}
-	have := strings.Fields(string(raw))
-	if !slices.Contains(have, opt.Context) {
-		return Check{Name: "kube context", Status: CheckFail, Detail: fmt.Sprintf("%q is not in your kubeconfig (have %s)", opt.Context, strings.Join(have, ", ")),
+	c, err := kubectx.Resolve(opt.Context, opt.Server)
+	if err != nil {
+		return Check{Name: "kube context", Status: CheckFail, Detail: firstLine(err),
 			Fix: "add the cluster's kubeconfig, or rename yours: kubectl config rename-context <yours> " + opt.Context}
 	}
-	return Check{Name: "kube context", Status: CheckOK, Detail: opt.Context}
+	return Check{Name: "kube context", Status: CheckOK, Detail: c}
 }
 
 // portChecks finds the host ports of services that are not running already taken by something else.

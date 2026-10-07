@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/kubectx"
 	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/manifest"
 	"github.com/goxang/rig/plugin"
@@ -28,7 +29,9 @@ func init() {
 }
 
 type Options struct {
-	Context   string `yaml:"context"`
+	Context string `yaml:"context"`
+	// Server finds the context by its cluster's API address when machines name it differently
+	Server    string `yaml:"server"`
 	Namespace string `yaml:"namespace"`
 	Registry  string `yaml:"registry"`
 	// PullRegistry is the registry as the cluster's nodes name it, when that differs from where
@@ -140,36 +143,23 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	if err := c.Decode(&r.Opt); err != nil {
 		return nil, err
 	}
-	if err := r.Init(); err != nil {
-		return nil, err
+	if r.Opt.Context != "" || r.Opt.Server != "" {
+		ctx, err := kubectx.Resolve(r.Opt.Context, r.Opt.Server)
+		if err != nil {
+			return nil, err
+		}
+		r.Opt.Context = ctx
 	}
-	if err := checkContext(r.Opt.Context); err != nil {
+	if err := r.Init(); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-// checkContext fails early, naming the contexts there are, when the kubeconfig of this machine
-// calls the cluster something else than rig.yaml does; without kubectl it leaves the error to later.
-func checkContext(name string) error {
-	raw, err := exec.Command("kubectl", "config", "get-contexts", "-o", "name").Output()
-	if err != nil {
-		return nil
-	}
-	have := strings.Fields(string(raw))
-	for _, c := range have {
-		if c == name {
-			return nil
-		}
-	}
-	return fmt.Errorf("kubectl context %q is not in this machine's kubeconfig (it has: %s); point the environment's runtime.context in rig.yaml (or the variable it reads, e.g. RIG_LOADTEST2_CONTEXT) at the right one, or rename yours: kubectl config rename-context <yours> %s",
-		name, strings.Join(have, ", "), name)
-}
-
 // Init checks options; adapters embedding Runtime call it after filling Opt.
 func (r *Runtime) Init() error {
 	if r.Opt.Context == "" {
-		return errors.New("kubernetes runtime needs `context`: rig never uses kubectl's current context implicitly")
+		return errors.New("kubernetes runtime needs `context` or `server`: rig never uses kubectl's current context implicitly")
 	}
 	if r.Opt.Namespace == "" {
 		r.Opt.Namespace = "default"
