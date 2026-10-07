@@ -36,6 +36,17 @@ type picker struct {
 	preview       func(item string) string
 	pvOff, pvRows int
 	pvFor         string
+	// detail, when set, is the selected item in full, opened in place of the list by ctrl+o and
+	// scrolled there, so a long description never resizes the list
+	detail     func(item string) string
+	showDetail bool
+	dtOff      int
+	// a long list (every key of a KV store) is filtered and measured once per change, not per frame
+	vis           []int
+	visFor        string
+	visOK         bool
+	measured      bool
+	nameW, totalW int
 }
 
 type pickGroup struct {
@@ -56,6 +67,10 @@ func (m *model) pickMany(title string, items, desc, chosen []string, done func([
 }
 
 func (p *picker) visible() []int {
+	key := fmt.Sprint(p.group, "\x00", p.filter)
+	if p.visOK && p.visFor == key {
+		return p.vis
+	}
 	var exact, loose []int
 	for i, it := range p.items {
 		if p.group > 0 && !p.groups[p.group].items[it] {
@@ -72,7 +87,26 @@ func (p *picker) visible() []int {
 			loose = append(loose, i)
 		}
 	}
-	return append(exact, loose...)
+	p.vis, p.visFor, p.visOK = append(exact, loose...), key, true
+	return p.vis
+}
+
+// changed drops what was worked out from the items, after one is removed
+func (p *picker) changed() { p.visOK, p.measured = false, false }
+
+func (p *picker) widths() (name, total int) {
+	if !p.measured {
+		p.nameW, p.totalW, p.measured = 0, 0, true
+		for i, it := range p.items {
+			d := ""
+			if i < len(p.desc) {
+				d = p.desc[i]
+			}
+			n := lipgloss.Width(it)
+			p.nameW, p.totalW = max(p.nameW, n), max(p.totalW, n+lipgloss.Width(firstLine(d)))
+		}
+	}
+	return p.nameW, p.totalW
 }
 
 func (p *picker) finish(m *model) tea.Cmd {
@@ -107,7 +141,31 @@ func (m *model) chainBack(restore func() tea.Cmd) {
 
 func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 	vis := p.visible()
+	if p.showDetail {
+		switch k.String() {
+		case "up":
+			p.dtOff = max(0, p.dtOff-1)
+		case "down":
+			p.dtOff++
+		case "pgup":
+			p.dtOff = max(0, p.dtOff-10)
+		case "pgdown":
+			p.dtOff += 10
+		case "home":
+			p.dtOff = 0
+		case "enter":
+			return p.finish(m)
+		case "esc", "ctrl+o", "left":
+			p.showDetail = false
+		}
+		return nil
+	}
 	switch k.String() {
+	case "ctrl+o":
+		if p.detail != nil && p.sel < len(vis) {
+			p.showDetail, p.dtOff = true, 0
+		}
+		return nil
 	case "esc":
 		m.picker = nil
 		if p.back != nil {
@@ -133,10 +191,15 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 		p.sel = max(0, p.sel-10)
 	case "pgdown":
 		p.sel = min(max(len(vis)-1, 0), p.sel+10)
-	case " ":
-		if p.multi && p.sel < len(vis) {
-			it := p.items[vis[p.sel]]
-			p.marked[it] = !p.marked[it]
+	case " ", "ctrl+@", "insert":
+		// space marks in a multi picker until a filter is typed, then it types (words match apart)
+		if p.multi && (k.String() != " " || p.filter == "") {
+			if p.sel < len(vis) {
+				it := p.items[vis[p.sel]]
+				p.marked[it] = !p.marked[it]
+			}
+		} else if k.String() == " " {
+			p.filter, p.sel = p.filter+" ", 0
 		}
 	case "ctrl+d":
 		if p.del != nil && p.sel < len(vis) {
@@ -147,6 +210,7 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 			}
 			m.setStatus("closed "+p.items[i], false)
 			p.items = append(p.items[:i:i], p.items[i+1:]...)
+			p.changed()
 			if i < len(p.desc) {
 				p.desc = append(p.desc[:i:i], p.desc[i+1:]...)
 			}
@@ -188,6 +252,9 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 }
 
 func (p *picker) click(m *model, h hit) tea.Cmd {
+	if p.showDetail {
+		return nil
+	}
 	if g, ok := stripHit(h, "pickgroup"); ok && g < len(p.groups) {
 		p.group, p.sel = g, 0
 		return nil
@@ -215,7 +282,7 @@ func (p *picker) click(m *model, h hit) tea.Cmd {
 func (p *picker) hints() string {
 	h := []string{sKey.Render("↑↓") + sDim.Render(" move"), sKey.Render("type") + sDim.Render(" filter")}
 	if p.multi {
-		h = append(h, sKey.Render("space")+sDim.Render(" mark"), sKey.Render("ctrl+a")+sDim.Render(" all"))
+		h = append(h, sKey.Render("space ctrl+space")+sDim.Render(" mark (space types once filtering)"), sKey.Render("ctrl+a")+sDim.Render(" all"))
 	}
 	if p.del != nil {
 		h = append(h, sKey.Render("ctrl+d")+sDim.Render(" close"))
@@ -226,6 +293,9 @@ func (p *picker) hints() string {
 	if p.preview != nil {
 		h = append(h, sKey.Render("⇧↑↓")+sDim.Render(" scroll details"))
 	}
+	if p.detail != nil {
+		h = append(h, sKey.Render("ctrl+o")+sDim.Render(" details"))
+	}
 	return strings.Join(append(h, sKey.Render("enter")+sDim.Render(" ok"), sKey.Render("esc")+sDim.Render(" cancel")), "  ")
 }
 
@@ -234,24 +304,21 @@ func (p *picker) view(m *model, h int) string {
 	// sized on every item, not the ones the filter or group shows, so the box stays put
 	p.pvRows = p.previewRows(h)
 	rows := min(len(p.items), max(3, h-8-min(len(p.groups), 1)-p.pvRows))
+	if p.detail != nil {
+		rows = min(max(len(p.items), 16), max(3, h-8-min(len(p.groups), 1))) // one size, details open or not
+	}
 	off := scroll(p.sel, 0, rows, len(vis))
 	if p.sel >= rows {
 		off = p.sel - rows + 1
 	}
 	p.off = off
-	w := 30
-	for i := range p.items {
-		d := ""
-		if i < len(p.desc) {
-			d = p.desc[i]
-		}
-		w = max(w, lipgloss.Width(p.items[i])+lipgloss.Width(d)+8)
-	}
+	_, total := p.widths()
+	w := max(30, total+8)
 	strip := 0
 	for _, g := range p.groups {
 		strip += lipgloss.Width(g.name) + 6 // padding, a count and the bar
 	}
-	if p.preview != nil {
+	if p.preview != nil || p.detail != nil {
 		w = max(w, 100)
 	}
 	w = min(max(w, strip), m.w-8)
@@ -297,6 +364,20 @@ func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 		b.WriteString(m.stripFit("pickgroup", sx, sy, labels, p.group, w) + "\n")
 	}
 	b.WriteString("\n")
+	if p.showDetail && p.sel < len(vis) {
+		item := p.items[vis[p.sel]]
+		lines := strings.Split(lipgloss.NewStyle().Width(w).Render(p.detail(item)), "\n")
+		p.dtOff = min(p.dtOff, max(0, len(lines)-rows+1))
+		b.WriteString(sAccent.Render(truncate(item, w-30)) + sDim.Render("  ↑↓ pgup pgdn scroll · enter picks it · esc back") + "\n")
+		for r := 0; r < rows-1; r++ {
+			l := ""
+			if p.dtOff+r < len(lines) {
+				l = truncate(lines[p.dtOff+r], w)
+			}
+			b.WriteString(l + "\n")
+		}
+		return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Render(strings.TrimRight(b.String(), "\n"))
+	}
 	for r := 0; r < rows && off+r < len(vis); r++ {
 		i := vis[off+r]
 		mark := "  "
@@ -309,7 +390,7 @@ func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 		line := mark + p.items[i]
 		if i < len(p.desc) && p.desc[i] != "" {
 			nw := p.nameWidth(w)
-			line = truncate(padRight(truncate(line, nw+2), nw+4)+sDim.Render(p.desc[i]), w)
+			line = truncate(padRight(truncate(line, nw+2), nw+4)+sDim.Render(firstLine(p.desc[i])), w)
 		}
 		line = padRight(line, w)
 		if off+r == p.sel {
@@ -413,10 +494,7 @@ func overlayAt(base, box string, x, y int) string {
 // nameWidth is the name column's width when items have descriptions: the widest name, at most
 // half the box, so descriptions line up as a second column.
 func (p *picker) nameWidth(w int) int {
-	n := 0
-	for _, it := range p.items {
-		n = max(n, lipgloss.Width(it))
-	}
+	n, _ := p.widths()
 	return min(n, w/2)
 }
 

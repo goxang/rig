@@ -34,6 +34,11 @@ Build and test with `GOTOOLCHAIN=local` (Go 1.23, deps pinned to the last 1.23 r
   `grep -rn '"X"' internal/tui` before taking a letter.
 - Mouse: register zones while rendering (`m.zone`, `m.zones`); positions are absolute rows.
 - Values that may be secrets go through `maskValue` (names, and passwords inside URLs).
+- Content never sizes a box: a list row shows one line (`firstLine` of a description), a box keeps
+  one size while the selection moves, and the full text of an item (a task's help and steps) opens
+  behind a key in a scrollable view (`picker.detail`, ctrl+o), never under the list.
+- Work over a long list (every KV key, every hit) runs once per change, not per frame: cache what
+  `view` needs (see `picker.visible`/`widths`), and debounce requests made while the cursor moves.
 
 ## Portability
 
