@@ -127,9 +127,12 @@ func FromLive(file *Object, live []byte, drop map[string]bool) ([]byte, error) {
 	}
 	n := doc.Content[0]
 	plain(n)
-	keep := map[string]any{"f:apiVersion": map[string]any{}, "f:kind": map[string]any{}}
-	mergeFields(keep, owned)
-	n = ownedOnly(n, keep)
+	if len(owned) > 0 { // without managed fields everything stays, defaults too
+		keep := map[string]any{"f:apiVersion": map[string]any{}, "f:kind": map[string]any{},
+			"f:metadata": map[string]any{"f:name": map[string]any{}}}
+		mergeFields(keep, owned)
+		n = ownedOnly(n, keep)
+	}
 	if md := mapGet(n, "metadata"); md != nil {
 		mapDel(md, "managedFields", "uid", "resourceVersion", "generation", "creationTimestamp", "selfLink")
 		for _, k := range []string{"annotations", "labels"} {

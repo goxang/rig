@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -50,6 +51,54 @@ type manifestsTab struct {
 	// hits is the search index, built once per scan and reused across searches
 	hits    []manifestHit
 	hitsSet *manifest.Set
+	// cluster shows what runs in the namespace instead of the files (c toggles; on Kubernetes the
+	// screen opens on it); files is the scan, kept for syncing a live object into its file
+	cluster   bool
+	files     *manifest.Set
+	live      *manifest.Set
+	liveStale bool
+}
+
+// liveLister is a runtime that lists the namespace's objects (Kubernetes, kind).
+type liveLister interface {
+	LiveObjects(ctx context.Context) ([]byte, error)
+}
+
+type manifestsLiveMsg struct {
+	gen int
+	set *manifest.Set
+	err error
+}
+
+const liveFile = "cluster:"
+
+func isLive(o *manifest.Object) bool { return strings.HasPrefix(o.File, liveFile) }
+
+func (t *manifestsTab) fetchLive(m *model) tea.Cmd {
+	l, ok := m.app.Runtime().(liveLister)
+	if !ok {
+		return nil
+	}
+	t.liveStale = false
+	gen, ctx, where := m.gen, m.work(), liveFile+m.app.Env.Name
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		y, err := l.LiveObjects(c)
+		if err != nil {
+			return manifestsLiveMsg{gen: gen, err: err}
+		}
+		return manifestsLiveMsg{gen: gen, set: manifest.Parse(where, y)}
+	}
+}
+
+// show puts the files or the cluster's objects on the list.
+func (t *manifestsTab) show() {
+	t.set = t.files
+	if t.cluster {
+		t.set = t.live
+	}
+	t.svcOf, t.fieldsObj = nil, nil
 }
 
 type manifestFoldersMsg struct {
@@ -132,7 +181,7 @@ func manifestOwners(m *model, set *manifest.Set) map[string]string {
 
 // shown says whether the list includes o: every object with u, else those a service deploys.
 func (t *manifestsTab) shown(o *manifest.Object) bool {
-	if t.all || len(t.owners) == 0 {
+	if t.all || isLive(o) || len(t.owners) == 0 {
 		return true
 	}
 	_, ok := t.owners[objKey(o)]
@@ -154,17 +203,28 @@ func (t *manifestsTab) hints() [][2]string {
 		}
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"esc", back}}
 	}
-	return [][2]string{{"t ctrl+←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+	if t.cluster {
+		return [][2]string{{"c", "files instead of the cluster"}, {"→ tab", "edit fields (applied to the cluster)"}, {"v enter", "go to its service"}, {"e L", "edit on the cluster"},
+			{"s", "sync into its file"}, {"/", "search fields and values"}, {"f", "filter"}, {"i/I", "issues"}, {"r", "reload"}, {"o", "editor"}}
+	}
+	return [][2]string{{"c", "what runs on the cluster"}, {"t ctrl+←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
 		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"u", "also what no service deploys"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
 	t.dirs = m.app.ManifestDirs()
 	t.marked = map[string]bool{}
-	return t.scan(m)
+	_, t.cluster = m.app.Runtime().(liveLister)
+	t.files, t.live, t.set = nil, nil, nil
+	return batch(t.scan(m), t.fetchLive(m))
 }
 
-func (t *manifestsTab) refresh(m *model) tea.Cmd { return nil }
+func (t *manifestsTab) refresh(m *model) tea.Cmd {
+	if t.liveStale {
+		return t.fetchLive(m)
+	}
+	return nil
+}
 
 func (t *manifestsTab) scan(m *model) tea.Cmd {
 	dirs, gen := t.dirs, m.gen
@@ -345,10 +405,20 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		t.pickFolders(m, msg)
 	case manifestsMsg:
 		if msg.gen == m.gen {
-			t.set, t.err, t.svcOf, t.owners = msg.set, "", nil, msg.owners
+			t.files, t.err, t.owners = msg.set, "", msg.owners
 			if msg.err != nil {
 				t.err = msg.err.Error()
 			}
+			t.show()
+		}
+	case manifestsLiveMsg:
+		if msg.gen == m.gen {
+			if msg.err != nil {
+				m.setStatus("cluster objects: "+msg.err.Error()+" · c shows the files", true)
+				return nil
+			}
+			t.live = msg.set
+			t.show()
 		}
 	case tea.KeyMsg:
 		if t.issues != "" {
@@ -374,7 +444,30 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			})
 		case "u":
 			t.all, t.sel, t.offset = !t.all, 0, 0
+		case "c":
+			if _, ok := m.app.Runtime().(liveLister); !ok {
+				m.setStatus(m.app.Env.Name+" is not on Kubernetes: only the files", true)
+				return nil
+			}
+			t.cluster, t.sel, t.offset, t.inFields, t.viaSearch = !t.cluster, 0, 0, false, false
+			t.show()
+			if t.cluster {
+				m.setStatus("what runs in "+m.app.Env.Name+" · s writes an object into its file", false)
+				return t.fetchLive(m)
+			}
+			m.setStatus("the manifest files · c shows what runs", false)
 		case "t", "shift+left", "shift+right":
+			if _, live := m.app.Runtime().(liveLister); live && msg.String() != "t" {
+				cur := 1 + boolInt(t.tree)
+				if t.cluster {
+					cur = 0
+				}
+				return t.mode(m, (cur+map[bool]int{true: 2, false: 1}[msg.String() == "shift+left"])%3)
+			}
+			if t.cluster {
+				m.setStatus("the cluster has no folders: c shows the files", false)
+				return nil
+			}
 			t.tree, t.sel, t.offset, t.file, t.viaSearch = !t.tree, 0, 0, "", false
 		case "v":
 			return t.gotoService(m)
@@ -419,12 +512,31 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "I":
 			t.issues = "all"
 		case "a":
+			if t.cluster {
+				m.setStatus("these already run: an edit here applies at once", false)
+				return nil
+			}
 			return t.apply(m)
 		case "e", "s", "L":
 			e, ok := t.current()
 			if !ok || e.obj == nil {
 				m.setStatus("select an object (t shows objects)", true)
 				return nil
+			}
+			if isLive(e.obj) {
+				if msg.String() != "s" {
+					t.liveStale = true
+					return editLive(m, e.obj)
+				}
+				var local *manifest.Object
+				if t.files != nil {
+					local = t.files.Get(e.obj.Kind, e.obj.Name)
+				}
+				if local == nil {
+					m.setStatus("no manifest file holds "+e.obj.ID()+" (d picks the folders read)", true)
+					return nil
+				}
+				return syncManifest(m, local, t.serviceOf(m, local))
 			}
 			switch msg.String() {
 			case "e":
@@ -436,10 +548,14 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "o":
 			pickEditor(m)
 		case "n":
+			if t.cluster {
+				m.setStatus("a new service starts from a file: c shows the files", true)
+				return nil
+			}
 			return t.newService(m)
 		case "r":
 			t.viaSearch = false
-			return t.scan(m)
+			return batch(t.scan(m), t.fetchLive(m))
 		case "d":
 			root := m.app.Spec.Dir
 			m.setStatus("looking for manifest folders…", false)
@@ -564,11 +680,33 @@ func addService(file, name, role, groups, image, workload, manifestFile string) 
 }
 
 func (t *manifestsTab) view(m *model, w, h int) string {
-	return m.withStrip("mf:mode", []string{"objects", "folders and files"}, boolInt(t.tree), w, h, func(h int) string { return t.body(m, w, h) })
+	modes, cur := []string{"objects", "folders and files"}, boolInt(t.tree)
+	if _, ok := m.app.Runtime().(liveLister); ok {
+		modes, cur = []string{"on the cluster", "files: objects", "files: folders"}, 1+boolInt(t.tree)
+		if t.cluster {
+			cur = 0
+		}
+	}
+	return m.withStrip("mf:mode", modes, cur, w, h, func(h int) string { return t.body(m, w, h) })
+}
+
+// mode shows the cluster (0), the files' objects (1) or their folders (2).
+func (t *manifestsTab) mode(m *model, i int) tea.Cmd {
+	var cmd tea.Cmd
+	if (i == 0) != t.cluster {
+		cmd = t.update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	}
+	if i > 0 && (i == 2) != t.tree {
+		t.tree, t.sel, t.offset, t.file = i == 2, 0, 0, ""
+	}
+	return cmd
 }
 
 func (t *manifestsTab) click(m *model, h hit) tea.Cmd {
 	if i, ok := stripHit(h, "mf:mode"); ok {
+		if _, live := m.app.Runtime().(liveLister); live {
+			return t.mode(m, i)
+		}
 		if (i == 1) != t.tree {
 			t.tree, t.sel, t.offset, t.file = i == 1, 0, 0, ""
 		}
@@ -705,6 +843,9 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 		}
 	}
 	head := sDim.Render(relTo(m.app.Spec.Dir, o.File))
+	if isLive(o) {
+		head = sDim.Render("running in " + strings.TrimPrefix(o.File, liveFile))
+	}
 	if svc := t.cachedService(m, o); svc != "" {
 		link := "→ service " + svc + " (v)"
 		st := sAccent
@@ -842,7 +983,7 @@ func (t *manifestsTab) serviceOf(m *model, o *manifest.Object) string {
 			continue
 		}
 		for _, x := range objs {
-			if x.ID() == o.ID() && abs(x.File) == abs(o.File) {
+			if x.ID() == o.ID() && (isLive(o) || abs(x.File) == abs(o.File)) {
 				return n
 			}
 		}

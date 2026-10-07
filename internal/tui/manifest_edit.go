@@ -184,9 +184,10 @@ func reread(o *manifest.Object) *manifest.Object {
 
 func (m *model) rescanManifests() {
 	for _, t := range m.tabs {
-		if mt, ok := t.(*manifestsTab); ok && mt.set != nil {
+		if mt, ok := t.(*manifestsTab); ok && mt.files != nil {
 			if set, err := manifest.Scan(mt.dirs...); err == nil {
-				mt.set = set
+				mt.files = set
+				mt.show()
 			}
 		}
 	}

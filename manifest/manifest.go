@@ -113,6 +113,15 @@ func Scan(roots ...string) (*Set, error) {
 	return s, nil
 }
 
+// Parse reads YAML documents (a kubectl List too) as the objects of one file named file.
+func Parse(file string, data []byte) *Set {
+	s := &Set{byID: map[string][]*Object{}}
+	s.read(file, bytes.NewReader(data))
+	s.link()
+	s.lint()
+	return s
+}
+
 func kustomization(dir string) string {
 	for _, n := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
 		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {

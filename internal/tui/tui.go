@@ -2284,7 +2284,7 @@ var screenHelp = map[string]string{
 	"KV":        "the config store (Consul): browse, edit and delete keys right in it; F loads the config files",
 	"Load":      "load generators: start, stop, change the rate, watch what they send",
 	"Hosts":     "the machines the environment runs on: CPU, memory, disk, a shell",
-	"Manifests": "Kubernetes manifests of the project: objects, links, issues, apply",
+	"Manifests": "what runs on the cluster, or the project's manifest files (c): objects, links, issues, edit, apply",
 	"Tests":     "the test suites of rig.yaml: run, rerun failures, reports",
 }
 

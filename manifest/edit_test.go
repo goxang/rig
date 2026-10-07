@@ -94,3 +94,19 @@ func TestFromLive(t *testing.T) {
 		t.Errorf("key order:\n%s", got)
 	}
 }
+
+func TestFromLiveKeepsNameWithOwnedFields(t *testing.T) {
+	live := []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cfg","namespace":"ns","uid":"x",
+	"managedFields":[{"manager":"kubectl","fieldsV1":{"f:data":{"f:a":{}}}}]},"data":{"a":"1"}}`)
+	y, err := FromLive(nil, live, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := Parse("cluster:x", y)
+	if o := set.Get("ConfigMap", "cfg"); o == nil {
+		t.Fatalf("the name should survive:\n%s", y)
+	}
+	if strings.Contains(string(y), "uid") {
+		t.Fatalf("uid should go:\n%s", y)
+	}
+}

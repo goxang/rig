@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -181,7 +182,7 @@ func (t *manifestsTab) fieldKey(m *model, k tea.KeyMsg) tea.Cmd {
 			m.ask("value of "+parent.path()+"."+key+" (JSON, or text)", "", func(v string) tea.Cmd {
 				kid := &jnode{key: key, parent: parent}
 				kid.set(v)
-				t.saveField("add "+parent.path()+"."+key, m, func(o *manifest.Object) (*yaml.Node, bool) {
+				return t.saveField("add "+parent.path()+"."+key, m, func(o *manifest.Object) (*yaml.Node, bool) {
 					y := yamlAt(o.Node, parent)
 					switch {
 					case y == nil:
@@ -194,7 +195,6 @@ func (t *manifestsTab) fieldKey(m *model, k tea.KeyMsg) tea.Cmd {
 					y.Content = append(y.Content, toYAML(kid))
 					return nil, true
 				})
-				return nil
 			})
 		}
 		if parent.kind == 'a' {
@@ -213,7 +213,7 @@ func (t *manifestsTab) fieldKey(m *model, k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		i := n.index()
-		t.saveField("delete "+n.path(), m, func(o *manifest.Object) (*yaml.Node, bool) {
+		return t.saveField("delete "+n.path(), m, func(o *manifest.Object) (*yaml.Node, bool) {
 			y := yamlAt(o.Node, p)
 			switch {
 			case y != nil && y.Kind == yaml.MappingNode && 2*i+1 < len(y.Content):
@@ -247,14 +247,13 @@ func (t *manifestsTab) editField(m *model) tea.Cmd {
 		}
 		j := &jnode{kind: n.kind, scalar: n.scalar}
 		j.set(v)
-		t.saveField("set "+n.path(), m, func(o *manifest.Object) (*yaml.Node, bool) {
+		return t.saveField("set "+n.path(), m, func(o *manifest.Object) (*yaml.Node, bool) {
 			y := yamlAt(o.Node, n)
 			if y != nil {
 				replaceYAML(y, j)
 			}
 			return y, y != nil
 		})
-		return nil
 	})
 	return nil
 }
@@ -262,8 +261,11 @@ func (t *manifestsTab) editField(m *model) tea.Cmd {
 // saveField changes the shown object's YAML with edit and writes it into its file: a changed scalar
 // in place, anything else as the re-encoded document, comments and the other documents kept. The
 // rescan shows the file as it is now either way.
-func (t *manifestsTab) saveField(what string, m *model, edit func(o *manifest.Object) (scalar *yaml.Node, ok bool)) {
+func (t *manifestsTab) saveField(what string, m *model, edit func(o *manifest.Object) (scalar *yaml.Node, ok bool)) tea.Cmd {
 	o := t.fieldsObj
+	if isLive(o) {
+		return t.applyField(what, m, edit)
+	}
 	defer func() {
 		t.fieldsObj = nil
 		m.rescanManifests()
@@ -271,7 +273,7 @@ func (t *manifestsTab) saveField(what string, m *model, edit func(o *manifest.Ob
 	scalar, ok := edit(o)
 	if !ok {
 		m.setStatus(what+": the file changed underneath, r rescans", true)
-		return
+		return nil
 	}
 	var err error
 	if scalar != nil {
@@ -285,7 +287,29 @@ func (t *manifestsTab) saveField(what string, m *model, edit func(o *manifest.Ob
 	}
 	if err != nil {
 		m.setStatus(what+": "+err.Error(), true)
-		return
+		return nil
 	}
 	m.setStatus(what+" · saved in "+relTo(m.app.Spec.Dir, o.File)+" · a applies it", false)
+	return nil
+}
+
+// applyField edits a live object and applies it to the cluster; the list reloads once it has run.
+func (t *manifestsTab) applyField(what string, m *model, edit func(o *manifest.Object) (*yaml.Node, bool)) tea.Cmd {
+	o := t.fieldsObj
+	ap, ok := m.app.Runtime().(applier)
+	if !ok {
+		return nil
+	}
+	if o.Kind == "Secret" {
+		m.setStatus("a secret's values are not read here: L edits it on the cluster", true)
+		return nil
+	}
+	if _, ok := edit(o); !ok {
+		m.setStatus(what+": the object changed, r reloads", true)
+		return nil
+	}
+	t.fieldsObj, t.liveStale = nil, true
+	return m.act(what+" on "+o.ID()+" in "+m.app.Env.Name, true, func(ctx context.Context) error {
+		return ap.ApplyManifests(ctx, []*manifest.Object{o})
+	})
 }

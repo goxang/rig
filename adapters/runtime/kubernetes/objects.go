@@ -7,16 +7,66 @@ import (
 	"strings"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/manifest"
 	"github.com/goxang/rig/spec"
 )
 
 // LiveObject is one object of the namespace as JSON (`kubectl get -o json`).
 func (r *Runtime) LiveObject(ctx context.Context, kind, name string) ([]byte, error) {
-	out, err := r.kubectl("get", kind+"/"+name, "-o", "json").Output(ctx)
+	out, err := r.kubectl("get", kind+"/"+name, "-o", "json", "--show-managed-fields").Output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s/%s on the cluster: %w", kind, name, err)
 	}
 	return out, nil
+}
+
+// liveKinds are what a deploy creates and someone may want to read or edit as it runs.
+const liveKinds = "secrets,deployments,statefulsets,daemonsets,cronjobs,services,configmaps,horizontalpodautoscalers,ingresses,persistentvolumeclaims,serviceaccounts,poddisruptionbudgets,networkpolicies"
+
+// LiveObjects are the namespace's objects as YAML documents, stripped of what the cluster adds
+// (status, managed fields, defaults no one set); objects another object owns are left out.
+func (r *Runtime) LiveObjects(ctx context.Context) ([]byte, error) {
+	out, err := r.kubectl("get", liveKinds, "-o", "json", "--show-managed-fields").Output(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("objects of %s: %w", r.Opt.Namespace, err)
+	}
+	var list struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	for _, item := range list.Items {
+		var meta struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Name   string            `json:"name"`
+				Owners []json.RawMessage `json:"ownerReferences"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(item, &meta) != nil || len(meta.Metadata.Owners) > 0 || meta.Metadata.Name == "kube-root-ca.crt" {
+			continue
+		}
+		if meta.Kind == "Secret" { // listed so references resolve; the values never leave the cluster
+			var obj map[string]any
+			if json.Unmarshal(item, &obj) != nil {
+				continue
+			}
+			delete(obj, "data")
+			delete(obj, "stringData")
+			if item, err = json.Marshal(obj); err != nil {
+				continue
+			}
+		}
+		y, err := manifest.FromLive(nil, item, nil)
+		if err != nil {
+			continue
+		}
+		b.WriteString("---\n")
+		b.Write(y)
+	}
+	return []byte(b.String()), nil
 }
 
 // InjectedEnv names the env vars a deploy of s adds from rig.yaml, which a manifest synced back
