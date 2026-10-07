@@ -15,6 +15,7 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
 
@@ -47,9 +48,10 @@ func Execute() int {
 	defer stop()
 	root := newRoot()
 	if err := root.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, red("error: ")+err.Error())
+		text := sh.WithHint(err.Error())
+		fmt.Fprintln(os.Stderr, red("error: ")+text)
 		if f := os.Getenv("RIG_ERROR_FILE"); f != "" {
-			_ = os.WriteFile(f, []byte(err.Error()), 0o600) // the UI that ran this shows it after the terminal closes
+			_ = os.WriteFile(f, []byte(text), 0o600) // the UI that ran this shows it after the terminal closes
 		}
 		if errors.Is(err, engine.ErrProtected) {
 			return 3

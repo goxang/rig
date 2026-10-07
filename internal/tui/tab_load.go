@@ -34,6 +34,8 @@ type loadTab struct {
 	full    *chartView
 	fullIdx int
 	w       int
+	// follow moves the selection to the first running generator as statuses arrive, until a key moves it
+	follow bool
 }
 
 // podHist is one generator instance while the TUI watched it, keyed "<generator>/<instance>".
@@ -67,10 +69,12 @@ func (h *loadHist) rates(now time.Time, st core.LoadStatus) (sent, failed float6
 	return float64(st.Sent-old.sent) / secs, float64(st.Failed-old.failed) / secs, true
 }
 
+// loadMsg is one generator's status; each arrives on its own, so a slow one holds up no other.
 type loadMsg struct {
-	gen   int
-	stats map[string]core.LoadStatus
-	errs  map[string]error
+	gen  int
+	name string
+	st   core.LoadStatus
+	err  error
 }
 
 func (t *loadTab) name() string { return "Load" }
@@ -87,6 +91,7 @@ func (t *loadTab) open(m *model) tea.Cmd {
 	t.names = m.app.Names(core.KindLoad)
 	t.hist = map[string]*loadHist{}
 	t.inst, t.pods = map[string]string{}, map[string]*podHist{}
+	t.stats, t.errs, t.follow = map[string]core.LoadStatus{}, map[string]error{}, true
 	for n, h := range t.restored {
 		t.hist[n] = &loadHist{target: h.Target, actual: h.Actual, failed: h.Failed}
 	}
@@ -94,22 +99,22 @@ func (t *loadTab) open(m *model) tea.Cmd {
 }
 
 func (t *loadTab) refresh(m *model) tea.Cmd {
-	a, gen, ctx, names := m.app, m.gen, m.ctx, t.names
-	return func() tea.Msg {
-		c, cancel := context.WithTimeout(ctx, 8*time.Second)
-		defer cancel()
-		msg := loadMsg{gen: gen, stats: map[string]core.LoadStatus{}, errs: map[string]error{}}
-		for _, n := range names {
+	a, gen, ctx := m.app, m.gen, m.ctx
+	var cmds []tea.Cmd
+	for _, n := range t.names {
+		cmds = append(cmds, func() tea.Msg {
+			c, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			msg := loadMsg{gen: gen, name: n}
 			g, _, err := engine.Get[core.LoadGenerator](a, core.KindLoad, n)
 			if err == nil {
-				msg.stats[n], err = g.Status(c)
+				msg.st, err = g.Status(c)
 			}
-			if err != nil {
-				msg.errs[n] = err
-			}
-		}
-		return msg
+			msg.err = err
+			return msg
+		})
 	}
+	return batch(cmds...)
 }
 
 func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
@@ -118,9 +123,18 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.gen != m.gen {
 			return nil
 		}
-		t.stats, t.errs = msg.stats, msg.errs
-		now := time.Now()
-		for n, st := range msg.stats {
+		n, st, now := msg.name, msg.st, time.Now()
+		if msg.err != nil {
+			t.errs[n] = msg.err
+			delete(t.stats, n)
+			return nil
+		}
+		delete(t.errs, n)
+		t.stats[n] = st
+		if t.follow && st.Running && !t.stats[t.names[t.sel]].Running {
+			t.sel = slices.Index(t.names, n)
+		}
+		{
 			h := t.hist[n]
 			if h == nil {
 				h = &loadHist{}
@@ -158,6 +172,7 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if listKeys(msg, &t.sel, len(t.names)) || len(t.names) == 0 {
+			t.follow = false
 			return nil
 		}
 		n := t.names[t.sel]
@@ -290,29 +305,51 @@ components:
     max: 500
     step: 10`))
 	}
-	lw := m.paneSize("load", splitGeo{total: w, minA: 24, minB: 40}, min(44, w/3), 0, 0, h)
+	lw := m.paneSize("load", splitGeo{total: w, minA: 30, minB: 40}, min(60, w*2/5), 0, 0, h)
 	var rows [][]string
+	running, sending := 0, 0.0
 	for _, n := range t.names {
 		st, ok := t.stats[n]
-		dot := sDim.Render("○")
-		if t.errs[n] != nil {
-			dot = sRed.Render("✖")
-		} else if ok && st.Running {
-			dot = sGreen.Render("●")
+		dot, rate, actual, fails := spinner(), "…", "", ""
+		switch {
+		case t.errs[n] != nil:
+			dot, rate = sRed.Render("✖"), ""
+		case ok:
+			dot, rate = sDim.Render("○"), viz.Human(st.Rate, "/s")
+			if st.Running {
+				dot = sGreen.Render("●")
+				running++
+			}
+			if hs := t.hist[n]; st.Running && hs != nil && len(hs.actual) > 0 {
+				v := hs.actual[len(hs.actual)-1].V
+				sending += v
+				actual = viz.Human(v, "/s")
+			}
+			if st.Sent > 0 {
+				pct := float64(st.Failed) / float64(st.Sent) * 100
+				fails = lipgloss.NewStyle().Foreground(failColor(pct)).Render(fmt.Sprintf("%.1f%%", pct))
+			}
 		}
 		_, typ, _ := m.app.Kind(n)
-		rows = append(rows, []string{dot, n, typ, viz.Human(st.Rate, "/s")})
+		rows = append(rows, []string{dot, n, typ, rate, actual, fails})
 	}
 	t.sel = min(t.sel, len(rows)-1)
-	list := panel("generators", table([]string{"", "NAME", "TYPE", "RATE"}, []int{1, lw - 26, 8, 9}, rows, t.sel, 0, h-2), lw, h, true)
+	title := fmt.Sprintf("generators · %d", len(t.names))
+	if running > 0 {
+		title += sGreen.Render(fmt.Sprintf(" · %d running", running)) + sDim.Render(" · sending "+viz.Human(sending, "/s"))
+	}
+	list := panel(title, table([]string{"", "NAME", "TYPE", "TARGET", "ACTUAL", "ERR"}, []int{1, max(8, lw-44), 8, 9, 9, 6}, rows, t.sel, 0, h-2), lw, h, true)
 
+	m.zone("load:list", 1, 2, lw-2, len(rows))
 	n := t.names[t.sel]
 	st := t.stats[n]
 	rw := w - lw
 	if err := t.errs[n]; err != nil {
 		return lipgloss.JoinHorizontal(lipgloss.Top, list, panel(n, sRed.Render(wrap(err.Error(), rw-4)), rw, h, false))
 	}
-	m.zone("load:list", 1, 2, lw-2, len(rows))
+	if _, ok := t.stats[n]; !ok {
+		return lipgloss.JoinHorizontal(lipgloss.Top, list, panel(n, sDim.Render(spinner()+" asking the generator…"), rw, h, false))
+	}
 	ids := t.instanceIDs(m, n)
 	if !slices.Contains(ids, t.inst[n]) {
 		t.inst[n] = ""
@@ -546,7 +583,7 @@ func (t *loadTab) click(m *model, h hit) tea.Cmd {
 		return nil
 	}
 	if h.id == "load:list" && h.y < len(t.names) {
-		t.sel = h.y
+		t.sel, t.follow = h.y, false
 		return nil
 	}
 	if i, ok := stripHit(h, "load:inst"); ok && len(t.names) > 0 {

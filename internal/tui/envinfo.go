@@ -60,7 +60,15 @@ func (b *envBox) view(h int) string {
 	b.sel = max(0, min(b.sel, len(b.lines)-1))
 	b.offset = scroll(b.sel, b.offset, inner, len(b.lines))
 	var body strings.Builder
-	for i := b.offset; i < len(b.lines) && i-b.offset < inner; i++ {
+	w := 0
+	for _, l := range b.lines {
+		w = max(w, lipgloss.Width(l.text))
+	}
+	for i := b.offset; i < b.offset+min(inner, len(b.lines)); i++ {
+		if i >= len(b.lines) {
+			body.WriteString(" \n")
+			continue
+		}
 		l := b.lines[i]
 		text := l.text
 		if i == b.sel && text != "" {
@@ -74,7 +82,7 @@ func (b *envBox) view(h int) string {
 	} else {
 		footer = "↑↓ select · y copies · any other key closes"
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Width(w + 6).
 		Render(sTitle.Render("rig — "+b.env) + "\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + sDim.Render(footer))
 }
 
@@ -196,5 +204,6 @@ func (m *model) editEnvVar(box *envBox) tea.Cmd {
 			return err
 		})
 	})
+	m.prompt.escape = func() tea.Cmd { m.envInfo = box; return nil }
 	return nil
 }

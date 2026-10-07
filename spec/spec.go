@@ -290,8 +290,11 @@ func (p *Project) SectionMap() map[string]string {
 // Dashboard is a list of panels, or {vars:, panels:} when its queries use $variables.
 // Task is a list of shell steps, or {help, steps} to say what it is for.
 type Task struct {
-	Help string    `yaml:"help"`
-	Args []TaskArg `yaml:"args"`
+	Help string `yaml:"help"`
+	// Group is the tab the TUI's task picker lists it under; without one, the name's first word
+	// (nexus-prune: nexus) when other tasks share it.
+	Group string    `yaml:"group"`
+	Args  []TaskArg `yaml:"args"`
 	// Confirm asks before the first step, on any environment; --yes answers it.
 	Confirm bool `yaml:"confirm"`
 	// ReadOnly marks a task that changes nothing, so it runs in a read-only environment too.

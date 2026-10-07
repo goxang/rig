@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/internal/kubectx"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
 
@@ -104,6 +106,8 @@ type model struct {
 
 	// quitArmed is the quit key pressed once; pressing it again right after quits
 	quitArmed string
+	// trail are the screen jumps (service → metrics, → logs, ...) that esc walks back
+	trail []crumb
 
 	confirm *confirm
 	prompt  *prompt
@@ -429,7 +433,39 @@ func execProcess(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
 
 func tick() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
 
+// crumb is a jump from screen from to screen to.
+type crumb struct{ from, to int }
+
+// rooted is a screen that knows whether esc has nothing left to close in it.
+type rooted interface{ atRoot() bool }
+
+// jump opens screen i from another screen's item; esc there, once nothing is left to close, comes back.
+func (m *model) jump(i int) tea.Cmd {
+	trail, from := m.trail, m.active
+	cmd := m.openTab(i)
+	if from != i {
+		m.trail = append(trail, crumb{from, i})
+	}
+	return cmd
+}
+
+// back returns to the screen the last jump came from.
+func (m *model) back() (tea.Cmd, bool) {
+	n := len(m.trail)
+	if n == 0 || m.trail[n-1].to != m.active {
+		return nil, false
+	}
+	if r, ok := m.tabs[m.active].(rooted); ok && !r.atRoot() {
+		return nil, false
+	}
+	rest, c := m.trail[:n-1], m.trail[n-1]
+	cmd := m.openTab(c.from)
+	m.trail = rest
+	return cmd, true
+}
+
 func (m *model) openTab(i int) tea.Cmd {
+	m.trail = nil
 	m.active = i
 	m.refreshed[i] = time.Now()
 	if !m.opened[i] {
@@ -469,28 +505,31 @@ func (m *model) working() bool {
 	return false
 }
 
-// failed is the footer line of an operation that ended with err; a ctrl+c is not a failure.
-func failed(label string, err error) statusMsg {
-	if errors.Is(err, context.Canceled) {
+// failed is the footer line of an operation that ended with err; a stop (ctrl+c, x under !) is not
+// a failure.
+func failed(ctx context.Context, label string, err error) statusMsg {
+	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 		return statusMsg{text: label + ": stopped"}
 	}
 	return statusMsg{text: label + ": " + err.Error(), err: true}
 }
 
-// do runs a slow operation off the UI loop and reports its outcome in the footer.
+// runJob runs f as a job; success says nothing in the status line, the job line above it shows ✓.
+func (m *model) runJob(ctx context.Context, label string, f func(ctx context.Context) error) tea.Msg {
+	ctx, j := m.startJob(ctx, label)
+	err := f(ctx)
+	j.finish(err)
+	if err != nil {
+		return failed(ctx, label, err)
+	}
+	return statusMsg{}
+}
+
+// do runs a slow operation off the UI loop; it shows above the keys while it runs.
 func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 	m.busy++
-	m.setStatus(label+"…", false)
 	ctx := m.work()
-	return func() tea.Msg {
-		ctx, j := m.startJob(ctx, label)
-		err := f(ctx)
-		j.finish(err)
-		if err != nil {
-			return failed(label, err)
-		}
-		return statusMsg{text: label + " ✓"}
-	}
+	return func() tea.Msg { return m.runJob(ctx, label, f) }
 }
 
 // needsConfirm: only dangerous changes on a real Kubernetes cluster, and every change on a protected
@@ -511,17 +550,10 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 	run := func() tea.Msg {
 		a.Confirmed = true
 		defer func() { a.Confirmed = false }()
-		ctx, j := m.startJob(ctx, label)
-		err := f(ctx)
-		j.finish(err)
-		if err != nil {
-			return failed(label, err)
-		}
-		return statusMsg{text: label + " ✓"}
+		return m.runJob(ctx, label, f)
 	}
 	if !m.needsConfirm(dangerous) {
 		m.busy++
-		m.setStatus(label+"…", false)
 		return run
 	}
 	text := label + " on " + m.app.Env.Name + "?"
@@ -546,6 +578,9 @@ type loggedErr struct {
 }
 
 func (m *model) setStatus(s string, err bool) {
+	if err {
+		s = sh.WithHint(s)
+	}
 	m.status, m.statusErr, m.statusAt = s, err, time.Now()
 	if err {
 		m.errLog = append(m.errLog, loggedErr{m.statusAt, s})
@@ -565,9 +600,9 @@ func (m *model) errorsView(h int) string {
 	if len(m.errLog) == 0 {
 		b.WriteString(sGreen.Render("no errors this session") + "\n\n")
 	}
-	b.WriteString(sDim.Render("y copies them all · any other key closes"))
+	b.WriteString(sDim.Render("y copies them all · tab operations · esc closes"))
 	body := clip(b.String(), w, max(3, h-6))
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cRed).Padding(1, 2).
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cRed).Padding(1, 2).Width(w).
 		Render(sTitle.Render("errors (newest first)") + "\n\n" + body)
 }
 
@@ -735,7 +770,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case statusMsg:
 		m.busy = max(0, m.busy-1)
-		m.setStatus(msg.text, msg.err)
+		if msg.text != "" {
+			m.setStatus(msg.text, msg.err)
+		}
 		m.svcAt = time.Time{}
 		for _, t := range m.tabs {
 			if d, ok := t.(*dataTab); ok {
@@ -988,7 +1025,7 @@ func (m *model) dragTo(e tea.MouseMsg) tea.Cmd {
 func (m *model) showMetrics(service string) tea.Cmd {
 	for i, t := range m.tabs {
 		if mt, ok := t.(*metricsTab); ok {
-			open := m.openTab(i)
+			open := m.jump(i)
 			return batch(open, mt.jump(m, service))
 		}
 	}
@@ -999,7 +1036,7 @@ func (m *model) showMetrics(service string) tea.Cmd {
 func (m *model) showService(name string) tea.Cmd {
 	for i, t := range m.tabs {
 		if st, ok := t.(*servicesTab); ok {
-			open := m.openTab(i)
+			open := m.jump(i)
 			return batch(open, st.openService(m, name, ""))
 		}
 	}
@@ -1156,12 +1193,10 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		m.confirm = nil
 		if k.String() == "enter" {
 			m.busy++
-			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
 			return c.run
 		}
 		if k.String() == "a" && c.always != nil {
 			m.busy++
-			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
 			return c.always
 		}
 		if c.cancel != nil {
@@ -1202,7 +1237,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 				v = p.described
 			}
 			m.prompt = nil
-			return p.submit(v)
+			cmd := p.submit(v)
+			if m.prompt != p {
+				m.chainBack(func() tea.Cmd { m.prompt = p; return nil })
+			}
+			return cmd
 		case "tab":
 			if p := m.prompt; p.described != "" && p.describedFor == p.input.Value() {
 				p.input.SetValue(p.described)
@@ -1340,6 +1379,10 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			if len(m.tabs) > 10 {
 				return m.openTab(10)
 			}
+		case "esc", "backspace":
+			if cmd, ok := m.back(); ok {
+				return cmd
+			}
 		}
 	}
 	return t.update(m, k)
@@ -1460,6 +1503,39 @@ func (m *model) pickTask(prefix string) {
 		m.askTaskArgs(name, args, make([]string, 0, len(args)))
 		return nil
 	})
+	if groups := taskGroups(m.app.Tasks(), names); len(groups) > 2 {
+		m.picker.groups = groups
+	}
+}
+
+// taskGroups are the task picker's tabs: "all", then each task's group, else the first word of its
+// name when another task shares it, else "other".
+func taskGroups(tasks map[string]spec.Task, names []string) []pickGroup {
+	word := func(n string) string { w, _, _ := strings.Cut(n, "-"); return w }
+	shared := map[string]int{}
+	for _, n := range names {
+		shared[word(n)]++
+	}
+	byName := map[string]*pickGroup{}
+	var order []string
+	for _, n := range names {
+		g := tasks[n].Group
+		if g == "" && shared[word(n)] > 1 && word(n) != n {
+			g = word(n)
+		}
+		g = cmp.Or(g, "other")
+		if byName[g] == nil {
+			byName[g] = &pickGroup{name: g, items: map[string]bool{}}
+			order = append(order, g)
+		}
+		byName[g].items[n] = true
+	}
+	sort.Slice(order, func(i, j int) bool { return order[j] == "other" || order[i] != "other" && order[i] < order[j] })
+	out := []pickGroup{{name: "all"}}
+	for _, g := range order {
+		out = append(out, *byName[g])
+	}
+	return out
 }
 
 // askTaskArgs asks for the task's args one after another (a pick list where it offers choices, else
@@ -1500,42 +1576,57 @@ func (m *model) askTaskArgs(name string, args []spec.TaskArg, answers []string) 
 	})
 }
 
-// runTask confirms, then runs rig task in the terminal; ctrl+c stops the task, not the shell
-// that waits for enter after it.
-// runTask runs a task in the background, its output under ! as it goes and the outcome in the footer.
+// runTask runs a task in the background after a confirmation: the activity view (!) opens on it
+// with its output, takes what it asks for (enter) and stops it (x); several can run at once.
 func (m *model) runTask(name string, args []string) {
 	what := name
 	if len(args) > 0 {
 		what += " " + strings.Join(args, " ")
 	}
 	label := "task " + what
-	file, env, base := m.app.Spec.File, m.app.Env.Name, m.work()
-	run := func() tea.Msg {
+	file, env := m.app.Spec.File, m.app.Env.Name
+	start := func() tea.Cmd {
 		self, err := os.Executable()
 		if err != nil {
-			return statusMsg{text: err.Error(), err: true}
+			return func() tea.Msg { return statusMsg{text: err.Error(), err: true} }
 		}
-		ctx, j := m.startJob(base, label)
+		ctx, j := m.startJob(m.work(), label)
 		cmd := exec.CommandContext(ctx, self, append([]string{"-f", file, "-e", env, "--yes", "task", name}, args...)...)
-		errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d-%d.err", os.Getpid(), time.Now().UnixNano()))
-		defer os.Remove(errFile)
-		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile, "NO_COLOR=1")
-		cmd.Stdout, cmd.Stderr = j, j
-		err = cmd.Run()
-		j.finish(err)
+		sh.Detached(cmd)
+		cmd.Cancel = func() error { sh.KillGroup(cmd); return nil }
+		cmd.WaitDelay = 3 * time.Second
+		in, err := cmd.StdinPipe()
 		if err != nil {
+			j.finish(err)
+			return func() tea.Msg { return statusMsg{text: label + ": " + err.Error(), err: true} }
+		}
+		j.stdin = in
+		m.showErrors, m.actErrors, m.jobSel, m.jobScroll = true, false, 0, 0
+		return func() tea.Msg {
+			errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d-%d.err", os.Getpid(), time.Now().UnixNano()))
+			defer os.Remove(errFile)
+			cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile, "NO_COLOR=1")
+			cmd.Stdout, cmd.Stderr = j, j
+			err := cmd.Run()
+			j.finish(err)
+			switch {
+			case err == nil:
+				return statusMsg{}
+			case ctx.Err() != nil:
+				return statusMsg{text: label + ": stopped"}
+			}
 			text := label + " failed"
 			if raw, rerr := os.ReadFile(errFile); rerr == nil {
 				text = strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n ", " ·")
 			}
-			if ctx.Err() != nil {
-				return statusMsg{text: label + ": stopped"}
+			out := j.output()
+			if h := sh.Hint(strings.Join(out[max(0, len(out)-10):], "\n")); h != "" && !strings.Contains(text, h) {
+				text += "\n→ " + h
 			}
 			return statusMsg{text: text + " · ! shows its output", err: true}
 		}
-		return statusMsg{text: label + " ✓"}
 	}
-	m.confirm = &confirm{text: "run " + label + " on " + m.app.Env.Name + "?", run: run}
+	m.confirm = &confirm{text: "run " + label + " on " + m.app.Env.Name + "?", run: func() tea.Msg { return thenMsg(start) }}
 }
 
 type namespacesMsg struct {
@@ -1750,7 +1841,7 @@ func (m *model) View() string {
 	}
 	body = lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body)
 	m.bodyEnd = m.originY + bodyH
-	m.frame = lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+	m.frame = m.markBorder(lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer))
 	return m.frame
 }
 
@@ -1870,7 +1961,8 @@ func (m *model) footer() string {
 		parts = append(parts, clip(jl, m.w, 1))
 	}
 	status := ""
-	if m.status != "" && time.Since(m.statusAt) < 30*time.Second {
+	// a note fades after a few seconds, an error stays a while
+	if ttl := map[bool]time.Duration{false: 5 * time.Second, true: 30 * time.Second}[m.statusErr]; m.status != "" && time.Since(m.statusAt) < ttl {
 		st := sDim
 		if m.statusErr {
 			st = sRed
@@ -2052,7 +2144,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output, and the errors (tab); y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {
@@ -2077,81 +2169,97 @@ func (m *model) helpLines() []string {
 	return strings.Split(b.String(), "\n")
 }
 
-// helpMatch finds the next line (from, wrapping) containing q, case-insensitively; -1 when q is
-// empty or matches nothing.
-func helpMatch(lines []string, q string, from int) int {
-	if q == "" || len(lines) == 0 {
-		return -1
+// helpFilter keeps the lines containing every word of q, case-insensitively.
+func helpFilter(lines []string, q string) []string {
+	words := strings.Fields(strings.ToLower(q))
+	if len(words) == 0 {
+		return lines
 	}
-	q = strings.ToLower(q)
-	for i := range lines {
-		idx := (from + i) % len(lines)
-		if strings.Contains(strings.ToLower(ansi.Strip(lines[idx])), q) {
-			return idx
+	var out []string
+	for _, l := range lines {
+		plain, ok := strings.ToLower(ansi.Strip(l)), true
+		for _, w := range words {
+			ok = ok && strings.Contains(plain, w)
+		}
+		if ok {
+			out = append(out, l)
 		}
 	}
-	return -1
+	return out
 }
 
-// helpKey drives the open help overlay: scroll it with the usual keys, esc/q/? close it, / opens
-// a search (reusing the footer prompt) that jumps to and highlights matching lines, n repeats it.
+// helpKey drives the open help overlay: typing filters it, the arrows scroll, esc clears the filter
+// and then closes, ? and f1 close.
 func (m *model) helpKey(k tea.KeyMsg) tea.Cmd {
-	lines := m.helpLines()
-	last := max(0, len(lines)-1)
+	last := max(0, len(helpFilter(m.helpLines(), m.helpQuery))-1)
 	switch k.String() {
-	case "esc", "q", "?", "f1":
+	case "esc":
+		if m.helpQuery != "" {
+			m.helpQuery, m.helpScroll = "", 0
+			return nil
+		}
+		m.help = false
+	case "?", "f1":
 		m.help, m.helpQuery = false, ""
-	case "up", "k":
+	case "up":
 		m.helpScroll = max(0, m.helpScroll-1)
-	case "down", "j":
+	case "down":
 		m.helpScroll = min(last, m.helpScroll+1)
 	case "pgup":
 		m.helpScroll = max(0, m.helpScroll-20)
 	case "pgdown":
 		m.helpScroll = min(last, m.helpScroll+20)
-	case "home", "g":
+	case "home":
 		m.helpScroll = 0
-	case "end", "G":
+	case "end":
 		m.helpScroll = last
-	case "/":
-		m.ask("search help", m.helpQuery, func(v string) tea.Cmd {
-			m.helpQuery = v
-			if i := helpMatch(lines, v, 0); i >= 0 {
-				m.helpScroll = i
-			}
-			return nil
-		})
-	case "n":
-		if i := helpMatch(lines, m.helpQuery, m.helpScroll+1); i >= 0 {
-			m.helpScroll = i
+	case "backspace":
+		if r := []rune(m.helpQuery); len(r) > 0 {
+			m.helpQuery, m.helpScroll = string(r[:len(r)-1]), 0
+		}
+	case "ctrl+h", "ctrl+w", "alt+backspace", "ctrl+u":
+		m.helpQuery, m.helpScroll = "", 0
+	default:
+		if k.Type == tea.KeyRunes || k.Type == tea.KeySpace {
+			m.helpQuery, m.helpScroll = m.helpQuery+string(k.Runes), 0
 		}
 	}
 	return nil
 }
 
-// helpView windows helpLines to h rows from helpScroll, highlighting the line a search landed on.
+// helpView windows the filtered help to h rows from helpScroll; its size does not follow the
+// lines shown, so it stays put while scrolling or filtering.
 func (m *model) helpView(h int) string {
-	lines := m.helpLines()
-	inner := max(1, h-4) // border + padding
+	all := m.helpLines()
+	lines := helpFilter(all, m.helpQuery)
+	inner := max(1, h-6) // border, padding, the search line
 	m.helpScroll = min(m.helpScroll, max(0, len(lines)-inner))
 	end := min(len(lines), m.helpScroll+inner)
 	visible := append([]string{}, lines[m.helpScroll:end]...)
-	if m.helpQuery != "" {
-		for i := range visible {
-			if strings.Contains(strings.ToLower(ansi.Strip(visible[i])), strings.ToLower(m.helpQuery)) {
-				visible[i] = highlight(sSelected, visible[i], lipgloss.Width(visible[i]))
-			}
-		}
+	if len(lines) == 0 {
+		visible = []string{sDim.Render("nothing matches")}
 	}
+	for len(visible) < min(inner, len(all)) {
+		visible = append(visible, "")
+	}
+	w := 0
+	for _, l := range all {
+		w = max(w, lipgloss.Width(l))
+	}
+	w = min(w, m.w-8)
 	title := "rig — keys"
-	if m.helpQuery != "" {
-		title += sDim.Render("  /" + m.helpQuery + " (n: next)")
-	}
 	if len(lines) > inner {
 		title += sDim.Render(fmt.Sprintf("  %d-%d/%d", m.helpScroll+1, end, len(lines)))
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
-		Render(sTitle.Render(title) + "\n\n" + strings.Join(visible, "\n"))
+	search := sDim.Render("type to search")
+	if m.helpQuery != "" {
+		search = sAccent.Render("/ ") + m.helpQuery + sCursor.Render(" ") + sDim.Render(fmt.Sprintf("  %d lines · esc clears", len(lines)))
+	}
+	for i, l := range visible {
+		visible[i] = truncate(l, w)
+	}
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Width(w + 6).
+		Render(sTitle.Render(title) + "\n" + search + "\n\n" + strings.Join(visible, "\n"))
 }
 
 // listKeys moves a selection with the usual keys and reports whether the key was one of them.

@@ -310,7 +310,7 @@ func (v *logView) drag(m *model, h hit, phase dragPhase) {
 		if v.selecting && v.dragged {
 			if text := v.selection(); text != "" {
 				copyText(text)
-				m.setStatus(fmt.Sprintf("copied %d characters", len([]rune(text))), false)
+				m.setStatus("copied", false)
 			}
 		}
 		v.selecting = false

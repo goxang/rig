@@ -777,7 +777,6 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 			}
 			t.marked[r.id] = !t.marked[r.id]
 			t.fill()
-			t.right.key(tea.KeyMsg{Type: tea.KeyDown})
 		}
 	case "D":
 		if t.editable(c) {
@@ -830,7 +829,6 @@ func (t *dataTab) queueKey(m *model, k tea.KeyMsg) (tea.Cmd, bool) {
 			}
 			t.qmarked[r.id] = !t.qmarked[r.id]
 			t.fill()
-			t.right.key(tea.KeyMsg{Type: tea.KeyDown})
 		}
 	case "a":
 		all := len(t.qmarked) < len(t.right.rows)

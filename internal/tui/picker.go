@@ -30,6 +30,8 @@ type picker struct {
 	// groups, when set, are tabs over the list (tab, shift+tab, ←→, click); the first holds everything
 	groups []pickGroup
 	group  int
+	// back, when set, is where esc returns: the picker or input this one was opened from
+	back func() tea.Cmd
 }
 
 type pickGroup struct {
@@ -81,7 +83,20 @@ func (p *picker) finish(m *model) tea.Cmd {
 	if len(chosen) == 0 && p.sel < len(vis) {
 		chosen = []string{p.items[vis[p.sel]]}
 	}
-	return p.done(chosen)
+	cmd := p.done(chosen)
+	m.chainBack(func() tea.Cmd { m.picker = p; return nil })
+	return cmd
+}
+
+// chainBack makes esc on the picker or input just opened return to what opened it (restore),
+// rather than drop the whole walk.
+func (m *model) chainBack(restore func() tea.Cmd) {
+	switch {
+	case m.prompt != nil && m.prompt.escape == nil:
+		m.prompt.escape = restore
+	case m.prompt == nil && m.picker != nil && m.picker.back == nil:
+		m.picker.back = restore
+	}
 }
 
 func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
@@ -89,6 +104,9 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 	switch k.String() {
 	case "esc":
 		m.picker = nil
+		if p.back != nil {
+			return p.back()
+		}
 		return nil
 	case "enter":
 		return p.finish(m)
@@ -109,7 +127,6 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if p.multi && p.sel < len(vis) {
 			it := p.items[vis[p.sel]]
 			p.marked[it] = !p.marked[it]
-			p.sel = min(max(len(vis)-1, 0), p.sel+1)
 		}
 	case "ctrl+d":
 		if p.del != nil && p.sel < len(vis) {
@@ -201,14 +218,15 @@ func (p *picker) hints() string {
 
 func (p *picker) view(m *model, h int) string {
 	vis := p.visible()
-	rows := min(len(vis), max(3, h-8-min(len(p.groups), 1)))
+	// sized on every item, not the ones the filter or group shows, so the box stays put
+	rows := min(len(p.items), max(3, h-8-min(len(p.groups), 1)))
 	off := scroll(p.sel, 0, rows, len(vis))
 	if p.sel >= rows {
 		off = p.sel - rows + 1
 	}
 	p.off = off
 	w := 30
-	for _, i := range vis {
+	for i := range p.items {
 		d := ""
 		if i < len(p.desc) {
 			d = p.desc[i]
@@ -285,6 +303,9 @@ func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 	}
 	if len(vis) == 0 {
 		b.WriteString(sDim.Render("nothing matches") + "\n")
+	}
+	for r := max(1, len(vis)-off); r < rows; r++ {
+		b.WriteString(" \n")
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Render(strings.TrimRight(b.String(), "\n"))
 }

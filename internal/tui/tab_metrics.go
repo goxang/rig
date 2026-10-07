@@ -1646,3 +1646,5 @@ func wrap(s string, w int) string {
 	b.WriteString(s)
 	return b.String()
 }
+
+func (t *metricsTab) atRoot() bool { return !t.zoom && t.cursor < 0 }

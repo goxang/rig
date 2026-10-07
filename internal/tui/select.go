@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -100,7 +99,7 @@ func (m *model) selectTo(e tea.MouseMsg) tea.Cmd {
 	}
 	if text := s.text(); text != "" {
 		copyText(text)
-		m.setStatus(fmt.Sprintf("copied %d characters", len([]rune(text))), false)
+		m.setStatus("copied", false)
 	}
 	return nil
 }

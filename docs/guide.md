@@ -61,7 +61,7 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | Queries | saved queries (with parameters), ad hoc ones, schedules with a trend of the first number; `H` every run of the session; `y` copies the query (or, on the result, the row), `Y` the whole result as TSV. Writing a query opens a popup: the whole text wrapped, `ctrl+a` selects it, `ctrl+c` / `ctrl+y` copy it |
 | KV | browse, edit and delete keys right in the store; `/` searches every key, field and value as you type and opens the hit with its field selected; `enter` edits a JSON value field by field; `o` picks the editor; `R` restarts the services that read the edited key; `F` loads the config files into it (`kv-*` tasks) |
 | Data | databases (objects, rows, definitions, running queries), caches (keys, values), queues; `e` edits a cell, `space` marks rows, `D` deletes them (table rows by primary key, Redis keys and entries); `Q` queries where you stand (on a table row: that row by its primary key; on a Redis key: the read for its type); going back (`esc` or ‹ back) lands on the row you opened; `y`/`Y` copy the row/all as TSV; `/` filters with globs |
-| Load | generators: rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report; `z` or a click shows a chart full size, with the Metrics panel view's legend, filter, range and drag to zoom |
+| Load | generators, each asked on its own so the running ones (●, selected first) show at once, with target and actual rate and error share, and the total being sent; rate and config shared by every instance, instance count, `i` (or a click) one instance's charts or all, `c` their KV config, `v` their env, `W` saves a metrics report; `z` or a click shows a chart full size, with the Metrics panel view's legend, filter, range and drag to zoom |
 | Manifests | objects or folders (`t`), relations, a file's issues (`i`), apply (`a`), make a service (`n`); `→` (or a click) walks the object field by field like the KV screen: `enter` edits a value, `a` adds a field, `D` deletes one, each saved into the file at once with its comments kept; `/` searches every field and value and lands on the field; `e` edits an object in your editor and saves it into its file, `s` writes what the cluster runs into the file (only fields someone set, `$VARS` kept), `L` edits it on the cluster; `d` picks among every manifest folder of the project |
 | Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, a shell (double-click), and `p` the pods on a node, sortable by CPU, memory or age |
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
@@ -88,8 +88,15 @@ last row reaches the environment's deploy variables (database names, say).
 
 What you start (a build, a deploy, a task) runs in the background: the line above the keys shows the
 running one and its last output line, and `!` opens the activity view with every operation of the
-session, the full output of the one picked (`y` copies it) and the errors (`tab`). A question or an
-input opens in its own box above the keys, which then show the keys that box takes.
+session, the full output of the one picked (`y` copies it), `x` to stop it and the errors (`tab`). A
+task opens that view on itself; when a step asks for input (the line above the keys says so), `enter`
+there types the answer. Several tasks can run at once. A question or an input opens in its own box
+above the keys, which then show the keys that box takes; `esc` on it returns to the picker or box it
+came from. Opening a service shows its instances first: `enter` follows the picked one's log (or all
+of them), `esc` goes back to the instances, then to the list. A jump to another screen (a service's
+metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there. The help
+(`?`) filters as you type. A border under the mouse lights up and drags to resize the panes. Errors a
+new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
 
 A Kubernetes environment can name its cluster by address as well: `runtime: { context: local, server:
 https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has

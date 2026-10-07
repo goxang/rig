@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -18,12 +20,16 @@ import (
 type job struct {
 	label string
 	start time.Time
+	stop  context.CancelFunc
+	// stdin, when set, takes what the user types for the job (a task step that reads input)
+	stdin io.WriteCloser
 
 	mu      sync.Mutex
 	end     time.Time
 	err     error
 	lines   []string
 	partial string
+	wrote   time.Time
 }
 
 const jobLines = 2000
@@ -44,6 +50,7 @@ func (j *job) Write(p []byte) (int, error) {
 		j.lines = append(j.lines[:0], j.lines[over:]...)
 	}
 	j.partial = parts[len(parts)-1]
+	j.wrote = time.Now()
 	return len(p), nil
 }
 
@@ -51,6 +58,39 @@ func (j *job) finish(err error) {
 	j.mu.Lock()
 	j.end, j.err = time.Now(), err
 	j.mu.Unlock()
+	if j.stop != nil {
+		j.stop()
+	}
+	if j.stdin != nil {
+		j.stdin.Close()
+	}
+}
+
+// waiting guesses that a running job with an input waits for it: it printed a line without ending
+// it and has been quiet since.
+func (j *job) waiting() (prompt string, ok bool) {
+	if j.stdin == nil {
+		return "", false
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	p := strings.TrimSpace(ansi.Strip(j.partial))
+	return p, j.end.IsZero() && p != "" && time.Since(j.wrote) > 700*time.Millisecond
+}
+
+// answer sends a line to the job's input.
+func (j *job) answer(line string) error {
+	j.mu.Lock()
+	j.lines = append(j.lines, ansi.Strip(j.partial)+line)
+	j.partial = ""
+	j.mu.Unlock()
+	_, err := io.WriteString(j.stdin, line+"\n")
+	return err
+}
+
+func (j *job) running() bool {
+	end, _, _ := j.state()
+	return end.IsZero()
 }
 
 func (j *job) state() (end time.Time, last string, err error) {
@@ -96,7 +136,8 @@ func jobOut(ctx context.Context) io.Writer {
 
 // startJob records an operation; it is safe from any goroutine.
 func (m *model) startJob(ctx context.Context, label string) (context.Context, *job) {
-	j := &job{label: label, start: time.Now()}
+	ctx, stop := context.WithCancel(ctx)
+	j := &job{label: label, start: time.Now(), stop: stop}
 	m.jobsMu.Lock()
 	m.jobs = append(m.jobs, j)
 	if len(m.jobs) > 30 {
@@ -145,7 +186,12 @@ func (m *model) jobLine() string {
 	if n := len(running); n > 1 {
 		head += sDim.Render(fmt.Sprintf(" · +%d more", n-1))
 	}
-	tail := sDim.Render("  ! output")
+	tail := sDim.Render("  ! output, stop")
+	for _, r := range running {
+		if prompt, ok := r.waiting(); ok {
+			return " " + sAmber.Render("⌨ "+r.label+" waits for input") + sDim.Render(" │ ") + truncate(prompt, max(10, m.w/2)) + sDim.Render("  ! answers")
+		}
+	}
 	if room := m.w - lipgloss.Width(head) - lipgloss.Width(tail) - 3; room > 10 && strings.TrimSpace(last) != "" {
 		head += sDim.Render(" │ ") + truncate(strings.TrimSpace(last), room)
 	}
@@ -158,7 +204,7 @@ func spinner() string {
 }
 
 // activityView is !: the operations of this session with the output of the selected one, and the
-// errors (tab switches).
+// errors (tab switches). Its size stays put while output arrives or the selection moves.
 func (m *model) activityView(h int) string {
 	w := min(m.w-4, 160)
 	if m.actErrors || len(m.jobList()) == 0 {
@@ -166,8 +212,11 @@ func (m *model) activityView(h int) string {
 	}
 	js := m.jobList()
 	m.jobSel = min(max(m.jobSel, 0), len(js)-1)
+	const listRows = 6
+	first := max(0, m.jobSel-listRows+1)
 	var list []string
-	for i := len(js) - 1; i >= 0 && len(list) < 6; i-- {
+	for k := first; k < len(js) && k < first+listRows; k++ {
+		i := len(js) - 1 - k
 		j := js[i]
 		end, _, err := j.state()
 		icon := spinner()
@@ -177,11 +226,18 @@ func (m *model) activityView(h int) string {
 		case !end.IsZero():
 			icon = sGreen.Render("✓")
 		}
-		row := fmt.Sprintf(" %s %s  %s", icon, truncate(j.label, w-30), sDim.Render(j.start.Format("15:04:05")+" · "+j.took().String()))
-		if i == len(js)-1-m.jobSel {
-			row = sCursor.Render(ansi.Strip(row))
+		note := j.start.Format("15:04:05") + " · " + j.took().String()
+		if _, ok := j.waiting(); ok {
+			note += " · " + sAmber.Render("waits for input")
+		}
+		row := fmt.Sprintf(" %s %s  %s", icon, truncate(j.label, w-40), sDim.Render(note))
+		if k == m.jobSel {
+			row = sCursor.Render(padRight(ansi.Strip(row), w-6))
 		}
 		list = append(list, row)
+	}
+	for len(list) < min(listRows, len(js)) {
+		list = append(list, "")
 	}
 	j := js[len(js)-1-m.jobSel]
 	out := j.output()
@@ -190,39 +246,66 @@ func (m *model) activityView(h int) string {
 	}
 	room := max(3, h-len(list)-9)
 	if len(out) == 0 {
-		out = []string{"(no output yet)"}
+		out = []string{sDim.Render("(no output yet)")}
 	}
 	from := max(0, len(out)-room-m.jobScroll)
-	shown := out[from:min(len(out), from+room)]
+	shown := append([]string(nil), out[from:min(len(out), from+room)]...)
 	for i, l := range shown {
 		shown[i] = truncate(l, w-6)
 	}
-	body := strings.Join(list, "\n") + "\n" + sDim.Render(strings.Repeat("─", w-6)) + "\n" + strings.Join(shown, "\n") + "\n\n" +
-		sDim.Render("↑↓ operation · pgup/pgdn scroll · y copy its output · tab errors · any other key closes")
+	for len(shown) < room {
+		shown = append(shown, "")
+	}
+	keys := [][2]string{{"↑↓", "operation"}, {"pgup/pgdn", "scroll"}, {"y", "copy output"}, {"tab", "errors"}}
+	if j.running() {
+		keys = append(keys, [2]string{"x", "stop it"})
+		if j.stdin != nil {
+			keys = append(keys, [2]string{"enter", "type its input"})
+		}
+	}
+	keys = append(keys, [2]string{"esc", "close"})
+	body := strings.Join(list, "\n") + "\n" + sDim.Render(strings.Repeat("─", w-6)) + "\n" + strings.Join(shown, "\n") + "\n\n" + keyHints(keys)
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(0, 1).Width(w).
 		Render(sTitle.Render("activity: what you started this session") + "\n\n" + body)
 }
 
 func (m *model) activityKey(k tea.KeyMsg) tea.Cmd {
 	js := m.jobList()
+	var j *job
+	if !m.actErrors && len(js) > 0 {
+		j = js[len(js)-1-min(m.jobSel, len(js)-1)]
+	}
 	switch k.String() {
 	case "up", "k":
 		m.jobSel, m.jobScroll = max(0, m.jobSel-1), 0
-		return nil
 	case "down", "j":
 		m.jobSel, m.jobScroll = min(len(js)-1, m.jobSel+1), 0
-		return nil
 	case "pgup":
 		m.jobScroll += 10
-		return nil
 	case "pgdown":
 		m.jobScroll = max(0, m.jobScroll-10)
-		return nil
 	case "tab", "shift+tab":
 		m.actErrors = !m.actErrors
-		return nil
+	case "x", "delete":
+		if j != nil && j.running() && j.stop != nil {
+			j.stop()
+			m.setStatus("stopping "+j.label, false)
+		}
+	case "enter", "i":
+		if j != nil && j.running() && j.stdin != nil {
+			prompt, _ := j.waiting()
+			m.ask(cmp.Or(prompt, "input for "+j.label), "", func(v string) tea.Cmd {
+				if err := j.answer(v); err != nil {
+					m.setStatus(j.label+": "+err.Error(), true)
+				}
+				return nil
+			})
+			if strings.Contains(strings.ToLower(prompt), "password") {
+				m.prompt.input.EchoMode = textinput.EchoPassword
+			}
+		}
 	case "y":
-		if m.actErrors || len(js) == 0 {
+		if j == nil {
 			var all []string
 			for _, e := range m.errLog {
 				all = append(all, e.at.Format("15:04:05")+" "+e.text)
@@ -230,14 +313,14 @@ func (m *model) activityKey(k tea.KeyMsg) tea.Cmd {
 			copyText(strings.Join(all, "\n"))
 			m.setStatus("copied the errors", false)
 		} else {
-			j := js[len(js)-1-min(m.jobSel, len(js)-1)]
 			copyText(strings.Join(j.output(), "\n"))
 			m.setStatus("copied the output of "+j.label, false)
 		}
-	}
-	m.showErrors = false
-	if m.statusErr {
-		m.status = ""
+	case "esc", "q", "!":
+		m.showErrors = false
+		if m.statusErr {
+			m.status = ""
+		}
 	}
 	return nil
 }

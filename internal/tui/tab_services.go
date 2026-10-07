@@ -32,6 +32,8 @@ type servicesTab struct {
 
 	open_ string // the service being shown, "" for the list
 	pods  *grid
+	// onPods is the focus on the service's instances: enter shows the log of the one picked
+	onPods bool
 	// lt is the open service's log: the Logs screen itself, pinned to that service
 	lt     *logsTab
 	detail string
@@ -49,6 +51,9 @@ type scaleChange struct {
 }
 
 const scaleShown = 10 * time.Minute
+
+// allInstances is the id of the pods grid's first row, which follows every instance's log
+const allInstances = "*all"
 
 // noteScale records a change of a service's replica count since the last refresh.
 func (t *servicesTab) noteScale(st core.Status) {
@@ -117,7 +122,11 @@ func (t *servicesTab) hints() [][2]string {
 		return t.lt.hints()
 	}
 	if t.open_ != "" {
-		return [][2]string{{"esc", "back"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
+		if t.onPods {
+			return [][2]string{{"↑↓", "instance"}, {"enter", "its log"}, {"tab", "the log"}, {"esc", "services"}, {"e", "shell"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
+				{"$", "env vars"}, {"m", "metrics"}, {"d", "deploy"}, {"b", "build, push, deploy"}, {"F", "manifests"}}
+		}
+		return [][2]string{{"esc", "instances"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
 			{"w", "wrap"}, {"S", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
 			{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy a tag/image"}, {"b", "build, push, deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
@@ -209,7 +218,6 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case " ":
 		if r, ok := t.list.current(); ok {
 			t.marked[r.id] = !t.marked[r.id]
-			t.list.sel = min(t.list.sel+1, len(t.list.rows)-1)
 		}
 	case "a":
 		all := true
@@ -320,7 +328,7 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 			if lt, ok := tb.(*logsTab); ok {
 				lt.services, lt.instances = names, nil
 				lt.restart = true
-				return m.openTab(i)
+				return m.jump(i)
 			}
 		}
 	}
@@ -362,6 +370,9 @@ func each(names []string, f func(string) error) error {
 
 // openService shows one service and streams its log (or one instance's) until it is closed.
 func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
+	if t.open_ != name {
+		t.pods.sel, t.onPods = 0, true
+	}
 	t.open_, t.detail = name, ""
 	t.lt.services, t.lt.instances, t.lt.inspect = []string{name}, nil, nil
 	if instance != "" {
@@ -397,23 +408,46 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			return cmd
 		}
 	}
+	if t.onPods && t.detail == "" {
+		if t.pods.key(k) {
+			return nil
+		}
+		switch k.String() {
+		case "enter", "right":
+			if r, ok := t.pods.current(); ok {
+				cmd := t.openService(m, name, strings.TrimPrefix(r.id, allInstances))
+				t.onPods = false
+				return cmd
+			}
+			return nil
+		case "tab", "down":
+			t.onPods = false
+			return nil
+		case "esc", "backspace", "left":
+			t.closeLogs()
+			t.open_ = ""
+			return nil
+		}
+	}
 	switch k.String() {
 	case "m":
 		return m.showMetrics(name)
+	case "tab":
+		t.onPods = true
+		return nil
 	case "esc", "backspace":
 		if t.detail != "" {
 			t.detail = ""
 			return nil
 		}
-		t.closeLogs()
-		t.open_ = ""
+		t.onPods = true
 		return nil
 	case "e":
 		inst := ""
 		if len(t.lt.instances) > 0 {
 			inst = t.lt.instances[0]
 		} else if r, ok := t.pods.current(); ok {
-			inst = r.id
+			inst = strings.TrimPrefix(r.id, allInstances)
 		}
 		return t.shell(m, name, inst)
 	case "p":
@@ -476,15 +510,15 @@ func (t *servicesTab) click(m *model, h hit) tea.Cmd {
 		t.open_ = ""
 		return nil
 	}
+	t.onPods = strings.HasPrefix(h.id, "pods")
 	if t.prof != nil && t.prof.grid.click(h) {
 		return nil
 	}
 	if t.pods.click(h) {
 		if r, ok := t.pods.current(); ok && h.double {
-			if len(t.lt.instances) == 1 && t.lt.instances[0] == r.id {
-				return t.openService(m, t.open_, "")
-			}
-			return t.openService(m, t.open_, r.id)
+			cmd := t.openService(m, t.open_, strings.TrimPrefix(r.id, allInstances))
+			t.onPods = false
+			return cmd
 		}
 		return nil
 	}
@@ -683,7 +717,11 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	head := b.String()
 	headH := lipgloss.Height(head)
 
-	var rows []grow
+	all := "all instances"
+	if len(t.lt.instances) == 0 {
+		all = sAccent.Render("▸ ") + all
+	}
+	rows := []grow{{id: allInstances, pin: true, cells: []string{"", all, "", "", "", "", "", ""}}}
 	for _, in := range st.Instances {
 		age := "-"
 		if !in.Started.IsZero() {
@@ -698,7 +736,11 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	}
 	t.pods.set(rows)
 	podsH := min(len(rows)+3, max(5, (h-headH)/3))
-	podsBox := panel(fmt.Sprintf("instances · %d", len(rows)), t.pods.view(m, 1, headH+2, w-2, podsH-2, true), w, podsH, true)
+	podsTitle := fmt.Sprintf("instances · %d", len(rows)-1)
+	if t.onPods {
+		podsTitle += sDim.Render(" · enter shows its log · tab the log · esc services")
+	}
+	podsBox := panel(podsTitle, t.pods.view(m, 1, headH+2, w-2, podsH-2, t.onPods), w, podsH, t.onPods)
 
 	logH := h - headH - podsH - 1
 	var logs string
@@ -1029,4 +1071,13 @@ func pickEnv(m *model, msg serviceEnvMsg) {
 		})
 		return nil
 	})
+}
+
+func (t *servicesTab) atRoot() bool {
+	for _, on := range t.marked {
+		if on {
+			return false
+		}
+	}
+	return t.open_ == "" && t.filter == ""
 }

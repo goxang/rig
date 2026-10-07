@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // splitGeo is a draggable border between two panes, in screen cells: the panes span total cells
@@ -133,4 +134,27 @@ func (m *model) pointerAt(x, y int) {
 	default:
 		setPointer("col-resize")
 	}
+}
+
+// markBorder draws the border under the mouse, or being dragged, thick and in the accent colour:
+// VTE (GNOME Terminal, Tilix) and Konsole ignore OSC 22, so this is the resize cue they show.
+func (m *model) markBorder(frame string) string {
+	name := m.splitting
+	if name == "" && m.hx >= 0 {
+		name = m.borderAt(m.hx, m.hy)
+	}
+	if name == "" {
+		return frame
+	}
+	st := lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	for _, z := range m.zones {
+		if z.id != "split:"+name {
+			continue
+		}
+		if m.splitGeo[name].down {
+			return overlayAt(frame, st.Render(strings.Repeat("━", z.w)), z.x, z.y)
+		}
+		return overlayAt(frame, st.Render(strings.TrimSuffix(strings.Repeat("┃\n", z.h), "\n")), z.x, z.y)
+	}
+	return frame
 }

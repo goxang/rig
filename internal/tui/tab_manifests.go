@@ -411,7 +411,6 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				if !t.marked[e.id()] {
 					delete(t.marked, e.id())
 				}
-				t.sel = min(t.sel+1, len(t.entries())-1)
 			}
 		case "i":
 			if t.fileInView() != "" {

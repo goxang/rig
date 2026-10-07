@@ -737,3 +737,5 @@ func (t *logsTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
 	t.log.wheel(up)
 	return nil, true
 }
+
+func (t *logsTab) atRoot() bool { return t.inspect == nil }

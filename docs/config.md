@@ -279,7 +279,10 @@ of another task). A protected environment asks once on a terminal instead of ref
 `--yes`. A read-only environment runs only tasks marked `readonly: true`. Steps print how long they took; secret values in a step's title show as `${NAME}`.
 `rig completion zsh|bash|fish` completes tasks, their args, services, components and `-e`.
 
-In the TUI, `T` runs any task; the KV screen's `F` lists the tasks named `kv-*` (filling the store from
+In the TUI, `T` runs any task, its picker in tabs: a task's `group:`, else the first word of its name
+when other tasks share it (`nexus-prune`, `nexus-restart`: nexus). The task runs in the background:
+the activity view (`!`) opens on its output, `enter` there types what a step asks for and `x` stops
+it. The KV screen's `F` lists the tasks named `kv-*` (filling the store from
 the project's config files, say).
 
 ## secrets

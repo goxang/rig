@@ -37,6 +37,8 @@ type grow struct {
 	id    string
 	cells []string
 	keys  []any // per column: float64 sorts numerically, anything else as text; nil uses the cell
+	// pin keeps the row on top whatever the sort ("all instances")
+	pin bool
 }
 
 func newGrid(id string, cols ...gcol) *grid { return &grid{id: id, cols: cols, sortBy: -1} }
@@ -86,6 +88,9 @@ func (g *grid) sortRows() {
 		return ""
 	}
 	sort.SliceStable(g.rows, func(i, j int) bool {
+		if g.rows[i].pin != g.rows[j].pin {
+			return g.rows[i].pin
+		}
 		c := compare(key(g.rows[i]), key(g.rows[j]))
 		if c == 0 {
 			c = strings.Compare(g.rows[i].id, g.rows[j].id)

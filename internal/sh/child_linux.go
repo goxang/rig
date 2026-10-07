@@ -17,6 +17,12 @@ func OwnGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL, Setpgid: true}
 }
 
+// Detached runs cmd in a session of its own, without the terminal: a background task must not
+// query the terminal, whose answers would land in the TUI's input. KillGroup stops it.
+func Detached(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL, Setsid: true}
+}
+
 func KillGroup(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)

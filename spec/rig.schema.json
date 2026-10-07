@@ -1034,6 +1034,14 @@
                 "string"
               ]
             },
+            "group": {
+              "description": "The tab the TUI's task picker lists it under; without one, the name's first word (nexus-prune: nexus) when other tasks share it.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
             "help": {
               "type": [
                 "string",
