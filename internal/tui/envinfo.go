@@ -25,8 +25,11 @@ func maskValue(name, value string) string {
 	if value != "" && secretName.MatchString(name) {
 		return sDim.Render("•••• (set)")
 	}
-	return value
+	// a connection string's password: postgres://app:pw@db, sqlserver://sa:pw@host
+	return urlPassword.ReplaceAllString(value, "${1}••••@")
 }
+
+var urlPassword = regexp.MustCompile(`(://[^:/@\s]+:)[^@\s]+@`)
 
 // envLine is one line of the ctrl+e box; key is set when the line is a manifest/task variable
 // (`rig vars set`'s own write path), which e/enter edits in place.

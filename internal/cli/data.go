@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"golang.org/x/term"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -374,12 +375,16 @@ func loadCommand() *cobra.Command {
 		}
 		var hist []float64
 		var lastSent int64
+		// a terminal redraws one line; a pipe (an agent, CI, a log file) gets a line every 5s
+		live := term.IsTerminal(int(os.Stdout.Fd()))
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Println()
+				if live {
+					fmt.Println()
+				}
 				return nil
 			case <-tick.C:
 			}
@@ -390,6 +395,13 @@ func loadCommand() *cobra.Command {
 			got := float64(st.Sent - lastSent)
 			lastSent = st.Sent
 			hist = append(hist, got)
+			if !live {
+				if len(hist)%5 == 0 {
+					fmt.Printf("%s  target %s  actual %s  failed %d/%d  p50 %s p99 %s\n", n, viz.Human(st.Rate, "/s"), viz.Human(got, "/s"),
+						st.Failed, st.Sent, st.Latency.P50.Round(time.Microsecond), st.Latency.P99.Round(time.Microsecond))
+				}
+				continue
+			}
 			fmt.Printf("\r%s %s  target %s  actual %s  failed %d/%d  p50 %s p99 %s   ", bold(n), viz.Sparkline(hist, 30, viz.Palette[0]),
 				viz.Human(st.Rate, "/s"), viz.Human(got, "/s"), st.Failed, st.Sent, st.Latency.P50.Round(time.Microsecond), st.Latency.P99.Round(time.Microsecond))
 		}

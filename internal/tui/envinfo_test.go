@@ -54,3 +54,12 @@ func TestEnvBoxScrollAndSelect(t *testing.T) {
 		t.Errorf("up clamp: got sel %d, want 0", box.sel)
 	}
 }
+
+func TestMaskValueHidesURLPasswords(t *testing.T) {
+	if got := maskValue("DATABASE_URL", "postgres://postgres:shop@postgres:5432/shop"); got != "postgres://postgres:••••@postgres:5432/shop" {
+		t.Fatalf("got %q", got)
+	}
+	if got := maskValue("ZIPKIN_URL", "http://zipkin:9411"); got != "http://zipkin:9411" {
+		t.Fatalf("a URL without credentials changed: %q", got)
+	}
+}
