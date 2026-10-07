@@ -367,6 +367,9 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 		return fmt.Errorf("no environment: define one under environments: and set default")
 	}
 	a.RememberEnv()
+	if t, err := LoadTheme(CurrentTheme()); err == nil {
+		applyTheme(t)
+	}
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
@@ -1392,6 +1395,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return m.fetchKubeconfig(cmp.Or(m.kubeEnv, m.app.Env.Name))
 		case "ctrl+w":
 			return m.toggleWatch()
+		case "ctrl+p":
+			m.pickTheme()
+			return nil
 		case "E":
 			m.pickEnv()
 			return nil
@@ -1530,6 +1536,44 @@ func (m *model) quit() tea.Cmd {
 // pickTask runs a rig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
 // may read input, so the TUI steps aside until it ends. Enter on the confirmation is the task's --yes.
 // prefix narrows the list (the KV screen's kv-*).
+// pickTheme previews each theme as the cursor lands on it; enter keeps it for good, esc puts back the old one.
+func (m *model) pickTheme() {
+	was := theme
+	names := ThemeNames()
+	sel := max(0, slices.Index(names, CurrentTheme()))
+	m.pick("theme", names, nil, sel, false, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		if err := UseTheme(chosen[0]); err != nil {
+			applyTheme(was)
+			m.setStatus(err.Error(), true)
+			return nil
+		}
+		m.setStatus("theme "+chosen[0]+" (rig theme --save to edit a copy)", false)
+		return nil
+	})
+	m.picker.back = func() tea.Cmd {
+		applyTheme(was)
+		return nil
+	}
+	m.picker.preview = func(name string) string {
+		t, err := LoadTheme(name)
+		if err != nil {
+			return sRed.Render(err.Error())
+		}
+		applyTheme(t)
+		sw := func(c, label string) string {
+			return lipgloss.NewStyle().Background(lipgloss.Color(c)).Render("    ") + " " + label
+		}
+		return strings.Join([]string{
+			sw(t.Accent, "accent") + "   " + sw(t.Green, "ok") + "   " + sw(t.Amber, "warn") + "   " + sw(t.Red, "error") + "   " + sw(t.Purple, "purple"),
+			sAccent.Render("accent text") + "  " + sDim.Render("dim text") + "  " + sSelected.Render(" selected row ") + " " + sCursor.Render(" cursor "),
+			"fonts and their size are the terminal's; rig sets colours only",
+		}, "\n")
+	}
+}
+
 func (m *model) pickTask(prefix string) {
 	var names []string
 	for _, n := range m.app.TaskNames() {
@@ -2242,7 +2286,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

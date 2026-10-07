@@ -436,20 +436,20 @@ func (t *loadTab) charts(m *model, n string) []loadChart {
 		if p == nil {
 			p = &podHist{}
 		}
-		sent := loadChart{title: shortInstance(id) + " · req/s", unit: "/s", lines: []viz.Line{{Name: "sent", Points: p.sent, Color: "#73BF69"}}}
+		sent := loadChart{title: shortInstance(id) + " · req/s", unit: "/s", lines: []viz.Line{{Name: "sent", Points: p.sent, Color: lipgloss.Color(theme.Green)}}}
 		if len(p.sent) == 0 {
 			sent.empty = "no per-instance counter: give the generator's kv load component metrics.per_instance, a PromQL sent counter labelled pod"
 		}
-		return []loadChart{sent, {title: shortInstance(id) + " · CPU while watching", lines: []viz.Line{{Name: "cpu (cores)", Points: p.cpu, Color: "#B877D9"}}}}
+		return []loadChart{sent, {title: shortInstance(id) + " · CPU while watching", lines: []viz.Line{{Name: "cpu (cores)", Points: p.cpu, Color: lipgloss.Color(theme.Purple)}}}}
 	}
 	hist := t.hist[n]
 	if hist == nil {
 		hist = &loadHist{}
 	}
 	out := []loadChart{{title: n + " · req/s while watching", unit: "/s", lines: []viz.Line{
-		{Name: "target", Points: hist.target, Color: "#5794F2"},
-		{Name: "actual", Points: hist.actual, Color: "#73BF69"},
-		{Name: "failed", Points: hist.failed, Color: "#F2495C"},
+		{Name: "target", Points: hist.target, Color: lipgloss.Color(theme.Accent)},
+		{Name: "actual", Points: hist.actual, Color: lipgloss.Color(theme.Green)},
+		{Name: "failed", Points: hist.failed, Color: lipgloss.Color(theme.Red)},
 	}}}
 	ids := t.instanceIDs(m, n)[1:]
 	if len(ids) < 2 {

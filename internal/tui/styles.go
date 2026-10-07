@@ -7,41 +7,64 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
 )
 
 var (
-	cAccent = lipgloss.Color("#5794F2")
-	cGreen  = lipgloss.Color("#73BF69")
-	cAmber  = lipgloss.Color("#FF9830")
-	cRed    = lipgloss.Color("#F2495C")
-	cPurple = lipgloss.Color("#B877D9")
-	cText   = lipgloss.AdaptiveColor{Light: "#1F1F1F", Dark: "#D8D9DA"}
-	cDim    = lipgloss.AdaptiveColor{Light: "#7A7A7A", Dark: "#7B7F85"}
+	cAccent, cGreen, cAmber, cRed, cPurple lipgloss.TerminalColor
+	cText, cDim                            lipgloss.TerminalColor
 	// cPlaceholder reads on both the panel and the cursor line's background
-	cPlaceholder = lipgloss.AdaptiveColor{Light: "#5A5A5A", Dark: "#A8ADB3"}
-	cPanel       = lipgloss.AdaptiveColor{Light: "#D0D0D0", Dark: "#2C3235"}
-	cBar         = lipgloss.AdaptiveColor{Light: "#ECECEC", Dark: "#181B1F"}
+	cPlaceholder, cPanel, cBar lipgloss.TerminalColor
 
-	sTitle     = lipgloss.NewStyle().Bold(true).Foreground(cText)
-	sDim       = lipgloss.NewStyle().Foreground(cDim)
-	sAccent    = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
-	sGreen     = lipgloss.NewStyle().Foreground(cGreen)
-	sAmber     = lipgloss.NewStyle().Foreground(cAmber)
-	sRed       = lipgloss.NewStyle().Foreground(cRed)
-	sCursor    = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#B4CCF5", Dark: "#2F5A9E"}).Bold(true)
-	sSelected  = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#DCE7FB", Dark: "#22344F"}).Bold(true)
-	sHover     = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#EEF2F8", Dark: "#1C2430"})
-	sUnderline = lipgloss.NewStyle().Underline(true)
-	sTabHover  = lipgloss.NewStyle().Foreground(cText).Underline(true).Padding(0, 1)
-	sTabOn     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(cAccent).Bold(true).Padding(0, 1)
-	sTabOff    = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
-	sHeader    = lipgloss.NewStyle().Background(cBar).Foreground(cText)
-	sBand      = lipgloss.NewStyle().Background(cBar)
-	sSubOn     = lipgloss.NewStyle().Foreground(cAccent).Bold(true).Padding(0, 1)
-	sSubOff    = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
-	sSubSep    = lipgloss.NewStyle().Foreground(cPanel).Render("│")
-	sKey       = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	sTitle, sDim, sAccent, sGreen, sAmber, sRed, sCursor, sSelected, sHover, sUnderline lipgloss.Style
+	sTabHover, sTabOn, sTabOff, sHeader, sBand, sSubOn, sSubOff, sKey                   lipgloss.Style
+	sSubSep                                                                             string
 )
+
+func init() { applyTheme(themes["default"]) }
+
+// applyTheme sets every colour and style of the UI from t.
+// theme is the one in use, for code that needs a plain colour (charts).
+var theme Theme
+
+func applyTheme(t Theme) {
+	theme = t
+	c := func(dark, light string) lipgloss.TerminalColor {
+		if light == "" {
+			return lipgloss.Color(dark)
+		}
+		return lipgloss.AdaptiveColor{Light: light, Dark: dark}
+	}
+	cAccent, cGreen, cAmber, cRed, cPurple = c(t.Accent, ""), c(t.Green, ""), c(t.Amber, ""), c(t.Red, ""), c(t.Purple, "")
+	cText, cDim, cPlaceholder = c(t.Text, t.Light.Text), c(t.Dim, t.Light.Dim), c(t.Placeholder, t.Light.Placeholder)
+	cPanel, cBar = c(t.Panel, t.Light.Panel), c(t.Bar, t.Light.Bar)
+
+	sTitle = lipgloss.NewStyle().Bold(true).Foreground(cText)
+	sDim = lipgloss.NewStyle().Foreground(cDim)
+	sAccent = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	sGreen = lipgloss.NewStyle().Foreground(cGreen)
+	sAmber = lipgloss.NewStyle().Foreground(cAmber)
+	sRed = lipgloss.NewStyle().Foreground(cRed)
+	sCursor = lipgloss.NewStyle().Background(c(t.Cursor, t.Light.Cursor)).Bold(true)
+	sSelected = lipgloss.NewStyle().Background(c(t.Selected, t.Light.Selected)).Bold(true)
+	sHover = lipgloss.NewStyle().Background(c(t.Hover, t.Light.Hover))
+	sUnderline = lipgloss.NewStyle().Underline(true)
+	sTabHover = lipgloss.NewStyle().Foreground(cText).Underline(true).Padding(0, 1)
+	sTabOn = lipgloss.NewStyle().Foreground(c(t.OnAccent, "")).Background(cAccent).Bold(true).Padding(0, 1)
+	sTabOff = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
+	sHeader = lipgloss.NewStyle().Background(cBar).Foreground(cText)
+	sBand = lipgloss.NewStyle().Background(cBar)
+	sSubOn = lipgloss.NewStyle().Foreground(cAccent).Bold(true).Padding(0, 1)
+	sSubOff = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
+	sSubSep = lipgloss.NewStyle().Foreground(cPanel).Render("│")
+	sKey = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
+	if len(t.Series) > 0 {
+		viz.Palette = make([]lipgloss.Color, len(t.Series))
+		for i, s := range t.Series {
+			viz.Palette[i] = lipgloss.Color(s)
+		}
+	}
+}
 
 // panel draws a titled, rounded box exactly w×h.
 func panel(title, body string, w, h int, focused bool) string {

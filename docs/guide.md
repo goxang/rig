@@ -101,6 +101,12 @@ sort, drafts, query history and results, the activity view and the errors come b
 (`?`) filters as you type. A border under the mouse lights up and drags to resize the panes. Errors a
 new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
 
+`ctrl+p` picks a colour theme, previewing each as you move (`rig theme` lists and sets them too):
+default, nord, dracula, gruvbox, catppuccin, mono, or your own. `rig theme --save mine nord` writes
+`~/.config/rig/themes/mine.yaml` to edit; a theme file sets `base:` and only the colours it changes,
+with `light:` for light terminals. `$RIG_THEME` overrides the choice for one run. Fonts belong to the
+terminal; rig sets colours only.
+
 A Kubernetes environment can name its cluster by address as well: `runtime: { context: local, server:
 https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has
 one, else whichever context points at that server (Rancher names downloaded kubeconfigs per user).

@@ -131,7 +131,7 @@ Run rig with no arguments for the terminal UI.`,
 	ac := aiCommand()
 	ac.GroupID = "obs"
 	root.AddCommand(ac)
-	for _, c := range append(projectCommands(), doctorCommand(), kubeconfigCommand(), whyCommand(), docsCommand(), schemaCommand(), skillCommand()) {
+	for _, c := range append(projectCommands(), doctorCommand(), kubeconfigCommand(), whyCommand(), docsCommand(), schemaCommand(), skillCommand(), themeCommand()) {
 		c.GroupID = "infra"
 		root.AddCommand(c)
 	}
