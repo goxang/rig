@@ -382,7 +382,7 @@ func (t *logsTab) view(m *model, w, h int) string {
 	nameW = min(nameW, 18)
 	re := t.grepRe()
 	if t.inspect != nil {
-		iw := min(max(w*3/5, 40), w-20)
+		iw := m.paneSize("logs.inspect", splitGeo{total: w, minA: 30, minB: 20, fromEnd: true}, min(max(w*3/5, 40), w-20), 0, 0, h)
 		lw := w - iw
 		left := t.logPanel(m, title, nameW, re, lw, h, !t.inTree)
 		it := "line · " + t.inspect.current().path()

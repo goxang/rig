@@ -573,7 +573,7 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 		return panel(fmt.Sprintf("issues of %s · %d · I all · esc back", relTo(m.app.Spec.Dir, f), len(mine)), body, w, h, true)
 	}
 
-	lw := min(52, w*2/5)
+	lw := m.paneSize("manifests", splitGeo{total: w, minA: 20, minB: 30}, min(52, w*2/5), 0, 0, h)
 	issuesOf := map[string]int{}
 	for _, i := range t.set.Issues {
 		if i.Level != "info" {

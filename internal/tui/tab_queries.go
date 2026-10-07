@@ -556,7 +556,7 @@ func (t *queriesTab) historyView(m *model, w, h int) string {
 			keys: []any{float64(-r.At.UnixNano()), r.Name, by, float64(len(r.Table.Rows)), float64(r.Took), first}})
 	}
 	t.hist.set(rows)
-	listH := max(5, min(h*2/5, len(rows)+3))
+	listH := m.paneSize("queries", splitGeo{total: h, minA: 4, minB: 5, down: true}, max(5, min(h*2/5, len(rows)+3)), 0, 0, w)
 	list := panel(fmt.Sprintf("history · %d runs this session · H back", len(runs)), t.hist.view(m, 1, 1, w-2, listH-2, !t.focusRes), w, listH, !t.focusRes)
 	resH := h - listH
 	cur, ok := t.hist.current()
@@ -591,9 +591,9 @@ func (t *queriesTab) savedView(m *model, w, h int) string {
 	if len(t.list.rows) == 0 && len(t.langs) == 0 {
 		return panel("queries", sDim.Render("no saved queries and no component that answers queries.\n\nadd saved queries to rig.yaml:\n\nqueries:\n  slow-requests:\n    source: prom\n    query: topk(5, rate(http_request_duration_seconds_sum[5m]))\n    every: 30s"), w, h, true)
 	}
-	listH := max(5, min(h*2/5, len(t.list.rows)+3))
-	if len(t.list.rows) == 0 {
-		listH = 4
+	listH := 4
+	if len(t.list.rows) > 0 {
+		listH = m.paneSize("queries", splitGeo{total: h, minA: 4, minB: 5, down: true}, max(5, min(h*2/5, len(t.list.rows)+3)), 0, 0, w)
 	}
 	listTitle := fmt.Sprintf("queries · %d saved · n writes a new one · a schedules", len(m.app.Queries()))
 	list := panel(listTitle, t.list.view(m, 1, 1, w-2, listH-2, !t.focusRes), w, listH, !t.focusRes)

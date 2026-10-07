@@ -288,7 +288,7 @@ components:
     max: 500
     step: 10`))
 	}
-	lw := min(44, w/3)
+	lw := m.paneSize("load", splitGeo{total: w, minA: 24, minB: 40}, min(44, w/3), 0, 0, h)
 	var rows [][]string
 	for _, n := range t.names {
 		st, ok := t.stats[n]

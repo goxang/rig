@@ -138,6 +138,11 @@ type model struct {
 	// dragZone is the zone a press started a drag on; moves and the release go to its tab
 	dragZone string
 	sel      *selection
+	// splitFrac are the user's pane sizes (panes.json); splitGeo where each border was drawn last;
+	// splitting the border being dragged
+	splitFrac map[string]float64
+	splitGeo  map[string]splitGeo
+	splitting string
 	// inputDrag is the mouse selecting in the footer input, which starts at column inputX
 	inputDrag bool
 	inputX    int
@@ -330,7 +335,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default")
 	}
-	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1}
+	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
 	if s != nil {
@@ -736,6 +741,14 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	m.hx, m.hy = e.X, e.Y
 	if m.dragZone != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.dragTo(e)
+	}
+	if m.splitting != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
+		m.splitDrag(e)
+		return nil
+	}
+	if name := m.borderAt(e.X, e.Y); name != "" && e.Action == tea.MouseActionPress && e.Button == tea.MouseButtonLeft && m.picker == nil {
+		m.splitting, m.sel = name, nil
+		return nil
 	}
 	if p := m.prompt; p != nil && !p.popup {
 		if m.inputDrag && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
@@ -1548,7 +1561,7 @@ func (m *model) View() string {
 	case m.picker != nil:
 		body = m.picker.view(m, bodyH)
 	case m.chat != nil && m.chat.open:
-		cw := m.chatWidth()
+		cw := m.chatWidth(bodyH)
 		if cw >= m.w {
 			body = m.chat.view(m, 0, m.w, bodyH)
 			break
@@ -1795,7 +1808,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ ctrl+⇧↑↓", "sort column, order (or click a header)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc", "back"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

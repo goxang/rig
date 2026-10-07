@@ -1021,7 +1021,7 @@ func (t *dataTab) view(m *model, w, h int) string {
 	if t.left == nil || len(t.left.rows) == 0 {
 		return panel("data", sDim.Render("no database, messaging or cache components in this environment (or still loading)"), w, h, true)
 	}
-	lw := min(34, w/4)
+	lw := m.paneSize("data", splitGeo{total: w, minA: 16, minB: 30}, min(34, w/4), 0, 0, h)
 	left := panel("components", t.left.view(m, 1, 1, lw-2, h-2, t.focus == 0), lw, h, t.focus == 0)
 
 	c := t.current()
@@ -1093,7 +1093,7 @@ func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w,
 	}
 	listH := h
 	if t.detailFor != "" && t.qview == 0 {
-		listH = max(8, h*2/5)
+		listH = m.paneSize("data.detail", splitGeo{total: h, minA: 5, minB: 4, down: true}, max(8, h*2/5), x, 0, w)
 	}
 	body := strip + head + t.right.view(m, x+1, 1+stripH+hh, w-2, listH-2-stripH-hh, t.focus == 1)
 	list := panel(title, body, w, listH, t.focus == 1)

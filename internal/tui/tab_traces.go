@@ -324,7 +324,7 @@ func (t *tracesTab) view(m *model, w, h int) string {
 	if t.err != "" && len(t.found) == 0 {
 		return panel(title, sRed.Render(wrap(t.err, w-4))+"\n\n"+sDim.Render("configure a tracing component (zipkin, jaeger) in rig.yaml"), w, h, true)
 	}
-	listH := max(6, min(h/2, len(t.list.rows)+3))
+	listH := m.paneSize("traces", splitGeo{total: h, minA: 5, minB: 6, down: true}, max(6, min(h/2, len(t.list.rows)+3)), 0, 0, w)
 	list := panel(fmt.Sprintf("%s · %d", title, len(t.list.rows)), t.list.view(m, 1, 1, w-2, listH-2, true), w, listH, true)
 	if len(t.spans) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, list, panel("trace", sDim.Render("select a trace (enter or click)"), w, h-listH, false))
@@ -337,7 +337,7 @@ func (t *tracesTab) view(m *model, w, h int) string {
 func (t *tracesTab) spansView(m *model, y, w, h int) string {
 	dw := 0
 	if w >= 110 {
-		dw = min(60, w/3)
+		dw = m.paneSize("traces.span", splitGeo{total: w, minA: 24, minB: 40, fromEnd: true}, min(60, w/3), 0, y, h)
 	}
 	ww := w - dw
 	if t.wfWidth != ww-4 {

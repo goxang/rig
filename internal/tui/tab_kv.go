@@ -579,7 +579,7 @@ func (t *kvTab) view(m *model, w, h int) string {
 		return panel("key-value", sRed.Render(wrap(t.err, w-4)), w, h, true)
 	}
 	t.list.set(t.entries())
-	lw := min(max(w/3, 36), 70)
+	lw := m.paneSize("kv", splitGeo{total: w, minA: 20, minB: 30}, min(max(w/3, 36), 70), 0, 0, h)
 	where := "/" + t.prefix
 	title := t.comp + " · " + where
 	if t.filter != "" {

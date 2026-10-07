@@ -947,10 +947,10 @@ tests:
 	case t.filter == filterBuild:
 		outY, outW, outH = 4, w, h
 	case w >= 160:
-		listW, listH = w*3/5, h
+		listW, listH = m.paneSize("tests.side", splitGeo{total: w, minA: 40, minB: 30}, w*3/5, 0, 4, h), h
 		outX, outY, outW, outH = listW, 4, w-listW, h
 	default:
-		listW, listH = w, max(6, h*11/20)
+		listW, listH = w, m.paneSize("tests.stack", splitGeo{total: h, minA: 5, minB: 5, down: true, start: 4}, max(6, h*11/20), 0, 4, w)
 		outY, outW, outH = 4+listH, w, h-listH
 	}
 	var listBox string

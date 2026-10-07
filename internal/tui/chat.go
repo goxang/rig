@@ -618,11 +618,11 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 	return false, "unknown action " + r.Action, nil
 }
 
-func (m *model) chatWidth() int {
+func (m *model) chatWidth(h int) int {
 	if m.w < 90 {
 		return m.w
 	}
-	return min(max(46, m.w*2/5), 90)
+	return m.paneSize("chat", splitGeo{total: m.w, minA: 36, minB: 30, fromEnd: true}, min(max(46, m.w*2/5), 90), 0, 0, h)
 }
 
 func (c *chat) view(m *model, x, w, h int) string {
