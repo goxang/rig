@@ -140,6 +140,11 @@ type Resourcer interface {
 	SetResources(ctx context.Context, s *spec.Service, r Resources) error
 }
 
+// EnvReader is a runtime that reads the environment variables a service's workload runs with.
+type EnvReader interface {
+	LiveEnv(ctx context.Context, s *spec.Service) (map[string]string, error)
+}
+
 // Workload is something running in the environment, managed by rig or not.
 type Workload struct {
 	Name    string

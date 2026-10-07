@@ -384,6 +384,25 @@ func (a *App) withEnv(s *spec.Service) *spec.Service {
 	return &c
 }
 
+// ServiceEnv is what a service runs with: its live workload's env where the runtime reads one
+// (Kubernetes), else rig.yaml's with the overrides on top; overridden names what SetEnv set.
+func (a *App) ServiceEnv(ctx context.Context, name string) (env map[string]string, overridden map[string]bool, err error) {
+	rt, s, err := a.Owner(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	overridden = map[string]bool{}
+	for k := range a.EnvOverrides(name) {
+		overridden[k] = true
+	}
+	if r, ok := rt.(core.EnvReader); ok {
+		if env, err = r.LiveEnv(ctx, s); err == nil {
+			return env, overridden, nil
+		}
+	}
+	return a.withEnv(s).Env, overridden, nil
+}
+
 // EnvOverrides are the variables SetEnv gave a service.
 func (a *App) EnvOverrides(name string) map[string]string { return a.overrides()[name] }
 

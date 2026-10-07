@@ -119,12 +119,12 @@ func (t *servicesTab) hints() [][2]string {
 	if t.open_ != "" {
 		return [][2]string{{"esc", "back"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
 			{"w", "wrap"}, {"s", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
-			{"r", "restart"}, {"u/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests: edit, sync, apply"},
+			{"r", "restart"}, {"u/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
+		{"h", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -180,6 +180,9 @@ func (t *servicesTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.profile != nil {
 			t.prof = msg.profile
 		}
+		return nil
+	case serviceEnvMsg:
+		pickEnv(m, msg)
 		return nil
 	case logStartMsg, logBatchMsg:
 		if t.lt != nil {
@@ -295,6 +298,8 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 		return serviceManifests(m, names[0])
 	case "R":
 		return editResources(m, names[0])
+	case "$":
+		return readEnv(m, names)
 	case "d":
 		m.ask(label("deploy", names)+": image tag (empty: the last built one)", "", func(tag string) tea.Cmd {
 			tag = strings.TrimSpace(tag)
@@ -970,4 +975,75 @@ func (t *servicesTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
 		return nil, false
 	}
 	return t.lt.wheel(m, h, up)
+}
+
+type serviceEnvMsg struct {
+	names []string
+	env   map[string]string
+	over  map[string]bool
+	err   error
+}
+
+// readEnv reads what the first of names runs with (on Kubernetes, its live workload's env).
+func readEnv(m *model, names []string) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	m.setStatus("reading the env of "+names[0]+"…", false)
+	return func() tea.Msg {
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		env, over, err := a.ServiceEnv(c, names[0])
+		return serviceEnvMsg{names: names, env: env, over: over, err: err}
+	}
+}
+
+// pickEnv lists the env vars to change one: the new value is kept in the environment's state, so
+// every later deploy has it, and the service is redeployed with it.
+func pickEnv(m *model, msg serviceEnvMsg) {
+	if msg.err != nil {
+		m.setStatus("env of "+msg.names[0]+": "+msg.err.Error(), true)
+		return
+	}
+	m.setStatus("", false)
+	const add = "+ new variable"
+	items, desc := []string{add}, []string{""}
+	keys := make([]string, 0, len(msg.env))
+	for k := range msg.env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		items = append(items, k)
+		d := msg.env[k]
+		if msg.over[k] {
+			d += sAmber.Render("  (set here; empty: back to the manifest's)")
+		}
+		desc = append(desc, truncate(d, 80))
+	}
+	set := func(kv map[string]string) tea.Cmd {
+		return m.act(label("set env of", msg.names), true, func(ctx context.Context) error { return m.app.SetEnv(ctx, msg.names, kv) })
+	}
+	m.pick("env of "+strings.Join(msg.names, ", ")+" · enter edits, redeploys", items, desc, 0, false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		if c[0] == add {
+			m.ask("new variable (NAME=value)", "", func(v string) tea.Cmd {
+				k, val, ok := strings.Cut(strings.TrimSpace(v), "=")
+				if !ok || k == "" {
+					m.setStatus("write NAME=value", true)
+					return nil
+				}
+				return set(map[string]string{k: val})
+			})
+			return nil
+		}
+		k := c[0]
+		m.ask(k, msg.env[k], func(v string) tea.Cmd {
+			if v == msg.env[k] {
+				return nil
+			}
+			return set(map[string]string{k: v})
+		})
+		return nil
+	})
 }

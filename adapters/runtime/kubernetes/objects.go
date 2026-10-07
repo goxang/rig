@@ -37,6 +37,67 @@ func (r *Runtime) KubectlArgs() []string {
 	return []string{"--context", r.Opt.Context, "-n", r.Opt.Namespace}
 }
 
+// LiveEnv is the first container's env on the cluster; values from secrets and config maps show
+// where they come from.
+func (r *Runtime) LiveEnv(ctx context.Context, s *spec.Service) (map[string]string, error) {
+	out, err := r.kubectl("get", r.section(s).Workload, "-o", "json").Output(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var w struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name string `json:"name"`
+						Env  []struct {
+							Name      string `json:"name"`
+							Value     string `json:"value"`
+							ValueFrom *struct {
+								SecretKeyRef    *struct{ Name, Key string } `json:"secretKeyRef"`
+								ConfigMapKeyRef *struct{ Name, Key string } `json:"configMapKeyRef"`
+								FieldRef        *struct {
+									FieldPath string `json:"fieldPath"`
+								} `json:"fieldRef"`
+							} `json:"valueFrom"`
+						} `json:"env"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(out, &w); err != nil {
+		return nil, err
+	}
+	env := map[string]string{}
+	cs := w.Spec.Template.Spec.Containers
+	if len(cs) == 0 {
+		return env, nil
+	}
+	c := cs[0]
+	if want := r.section(s).Container; want != "" {
+		for _, x := range cs {
+			if x.Name == want {
+				c = x
+			}
+		}
+	}
+	for _, e := range c.Env {
+		v := e.Value
+		switch f := e.ValueFrom; {
+		case f == nil:
+		case f.SecretKeyRef != nil:
+			v = "(secret " + f.SecretKeyRef.Name + "/" + f.SecretKeyRef.Key + ")"
+		case f.ConfigMapKeyRef != nil:
+			v = "(config map " + f.ConfigMapKeyRef.Name + "/" + f.ConfigMapKeyRef.Key + ")"
+		case f.FieldRef != nil:
+			v = "(field " + f.FieldRef.FieldPath + ")"
+		}
+		env[e.Name] = v
+	}
+	return env, nil
+}
+
 type containerResources struct {
 	Name      string `json:"name"`
 	Resources struct {
