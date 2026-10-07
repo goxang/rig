@@ -314,6 +314,13 @@ components:
 		switch {
 		case t.errs[n] != nil:
 			dot, rate = sRed.Render("✖"), ""
+		case !ok:
+			// its status is on the way: the services it runs as already tell whether it is up
+			for _, s := range t.services(m, n) {
+				if s.Ready > 0 {
+					dot = sGreen.Render("●")
+				}
+			}
 		case ok:
 			dot, rate = sDim.Render("○"), viz.Human(st.Rate, "/s")
 			if st.Running {
