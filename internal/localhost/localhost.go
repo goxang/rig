@@ -18,7 +18,6 @@ import (
 	"github.com/goxang/rig/internal/sh"
 )
 
-
 type Host struct{}
 
 func (Host) Hosts(ctx context.Context) ([]core.Host, error) {
