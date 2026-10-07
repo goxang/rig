@@ -4,6 +4,7 @@
 package ai
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -445,4 +448,69 @@ func DetectLocal(ctx context.Context) []LocalServer {
 		out = append(out, s)
 	}
 	return out
+}
+
+// Found is an AI tool installed on this machine, with the model its own config picks.
+type Found struct {
+	Backend, Bin, Model string
+	// Ready is whether it has a login or a model to run with; opencode always does (free models).
+	Ready bool
+}
+
+var modelField = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+
+// Detect lists the installed backends and what their own configs set.
+func Detect() []Found {
+	home, _ := os.UserHomeDir()
+	cfg, _ := os.UserConfigDir()
+	firstModel := func(files ...string) string {
+		for _, f := range files {
+			if raw, err := os.ReadFile(f); err == nil {
+				if m := modelField.FindSubmatch(raw); m != nil {
+					return string(m[1])
+				}
+			}
+		}
+		return ""
+	}
+	var out []Found
+	if bin := find(BackendOpencode); bin != "" {
+		d := filepath.Join(cfg, "opencode")
+		out = append(out, Found{Backend: BackendOpencode, Bin: bin, Ready: true,
+			Model: firstModel(filepath.Join(d, "opencode.json"), filepath.Join(d, "opencode.jsonc"), filepath.Join(d, "config.json"))})
+	}
+	if bin := find(BackendClaude); bin != "" {
+		_, err := os.Stat(filepath.Join(home, ".claude", ".credentials.json"))
+		model := cmp.Or(os.Getenv("ANTHROPIC_MODEL"), firstModel(filepath.Join(home, ".claude", "settings.json")))
+		out = append(out, Found{Backend: BackendClaude, Bin: bin, Model: model,
+			Ready: err == nil || os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("ANTHROPIC_AUTH_TOKEN") != "" || runtime.GOOS == "darwin"})
+	}
+	return out
+}
+
+// Connect points the saved setup at a found backend as the user has it set up: its own login,
+// config and model (opencode without a model gets its free ones). Other settings are kept.
+func Connect(f Found) error {
+	c, err := readConfig()
+	if err != nil {
+		return err
+	}
+	c.Backend, c.Provider, c.Model, c.URL, c.APIKey, c.Disabled = f.Backend, "own", "", "", "", false
+	if f.Backend == BackendOpencode && f.Model == "" {
+		c.Provider = "opencode"
+	}
+	return SaveConfig(c)
+}
+
+func (f Found) Describe() string {
+	d := f.Backend + " (" + f.Bin + ")"
+	if f.Model != "" {
+		d += " · model " + f.Model
+	} else if f.Backend == BackendOpencode {
+		d += " · free models"
+	}
+	if !f.Ready {
+		d += " · not logged in: run claude once"
+	}
+	return d
 }

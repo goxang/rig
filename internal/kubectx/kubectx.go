@@ -66,7 +66,7 @@ func pick(kc kubeconfig, name, server string) (string, error) {
 			want += fmt.Sprintf(" (or named %q)", name)
 		}
 	}
-	return "", fmt.Errorf("%s is not in this machine's kubeconfig (it has: %s); add the cluster's kubeconfig, or point the environment's runtime.context (or runtime.server) in rig.yaml at the right one",
+	return "", fmt.Errorf("%s is not in this machine's kubeconfig (it has: %s); fetch the cluster's kubeconfig (rig kubeconfig), or point the environment's runtime.context (or runtime.server) in rig.yaml at the right one",
 		want, strings.Join(have, ", "))
 }
 

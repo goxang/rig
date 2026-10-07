@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +61,7 @@ rig ai log lists what the assistant ran, who confirmed it and how it went.`,
 	}
 	c.Flags().StringVarP(&session, "session", "s", "", "continue this conversation")
 	c.Flags().BoolVarP(&cont, "continue", "c", false, "continue the last conversation")
-	c.AddCommand(aiConfigCommand(), aiLogCommand(), &cobra.Command{
+	c.AddCommand(aiConfigCommand(), aiConnectCommand(), aiLogCommand(), &cobra.Command{
 		Use:   "sessions",
 		Short: "conversations of this project, newest first",
 		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
@@ -94,6 +95,38 @@ rig ai log lists what the assistant ran, who confirmed it and how it went.`,
 		}),
 	})
 	return c
+}
+
+func aiConnectCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:       "connect [opencode|claude]",
+		Short:     "find the installed opencode / Claude Code and use it as you have it set up (its login, config and model)",
+		ValidArgs: []string{ai.BackendOpencode, ai.BackendClaude},
+		Args:      cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			found := ai.Detect()
+			if len(found) == 0 {
+				return fmt.Errorf("neither opencode nor claude is installed: install one (https://opencode.ai, https://claude.com/claude-code)")
+			}
+			for _, f := range found {
+				fmt.Println(dim("found ") + f.Describe())
+			}
+			pick := found[0]
+			if len(args) > 0 {
+				i := slices.IndexFunc(found, func(f ai.Found) bool { return f.Backend == args[0] })
+				if i < 0 {
+					return fmt.Errorf("%s is not installed", args[0])
+				}
+				pick = found[i]
+			}
+			if err := ai.Connect(pick); err != nil {
+				return err
+			}
+			c, _ := ai.LoadConfig()
+			fmt.Println(green("● ") + ai.Resolve(c).Describe() + dim("  (rig ai check tests it)"))
+			return nil
+		},
+	}
 }
 
 func aiConfigCommand() *cobra.Command {
@@ -151,6 +184,9 @@ RIG_AI_<KEY> (RIG_AI_MODEL, RIG_AI_FAST_URL, ...) overrides a setting for one ru
 				line = red("○ ") + s.Describe()
 			}
 			fmt.Println("\n" + line + "\n" + dim(f))
+			for _, f := range ai.Detect() {
+				fmt.Printf("\n%s %s\n  %s\n", green("◆"), f.Describe(), dim("use it: rig ai connect "+f.Backend))
+			}
 			for _, l := range ai.DetectLocal(cmd.Context()) {
 				if len(l.Models) == 0 {
 					fmt.Printf("\n%s %s at %s serves no model yet: %s\n", amber("◆"), l.Provider, l.URL, map[string]string{"ollama": "ollama pull qwen2.5-coder", "lmstudio": "load one in LM Studio"}[l.Provider])

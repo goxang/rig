@@ -5,6 +5,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/kubectx"
 	"github.com/goxang/rig/spec"
 )
 
@@ -82,7 +84,12 @@ type model struct {
 	status    string
 	statusErr bool
 	statusAt  time.Time
-	busy      int
+	// errLog keeps the last errors, newest last; ! shows them in full
+	errLog     []loggedErr
+	showErrors bool
+	// kubeEnv is the environment that last failed on its kubeconfig: ctrl+k fetches one for it
+	kubeEnv string
+	busy    int
 	// workCtx is what one-off operations (queries, actions, loads) run under: ctrl+c ends them
 	// without leaving rig
 	workCtx  context.Context
@@ -202,6 +209,8 @@ type (
 	envMsg struct {
 		app *engine.App
 		err error
+		// name is the environment that was opened, for offering a kubeconfig when it failed on one
+		name string
 	}
 )
 
@@ -515,8 +524,48 @@ func (m *model) ask(label, value string, submit func(string) tea.Cmd) {
 	m.prompt = &prompt{label: label, input: in, submit: submit}
 }
 
+type loggedErr struct {
+	at   time.Time
+	text string
+}
+
 func (m *model) setStatus(s string, err bool) {
 	m.status, m.statusErr, m.statusAt = s, err, time.Now()
+	if err {
+		m.errLog = append(m.errLog, loggedErr{m.statusAt, s})
+		if len(m.errLog) > 50 {
+			m.errLog = m.errLog[1:]
+		}
+	}
+}
+
+func (m *model) errorsView(h int) string {
+	w := min(m.w-6, 140)
+	var b strings.Builder
+	for i := len(m.errLog) - 1; i >= 0; i-- {
+		e := m.errLog[i]
+		b.WriteString(sDim.Render(e.at.Format("15:04:05")) + "\n" + sRed.Render(wordWrap(e.text, w-4)) + "\n\n")
+	}
+	if len(m.errLog) == 0 {
+		b.WriteString(sGreen.Render("no errors this session") + "\n\n")
+	}
+	b.WriteString(sDim.Render("y copies them all · any other key closes"))
+	body := clip(b.String(), w, max(3, h-6))
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cRed).Padding(1, 2).
+		Render(sTitle.Render("errors (newest first)") + "\n\n" + body)
+}
+
+// errorPanel shows an error that does not fit the status line wrapped in a box above the footer.
+func (m *model) errorPanel() string {
+	const most = 8
+	lines := strings.Split(wordWrap(m.status, m.w-4), "\n")
+	if len(lines) > most {
+		lines = append(lines[:most-1], sDim.Render(fmt.Sprintf("… %d more lines: ! shows the whole error", len(lines)-most+1)))
+	}
+	for i, l := range lines {
+		lines[i] = sRed.Render(l)
+	}
+	return panel("error · ! all errors", strings.Join(lines, "\n"), m.w, len(lines)+2, false)
 }
 
 func (m *model) fetchServices() tea.Cmd {
@@ -701,7 +750,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.onWatch(msg)
 	case envMsg:
 		if msg.err != nil {
-			m.setStatus("switch environment: "+msg.err.Error(), true)
+			text := "switch environment: " + msg.err.Error()
+			if kubeAccess(msg.err.Error()) {
+				m.kubeEnv = cmp.Or(msg.name, m.app.Env.Name)
+				text += " · ctrl+k fetches the kubeconfig"
+			}
+			m.setStatus(text, true)
 			return m, nil
 		}
 		if m.watch != nil {
@@ -791,7 +845,7 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	if m.confirm != nil || m.prompt != nil {
 		return nil
 	}
-	if c := m.chat; c != nil && c.open && m.picker == nil && !m.help && !m.showAlerts && e.Action == tea.MouseActionPress {
+	if c := m.chat; c != nil && c.open && m.picker == nil && !m.help && !m.showAlerts && !m.showErrors && e.Action == tea.MouseActionPress {
 		z, ok := m.zoneAt(e.X, e.Y)
 		inChat := ok && z.id == "chat"
 		switch {
@@ -815,7 +869,7 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		if e.Button == tea.MouseButtonWheelRight {
 			key = tea.KeyMsg{Type: tea.KeyRight}
 		}
-		if m.picker == nil && !m.help && !m.showAlerts {
+		if m.picker == nil && !m.help && !m.showAlerts && !m.showErrors {
 			return m.tabs[m.active].update(m, key)
 		}
 		return nil
@@ -839,7 +893,7 @@ func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 		if m.picker != nil {
 			return m.picker.key(m, key)
 		}
-		if wh, ok := m.tabs[m.active].(wheeler); ok && !m.help && !m.showAlerts {
+		if wh, ok := m.tabs[m.active].(wheeler); ok && !m.help && !m.showAlerts && !m.showErrors {
 			if z, ok := m.zoneAt(e.X, e.Y); ok {
 				z.mod = e.Ctrl || e.Alt || e.Shift
 				if cmd, done := wh.wheel(m, z, up); done {
@@ -1069,7 +1123,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		if m.prompt != nil && m.prompt.escape != nil {
 			esc = m.prompt.escape()
 		}
-		m.confirm, m.prompt, m.picker, m.envInfo, m.help, m.showAlerts = nil, nil, nil, nil, false, false
+		m.confirm, m.prompt, m.picker, m.envInfo, m.help, m.showAlerts, m.showErrors = nil, nil, nil, nil, false, false, false
 		if m.chat != nil {
 			m.chat.focus = false
 		}
@@ -1189,6 +1243,20 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		m.showAlerts = false
 		return nil
 	}
+	if m.showErrors {
+		m.showErrors = false
+		if k.String() == "y" {
+			var all []string
+			for _, e := range m.errLog {
+				all = append(all, e.at.Format("15:04:05")+" "+e.text)
+			}
+			copyText(strings.Join(all, "\n"))
+			m.setStatus("copied the errors", false)
+		} else if m.statusErr {
+			m.status = ""
+		}
+		return nil
+	}
 	if c := m.chat; c != nil && c.open && c.focus {
 		return m.chatKey(k)
 	}
@@ -1218,8 +1286,13 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "A":
 			m.showAlerts = true
 			return nil
+		case "!":
+			m.showErrors = true
+			return nil
 		case "ctrl+e":
 			return m.fetchEnvInfo()
+		case "ctrl+k":
+			return m.fetchKubeconfig(cmp.Or(m.kubeEnv, m.app.Env.Name))
 		case "ctrl+w":
 			return m.toggleWatch()
 		case "E":
@@ -1552,9 +1625,72 @@ func (m *model) pickEnv() {
 		m.setStatus("opening "+name+"…", false)
 		return func() tea.Msg {
 			a, err := engine.Open(file, name)
-			return envMsg{app: a, err: err}
+			return envMsg{app: a, err: err, name: name}
 		}
 	})
+}
+
+// kubeAccess is whether an error says the kubeconfig lacks the cluster or no longer gets in.
+func kubeAccess(err string) bool {
+	for _, s := range []string{"kubeconfig", "kubectl context", "Unauthorized", "must be logged in", "provide credentials", "x509:"} {
+		if strings.Contains(err, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchKubeconfig asks for what gets the kubeconfig of env (a Rancher API key, a URL or a file),
+// merges it into the user's, and opens env again.
+func (m *model) fetchKubeconfig(env string) tea.Cmd {
+	file := m.app.Spec.File
+	_, ctxName, server, err := engine.KubeTarget(file, env)
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
+	label := "kubeconfig of " + env + ": its URL or file"
+	rancher := kubectx.IsRancher(server)
+	if rancher {
+		label = "Rancher API key for " + env + " (avatar › Account & API Keys), or a kubeconfig URL/file"
+	}
+	m.ask(label, "", func(v string) tea.Cmd {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return nil
+		}
+		source, token := v, ""
+		if rancher && !strings.Contains(v, "/") {
+			source, token = "", v
+		}
+		if strings.HasPrefix(source, "~/") {
+			home, _ := os.UserHomeDir()
+			source = filepath.Join(home, source[2:])
+		}
+		m.setStatus("fetching the kubeconfig of "+env+"…", false)
+		ctx := m.ctx
+		return func() tea.Msg {
+			raw, err := kubectx.Fetch(ctx, source, server, token, false)
+			if err != nil {
+				if strings.Contains(err.Error(), "x509:") {
+					err = fmt.Errorf("%w (a self-signed server: rig -e %s kubeconfig --insecure in a terminal)", err, env)
+				}
+				return envMsg{err: fmt.Errorf("fetch kubeconfig: %w", err), name: env}
+			}
+			if _, _, err := kubectx.Merge(raw); err != nil {
+				return envMsg{err: fmt.Errorf("merge kubeconfig: %w", err), name: env}
+			}
+			if _, err := kubectx.Resolve(ctxName, server); err != nil {
+				return envMsg{err: fmt.Errorf("merged the kubeconfig, but: %w", err), name: env}
+			}
+			a, err := engine.Open(file, env)
+			return envMsg{app: a, err: err, name: env}
+		}
+	})
+	if rancher {
+		m.prompt.input.EchoMode = textinput.EchoPassword
+	}
+	return nil
 }
 
 func (m *model) View() string {
@@ -1576,6 +1712,8 @@ func (m *model) View() string {
 		body = m.overlay(m.helpView(bodyH), bodyH)
 	case m.showAlerts:
 		body = m.overlay(m.alertsView(), bodyH)
+	case m.showErrors:
+		body = m.overlay(m.errorsView(bodyH), bodyH)
 	case m.envInfo != nil:
 		body = m.overlay(m.envInfo.view(bodyH), bodyH)
 	case m.prompt != nil && m.prompt.popup:
@@ -1750,6 +1888,9 @@ func (m *model) footer() string {
 		if m.statusErr {
 			st = sRed
 		}
+		if m.statusErr && (strings.Contains(m.status, "\n") || lipgloss.Width(m.status) > m.w-2) {
+			return m.errorPanel() + "\n" + clip(line, m.w, m.h/2)
+		}
 		status = " " + st.Render(truncate(m.status, m.w-2))
 	}
 	return clip(line, m.w, m.h/2) + "\n" + status
@@ -1783,6 +1924,9 @@ func (m *model) promptView() string {
 	text := p.input.Value()
 	if text == "" {
 		text = p.template
+	}
+	if p.input.EchoMode == textinput.EchoPassword {
+		text = strings.Repeat("•", len([]rune(text)))
 	}
 	above := ""
 	if p.described != "" && p.describedFor == p.input.Value() {
@@ -1831,8 +1975,8 @@ var screenHelp = map[string]string{
 func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
-		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ ctrl+⇧↑↓", "sort column, order (or click a header)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
+		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "errors of this session in full (y copies)"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

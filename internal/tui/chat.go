@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -221,7 +222,7 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		c.input.SetValue("")
-		if f := strings.Fields(v); f[0] == "@why" || f[0] == "/why" {
+		if f := strings.Fields(v); f[0] == "/why" {
 			return m.chatWhy(f[1:])
 		}
 		if strings.HasPrefix(v, "/") {
@@ -281,12 +282,14 @@ func (m *model) chatCommand(v string) tea.Cmd {
 			}
 			return nil
 		})
+	case "/connect":
+		m.pickConnect()
 	case "/autocomplete":
 		m.toggleAutocomplete()
 	case "/redact":
 		m.toggleRedact()
 	default:
-		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off, /redact the masking of secrets in what the model sees · @why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /connect uses your installed opencode or Claude Code as set up · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off, /redact the masking of secrets in what the model sees · /why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
 	}
 	return nil
 }
@@ -361,6 +364,35 @@ func (m *model) setAI(key, value string) {
 	m.setStatus("AI "+key+": "+shown, false)
 }
 
+// pickConnect offers the installed backends; the picked one runs with its own login and config.
+func (m *model) pickConnect() {
+	found := ai.Detect()
+	if len(found) == 0 {
+		m.setStatus("neither opencode nor claude is installed: https://opencode.ai, https://claude.com/claude-code", true)
+		return
+	}
+	var names, desc []string
+	for _, f := range found {
+		names, desc = append(names, f.Backend), append(desc, f.Describe())
+	}
+	m.pick("connect the AI to", names, desc, 0, false, func(l []string) tea.Cmd {
+		if len(l) == 0 {
+			return nil
+		}
+		if err := ai.Connect(found[slices.Index(names, l[0])]); err != nil {
+			m.setStatus(err.Error(), true)
+			return nil
+		}
+		m.ai = nil
+		if c := m.chat; c != nil {
+			if c.runner, c.err = m.aiRunner(), ""; c.runner != nil {
+				m.setStatus("AI: "+c.runner.Setup.Describe(), !c.enabled())
+			}
+		}
+		return nil
+	})
+}
+
 // pickChatSession lists this environment's conversations: enter continues one, d closes it.
 func (m *model) pickChatSession() {
 	ss, err := ai.ListSessions(m.app.AIDir())
@@ -405,7 +437,7 @@ func (m *model) pickChatSession() {
 func (m *model) chatWhy(args []string) tea.Cmd {
 	c := m.chat
 	if len(args) == 0 {
-		m.pick("@why: which service misbehaves?", engine.SortedKeys(m.app.Spec.Services), nil, 0, false, func(l []string) tea.Cmd {
+		m.pick("/why: which service misbehaves?", engine.SortedKeys(m.app.Spec.Services), nil, 0, false, func(l []string) tea.Cmd {
 			if len(l) == 0 {
 				return nil
 			}
@@ -415,13 +447,13 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 		return nil
 	}
 	if !c.enabled() || c.busy {
-		return m.chatSend("@why " + args[0])
+		return m.chatSend("/why " + args[0])
 	}
 	if c.sess == nil {
 		c.newSession(m)
 	}
 	svc := args[0]
-	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "@why " + svc, At: time.Now()})
+	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "/why " + svc, At: time.Now()})
 	c.busy, c.started, c.scroll = true, time.Now(), 0
 	ctx, cancel := context.WithCancel(m.ctx)
 	c.cancel = cancel
@@ -650,7 +682,7 @@ func (c *chat) view(m *model, x, w, h int) string {
 		}
 		add(sAmber.Render(wordWrap("AI is off: "+why, iw)))
 		add("")
-		add(sDim.Render(wordWrap("Install opencode (free models, no key) or Claude Code, or set a provider:\n  rig ai config provider=deepseek api_key=…\n  rig ai config provider=openai url=… api_key=… model=…\n  rig ai config proxy=localhost:10808\nrig ai check tests it.", iw)))
+		add(sDim.Render(wordWrap("/connect picks an installed opencode or Claude Code with its own setup. Else install one (opencode has free models, no key), or set a provider:\n  rig ai config provider=deepseek api_key=…\n  rig ai config provider=openai url=… api_key=… model=…\n  rig ai config proxy=localhost:10808\nrig ai check tests it.", iw)))
 	case len(c.msgs) == 0:
 		add(sDim.Render(wordWrap("Ask about what this screen shows, or to do anything you can do in rig. It works on "+m.app.Env.Name+" only; the project directory is its only workspace.", iw)))
 		add("")

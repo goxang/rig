@@ -26,6 +26,8 @@ func editorTextarea(in *textarea.Model) {
 	in.KeyMap.DeleteWordBackward = key.NewBinding(key.WithKeys("ctrl+h", "alt+backspace", "ctrl+w"))
 	in.KeyMap.DeleteCharacterBackward = key.NewBinding(key.WithKeys("backspace"))
 	in.KeyMap.LineStart = key.NewBinding(key.WithKeys("home"))
+	in.KeyMap.WordForward = key.NewBinding(key.WithKeys("ctrl+right", "alt+f"))
+	in.KeyMap.WordBackward = key.NewBinding(key.WithKeys("ctrl+left", "alt+b"))
 }
 
 // textSel is a selection in a one-line input: from anchor to the cursor.
@@ -144,6 +146,9 @@ func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r
 // rune shown, kept so the cursor stays in view and clicks map back to runes.
 func inputView(in textinput.Model, s textSel, w int, off *int) string {
 	val := []rune(in.Value())
+	if in.EchoMode == textinput.EchoPassword {
+		val = []rune(strings.Repeat("•", len(val)))
+	}
 	pos := min(in.Position(), len(val))
 	if len(val) == 0 && in.Placeholder != "" {
 		ph := []rune(in.Placeholder)

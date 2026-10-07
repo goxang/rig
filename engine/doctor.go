@@ -99,7 +99,7 @@ func runtimeFix(typ string) string {
 	case "kind":
 		return "start Docker, then create the cluster: rig do runtime create"
 	case "kubernetes":
-		return "check the cluster is up and your kubeconfig can reach it: kubectl --context <context> get ns"
+		return "check the cluster is up and your kubeconfig can reach it (kubectl --context <context> get ns); an expired one: rig kubeconfig"
 	}
 	return ""
 }
@@ -124,7 +124,7 @@ func (a *App) contextCheck(ctx context.Context) Check {
 	c, err := kubectx.Resolve(opt.Context, opt.Server)
 	if err != nil {
 		return Check{Name: "kube context", Status: CheckFail, Detail: firstLine(err),
-			Fix: "add the cluster's kubeconfig, or rename yours: kubectl config rename-context <yours> " + opt.Context}
+			Fix: "rig kubeconfig fetches the cluster's kubeconfig, or rename yours: kubectl config rename-context <yours> " + opt.Context}
 	}
 	return Check{Name: "kube context", Status: CheckOK, Detail: c}
 }
