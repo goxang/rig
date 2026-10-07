@@ -880,6 +880,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, batch(m.openTab(m.active), m.fetchServices())
 	case tea.KeyMsg:
+		if !m.typingText() {
+			k, ok := latinKey(msg)
+			if !ok {
+				m.setStatus("rig's keys follow the English (US) layout: switch the keyboard to English", true)
+				return m, nil
+			}
+			msg = k
+		}
 		return m, m.key(msg)
 	case tea.MouseMsg:
 		return m, m.mouse(msg)
@@ -1601,7 +1609,7 @@ func (m *model) pickTask(prefix string) {
 	if groups := taskGroups(m.app.Tasks(), names); len(groups) > 2 {
 		m.picker.groups = groups
 	}
-	m.picker.preview = func(name string) string {
+	m.picker.detail = func(name string) string {
 		return taskDetail(m.app.Tasks()[name], m.app.TaskHelp(name), m.app.Spec.SecretValues())
 	}
 }
@@ -2284,7 +2292,7 @@ var screenHelp = map[string]string{
 // unchanged from before, just no longer rendered as one fixed block.
 func (m *model) helpLines() []string {
 	rows := [][2]string{
-		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
+		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (ctrl+o there shows its steps)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
 		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
