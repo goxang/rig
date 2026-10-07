@@ -97,7 +97,10 @@ of them), `esc` goes back to the instances, then to the list. A jump to another 
 metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there; with no jump
 to walk back, `esc` goes home: the Services list, every service. An input left with `esc` keeps what was
 typed as a draft the next time it opens. `S` saves the session (and pins it): the screen, each grid's
-sort, drafts, query history and results, the activity view and the errors come back with it. The help
+sort, each screen's filters (services, KV, manifests, traces, the metrics range, tests), drafts, query
+history and results, the activity view and the errors come back with it; it saves again as you switch
+screens and when you quit. `ctrl+r` reloads `rig.yaml` in place, keeping the filters, after you or the
+assistant edited it (the status line says when the file changed). The help
 (`?`) filters as you type. A border under the mouse lights up and drags to resize the panes. Errors a
 new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
 

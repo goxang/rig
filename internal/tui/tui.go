@@ -93,7 +93,13 @@ type model struct {
 	drafts     map[string]draft
 	showErrors bool
 	// jobs are the operations started this session (act, do, tasks), shown with their output under !
-	jobsMu    sync.Mutex
+	jobsMu sync.Mutex
+	saving sync.Mutex
+	// views are the filters of each screen, carried over a reload and kept by a saved session
+	views map[string]map[string]string
+	// specAt is rig.yaml's modification time when it was read, to notice an edit
+	specAt    time.Time
+	specNoted bool
 	jobs      []*job
 	jobSel    int
 	jobScroll int
@@ -228,6 +234,8 @@ type (
 	envMsg struct {
 		app *engine.App
 		err error
+		// reload is ctrl+r opening the same environment again from the edited rig.yaml
+		reload bool
 		// name is the environment that was opened, for offering a kubeconfig when it failed on one
 		name string
 	}
@@ -373,6 +381,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
+	m.specAt = specTime(a)
 	if s != nil {
 		m.restore(s)
 	}
@@ -493,14 +502,22 @@ func (m *model) home() tea.Cmd {
 }
 
 func (m *model) openTab(i int) tea.Cmd {
+	if i != m.active {
+		m.autosave()
+	}
 	m.trail = nil
 	m.active = i
 	m.refreshed[i] = time.Now()
-	if !m.opened[i] {
-		m.opened[i] = true
-		return m.tabs[i].open(m)
+	if m.opened[i] {
+		return m.tabs[i].refresh(m)
 	}
-	return m.tabs[i].refresh(m)
+	m.opened[i] = true
+	t := m.tabs[i]
+	cmd := t.open(m)
+	if k, ok := t.(keeper); ok && m.views[t.name()] != nil {
+		cmd = batch(cmd, k.resume(m, m.views[t.name()]))
+	}
+	return cmd
 }
 
 // work is the context of the next one-off operation; ctrl+c cancels every one in flight.
@@ -771,6 +788,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case thenMsg:
 		return m, msg()
 	case tickMsg:
+		m.noticeSpecEdit()
 		cmds := []tea.Cmd{tick(), m.sched.due(m)}
 		if time.Since(m.svcAt) >= 3*time.Second {
 			cmds = append(cmds, m.fetchServices())
@@ -847,6 +865,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case watchMsg:
 		return m, m.onWatch(msg)
 	case envMsg:
+		if msg.err != nil && msg.reload {
+			m.setStatus("reload "+filepath.Base(m.app.Spec.File)+": "+msg.err.Error(), true)
+			return m, nil
+		}
 		if msg.err != nil {
 			text := "switch environment: " + msg.err.Error()
 			if kubeAccess(msg.err.Error()) {
@@ -860,17 +882,29 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.watch.cancel()
 			m.watch = nil
 		}
-		old := m.app
+		m.keepViews()
+		old, screen := m.app, m.tabs[m.active].name()
 		m.app, m.gen = msg.app, m.gen+1
 		go old.Close()
 		m.services, m.svcBusy = nil, false
 		m.opened, m.refreshed = map[int]bool{}, map[int]time.Time{}
 		m.all = allTabs()
 		m.tabs = newTabs(m.app, m.all, m.simple)
+		m.active = min(m.active, len(m.tabs)-1)
+		for i, t := range m.tabs {
+			if t.name() == screen {
+				m.active = i
+			}
+		}
 		m.sched = newScheduler(m.app)
+		m.specAt, m.specNoted = specTime(m.app), false
+		m.ai = nil
+		if msg.reload {
+			m.setStatus("reloaded "+filepath.Base(m.app.Spec.File), false)
+			return m, batch(m.openTab(m.active), m.fetchServices())
+		}
 		m.setStatus("environment "+m.app.Env.Name, false)
 		m.app.RememberEnv()
-		m.ai = nil
 		if m.chat != nil {
 			m.chat.reset()
 			if m.chat.open {
@@ -1380,6 +1414,8 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return nil
 		case "q":
 			return m.quitTwice("q", again)
+		case "ctrl+r":
+			return m.reload()
 		case "S":
 			id, err := m.saveSession()
 			if err != nil {
@@ -1853,6 +1889,34 @@ func (m *model) showNamespaces(msg namespacesMsg) tea.Cmd {
 	return nil
 }
 
+// reload reads rig.yaml again and reopens the current environment, keeping each screen's filters.
+func (m *model) reload() tea.Cmd {
+	file, env := m.app.Spec.File, m.app.Env.Name
+	m.setStatus("reloading "+filepath.Base(file)+"…", false)
+	return func() tea.Msg {
+		a, err := engine.Open(file, env)
+		return envMsg{app: a, err: err, name: env, reload: true}
+	}
+}
+
+func specTime(a *engine.App) time.Time {
+	st, err := os.Stat(a.Spec.File)
+	if err != nil {
+		return time.Time{}
+	}
+	return st.ModTime()
+}
+
+func (m *model) noticeSpecEdit() {
+	if m.specNoted || m.app.Inferred {
+		return
+	}
+	if at := specTime(m.app); !at.IsZero() && !at.Equal(m.specAt) {
+		m.specNoted = true
+		m.setStatus(filepath.Base(m.app.Spec.File)+" changed · ctrl+r reloads it", false)
+	}
+}
+
 func (m *model) pickEnv() {
 	names := m.app.Spec.EnvironmentNames()
 	var desc []string
@@ -2294,7 +2358,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (ctrl+o there shows its steps)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"ctrl+r", "reload rig.yaml after you or the assistant edited it (filters stay)"}, {"S", "save this session: rig opens on it from now on, as you leave it, filters included (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

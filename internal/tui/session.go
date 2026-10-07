@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +47,8 @@ type Session struct {
 	Drafts   map[string]draft    `json:"drafts,omitempty"`
 	Activity []savedJob          `json:"activity,omitempty"`
 	Errors   []loggedErr         `json:"errors,omitempty"`
+
+	Views map[string]map[string]string `json:"views,omitempty"`
 }
 
 // savedJob is an operation of the activity view (!) as a session keeps it: its last lines only.
@@ -93,6 +98,8 @@ func (m *model) snapshot() *Session {
 		s = &Session{ID: time.Now().Format("20060102-150405"), Created: time.Now()}
 	}
 	s.Env, s.Saved, s.Tab, s.TabName = m.app.Env.Name, time.Now(), m.active, m.tabs[m.active].name()
+	m.keepViews()
+	s.Views = m.views
 	for _, t := range m.tabs {
 		switch t := t.(type) {
 		case *logsTab:
@@ -144,18 +151,40 @@ func (m *model) snapshot() *Session {
 func (m *model) saveSession() (string, error) {
 	s := m.snapshot()
 	m.session = s
-	dir := sessionDir(m.app.Spec.Dir)
+	return s.ID, writeSession(m.app.Spec.Dir, s)
+}
+
+// autosave keeps a saved session current as the user moves between screens.
+func (m *model) autosave() {
+	if m.session == nil {
+		return
+	}
+	m.session = m.snapshot()
+	raw, err := json.Marshal(m.session)
+	if err != nil {
+		return
+	}
+	dir, id := m.app.Spec.Dir, m.session.ID
+	go func() {
+		m.saving.Lock()
+		defer m.saving.Unlock()
+		_ = os.WriteFile(filepath.Join(sessionDir(dir), id+".json"), raw, 0o644)
+	}()
+}
+
+func writeSession(projectDir string, s *Session) error {
+	dir := sessionDir(projectDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
+		return err
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, s.ID+".json"), raw, 0o644); err != nil {
-		return "", err
+		return err
 	}
-	return s.ID, os.WriteFile(pinFile(m.app.Spec.Dir), []byte(s.ID), 0o644)
+	return os.WriteFile(pinFile(projectDir), []byte(s.ID), 0o644)
 }
 
 // restore puts a saved session back into freshly opened screens.
@@ -190,7 +219,7 @@ func (m *model) restore(s *Session) {
 	for id, st := range s.Sorts {
 		gridSorts[id] = st
 	}
-	m.drafts, m.errLog = s.Drafts, s.Errors
+	m.drafts, m.errLog, m.views = s.Drafts, s.Errors, s.Views
 	m.jobsMu.Lock()
 	for _, sj := range s.Activity {
 		j := &job{label: sj.Label, start: sj.Start, end: sj.End, lines: sj.Lines}
@@ -386,4 +415,111 @@ func (p *sessionPicker) View() string {
 		b.WriteString("\n" + p.note + "\n")
 	}
 	return b.String()
+}
+
+func (m *model) keepViews() {
+	if m.views == nil {
+		m.views = map[string]map[string]string{}
+	}
+	for i, t := range m.tabs {
+		if k, ok := t.(keeper); ok && m.opened[i] {
+			m.views[t.name()] = k.keep()
+		}
+	}
+}
+
+// keeper is a screen whose filters a session keeps; resume runs right after its first open.
+type keeper interface {
+	keep() map[string]string
+	resume(m *model, v map[string]string) tea.Cmd
+}
+
+func (t *servicesTab) keep() map[string]string {
+	return map[string]string{"filter": t.filter, "section": t.section}
+}
+
+func (t *servicesTab) resume(m *model, v map[string]string) tea.Cmd {
+	t.filter = v["filter"]
+	if sec := v["section"]; sec == "other" || sec == "infra" || slices.Contains(m.app.Spec.SectionOrder, sec) {
+		t.setSection(sec)
+	}
+	return nil
+}
+
+func (t *kvTab) keep() map[string]string {
+	return map[string]string{"comp": t.comp, "prefix": t.prefix, "filter": t.filter}
+}
+
+func (t *kvTab) resume(m *model, v map[string]string) tea.Cmd {
+	t.prefix, t.filter = v["prefix"], v["filter"]
+	if v["comp"] == "" || v["comp"] == t.comp || !slices.Contains(t.comps(m), v["comp"]) {
+		return nil
+	}
+	t.comp = v["comp"]
+	return t.load(m)
+}
+
+func (t *manifestsTab) keep() map[string]string {
+	view := "cluster"
+	if !t.cluster {
+		view = "files"
+	}
+	return map[string]string{"filter": t.filter, "view": view}
+}
+
+func (t *manifestsTab) resume(m *model, v map[string]string) tea.Cmd {
+	t.filter = v["filter"]
+	if v["view"] == "files" {
+		t.cluster = false
+	}
+	return nil
+}
+
+func (t *tracesTab) keep() map[string]string {
+	return map[string]string{"service": t.service, "op": t.op, "text": t.text, "min": t.min.String(),
+		"back": strconv.Itoa(t.back), "errors": strconv.FormatBool(t.errsOnly)}
+}
+
+func (t *tracesTab) resume(m *model, v map[string]string) tea.Cmd {
+	t.service, t.op, t.text = v["service"], v["op"], v["text"]
+	t.min, _ = time.ParseDuration(v["min"])
+	if b, err := strconv.Atoi(v["back"]); err == nil && b >= 0 && b < len(lookbacks) {
+		t.back = b
+	}
+	t.errsOnly = v["errors"] == "true"
+	return t.refresh(m)
+}
+
+func (t *metricsTab) keep() map[string]string {
+	return map[string]string{"range": strconv.Itoa(t.win.rng), "every": strconv.Itoa(t.every)}
+}
+
+func (t *metricsTab) resume(m *model, v map[string]string) tea.Cmd {
+	if r, err := strconv.Atoi(v["range"]); err == nil && r >= 0 && r < len(t.win.presets) {
+		t.win.rng = r
+	}
+	if e, err := strconv.Atoi(v["every"]); err == nil && e >= 0 && e < len(refreshes) {
+		t.every = e
+	}
+	return nil
+}
+
+func (t *testsTab) keep() map[string]string {
+	v := map[string]string{"suite": strconv.Itoa(t.suite), "filter": strconv.Itoa(t.filter)}
+	if t.search != nil {
+		v["search"] = t.search.String()
+	}
+	return v
+}
+
+func (t *testsTab) resume(m *model, v map[string]string) tea.Cmd {
+	if n, err := strconv.Atoi(v["suite"]); err == nil {
+		t.suite = max(0, n)
+	}
+	t.filter, _ = strconv.Atoi(v["filter"])
+	t.search, _ = regexp.Compile(v["search"])
+	if v["search"] == "" {
+		t.search = nil
+	}
+	return t.load(m)
 }
