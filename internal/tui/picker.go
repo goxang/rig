@@ -18,9 +18,11 @@ type picker struct {
 	sel    int
 	multi  bool
 	marked map[string]bool
-	filter string
-	off    int
-	done   func(chosen []string) tea.Cmd
+	// unmarked says the user took marks away: none left then means none, not the cursor's item
+	unmarked bool
+	filter   string
+	off      int
+	done     func(chosen []string) tea.Cmd
 	// del, when set, removes the selected item for good (ctrl+d)
 	del func(item string) error
 	// zx, zy is where the last frame drew the rows, for hover
@@ -120,7 +122,7 @@ func (p *picker) finish(m *model) tea.Cmd {
 		}
 	}
 	vis := p.visible()
-	if len(chosen) == 0 && p.sel < len(vis) {
+	if len(chosen) == 0 && p.sel < len(vis) && !p.unmarked {
 		chosen = []string{p.items[vis[p.sel]]}
 	}
 	cmd := p.done(chosen)
@@ -197,6 +199,7 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 			if p.sel < len(vis) {
 				it := p.items[vis[p.sel]]
 				p.marked[it] = !p.marked[it]
+				p.unmarked = p.unmarked || !p.marked[it]
 			}
 		} else if k.String() == " " {
 			p.filter, p.sel = p.filter+" ", 0
@@ -229,6 +232,7 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 			for _, i := range vis {
 				p.marked[p.items[i]] = !all
 			}
+			p.unmarked = p.unmarked || all
 		}
 	case "backspace":
 		if r := []rune(p.filter); len(r) > 0 {

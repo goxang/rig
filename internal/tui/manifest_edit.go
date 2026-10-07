@@ -276,7 +276,7 @@ func applyObjectNow(m *model, o *manifest.Object) tea.Cmd {
 	a, ctx := m.app, core.WithConfirmed(m.ctx)
 	return func() tea.Msg {
 		a.Confirmed = true
-		defer func() { a.Confirmed = false }()
+		defer func() { a.Confirmed = m.yes }()
 		if err := ap.ApplyManifests(ctx, []*manifest.Object{o}); err != nil {
 			return statusMsg{text: "apply " + o.ID() + ": " + err.Error(), err: true}
 		}

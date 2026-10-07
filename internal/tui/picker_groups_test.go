@@ -32,3 +32,15 @@ func TestPickerGroups(t *testing.T) {
 		t.Fatal("empty view")
 	}
 }
+
+func TestPickerAllUnmarked(t *testing.T) {
+	m := &model{w: 100}
+	var got []string
+	called := false
+	m.pickMany("logs", []string{"api", "db"}, nil, []string{"api"}, func(c []string) tea.Cmd { got, called = c, true; return nil })
+	m.picker.key(m, tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m.picker.key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !called || len(got) != 0 {
+		t.Fatalf("unmarking every item then enter chose %v", got)
+	}
+}

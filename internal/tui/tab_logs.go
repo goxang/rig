@@ -110,6 +110,15 @@ func (t *logsTab) pickServices(m *model) {
 	}
 	m.pickMany("logs of which services? (space marks several)", names, desc, t.services, func(chosen []string) tea.Cmd {
 		if len(chosen) == 0 {
+			// every service unmarked: follow none
+			if t.cancel != nil {
+				t.cancel()
+			}
+			t.services, t.instances, t.err = nil, nil, ""
+			t.stream++
+			if t.log != nil {
+				t.log.reset()
+			}
 			return nil
 		}
 		t.services, t.instances = chosen, nil
