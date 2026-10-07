@@ -61,7 +61,7 @@ func (a *App) TaskNames() []string {
 }
 
 // TaskArgChoices is what a task arg offers to pick from: its choices, or the services and groups,
-// or the hosts, of this environment.
+// the git branches (WorkingTree first), or the hosts, of this environment.
 func (a *App) TaskArgChoices(ctx context.Context, arg spec.TaskArg) []string {
 	if len(arg.Choices) > 0 {
 		return arg.Choices
@@ -84,6 +84,8 @@ func (a *App) TaskArgChoices(ctx context.Context, arg spec.TaskArg) []string {
 		sort.Strings(out[1:])
 		sort.Strings(names)
 		return append(out, names...)
+	case "branches":
+		return append([]string{WorkingTree}, a.Branches(ctx)...)
 	case "hosts":
 		h, _, err := Get[core.Hosts](a, core.KindHosts, "")
 		if err != nil {
@@ -105,6 +107,13 @@ func TaskArgValues(args []spec.TaskArg, answers []string) []string {
 	var out []string
 	for i, arg := range args {
 		if i >= len(answers) || strings.TrimSpace(answers[i]) == "" {
+			continue
+		}
+		if answers[i] == WorkingTree {
+			// set, and empty, so a value the environment carries does not stand in for it
+			if arg.Env() {
+				out = append(out, arg.Name+"=")
+			}
 			continue
 		}
 		if arg.Env() {

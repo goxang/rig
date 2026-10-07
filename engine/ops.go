@@ -316,10 +316,10 @@ func (a *App) BuildFrom(ctx context.Context, s *spec.Service, tag, ref string, o
 	return a.build(ctx, s, tag, ref, true, out)
 }
 
-// BuildLocal builds s's image into the local Docker daemon (a kind cluster's nodes, when the
-// environment has no registry) without pushing it; Push sends it later.
-func (a *App) BuildLocal(ctx context.Context, s *spec.Service, tag string, out io.Writer) (string, error) {
-	return a.build(ctx, s, tag, "", false, out)
+// BuildLocal builds s's image (from a git ref when given) into the local Docker daemon (a kind
+// cluster's nodes, when the environment has no registry) without pushing it; Push sends it later.
+func (a *App) BuildLocal(ctx context.Context, s *spec.Service, tag, ref string, out io.Writer) (string, error) {
+	return a.build(ctx, s, tag, ref, false, out)
 }
 
 // Push sends s's image at tag from the local Docker daemon to the environment's registry.

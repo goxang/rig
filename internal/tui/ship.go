@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -19,27 +20,6 @@ import (
 func pickShipServices(m *model, names []string) tea.Cmd {
 	sp := m.app.Spec
 	all := sp.ServiceNames()
-	sections := sp.SectionMap()
-	groups := []pickGroup{{name: "all"}}
-	for _, n := range append(slices.Clone(sp.SectionOrder), "other", "infra") {
-		g := pickGroup{name: n, items: map[string]bool{}}
-		for _, svc := range all {
-			s := sp.Services[svc]
-			sec, ok := sections[svc]
-			switch {
-			case s.Role == spec.RoleInfra:
-				sec = "infra"
-			case !ok:
-				sec = "other"
-			}
-			if sec == n {
-				g.items[svc] = true
-			}
-		}
-		if len(g.items) > 0 {
-			groups = append(groups, g)
-		}
-	}
 	desc := make([]string, len(all))
 	for i, n := range all {
 		desc[i] = strings.Join(sp.Services[n].Groups, ",")
@@ -50,17 +30,49 @@ func pickShipServices(m *model, names []string) tea.Cmd {
 		}
 		return ship(m, chosen)
 	})
-	if len(groups) > 2 {
-		m.picker.groups = groups
-		if len(names) > 0 {
-			for i, g := range groups[1:] {
-				if g.items[names[0]] {
-					m.picker.group = i + 1
-				}
+	serviceTabs(m, names)
+	return nil
+}
+
+// serviceTabs gives the open picker of services (and groups) a tab per section of the Services
+// screen, groups in their own, opened on the tab of the first of names.
+func serviceTabs(m *model, names []string) {
+	sp, p := m.app.Spec, m.picker
+	sections := sp.SectionMap()
+	groups := []pickGroup{{name: "all"}}
+	tabOf := func(item string) string {
+		s := sp.Services[item]
+		sec, ok := sections[item]
+		switch {
+		case s == nil:
+			return "groups"
+		case s.Role == spec.RoleInfra:
+			return "infra"
+		case !ok:
+			return "other"
+		}
+		return sec
+	}
+	for _, n := range append(append([]string{"groups"}, sp.SectionOrder...), "other", "infra") {
+		g := pickGroup{name: n, items: map[string]bool{}}
+		for _, it := range p.items {
+			if tabOf(it) == n {
+				g.items[it] = true
 			}
 		}
+		if len(g.items) > 0 {
+			groups = append(groups, g)
+		}
 	}
-	return nil
+	if len(groups) <= 2 {
+		return
+	}
+	p.groups = groups
+	for i, g := range groups[1:] {
+		if len(names) > 0 && g.items[names[0]] {
+			p.group = i + 1
+		}
+	}
 }
 
 // ship asks which of build, push and deploy to run for names, the image tag, and (when deploying)
@@ -83,24 +95,61 @@ func ship(m *model, names []string) tea.Cmd {
 		if len(chosen) == 0 {
 			return nil
 		}
-		tag, hint := a.DefaultTag(m.ctx, ""), "image tag"
 		if !slices.Contains(chosen, "build") {
-			st, _ := a.LoadState(m.ctx)
-			tag, hint = st["tag"], "image tag (empty: the last built one)"
+			return askShipTag(m, names, chosen, "")
 		}
-		m.ask(label(strings.Join(chosen, "+"), names)+": "+hint, tag, func(tag string) tea.Cmd {
-			tag = strings.TrimSpace(tag)
-			if tag == "" && !slices.Equal(chosen, []string{"deploy"}) {
-				m.setStatus("building and pushing need a tag", true)
-				return nil
-			}
-			if !slices.Contains(chosen, "deploy") {
-				return runShip(m, names, chosen, tag, nil, nil)
-			}
-			plan := &shipPlan{names: names, steps: chosen, tag: tag, env: map[string]map[string]string{}}
-			return plan.env_(m, 0)
-		})
-		return nil
+		return pickBranch(m, label("build", names)+" from", func(ref string) tea.Cmd { return askShipTag(m, names, chosen, ref) })
+	})
+	return nil
+}
+
+// pickBranch asks which branch to build: the working tree, or a branch (the environment's BRANCH
+// var, when set, is preselected); ref is "" for the working tree.
+func pickBranch(m *model, title string, then func(ref string) tea.Cmd) tea.Cmd {
+	a := m.app
+	branches := a.Branches(m.ctx)
+	if len(branches) == 0 {
+		return then("")
+	}
+	items := append([]string{engine.WorkingTree}, branches...)
+	desc := make([]string, len(items))
+	desc[0] = "the checkout as it is, uncommitted changes included"
+	sel := 0
+	if b := cmp.Or(a.Env.Vars["BRANCH"], a.Spec.Vars["BRANCH"]); b != "" {
+		if i := slices.Index(items, b); i > 0 {
+			sel, desc[i] = i, "this environment's BRANCH"
+		}
+	}
+	m.pick(title+" · type to filter", items, desc, sel, false, func(c []string) tea.Cmd {
+		if len(c) == 0 {
+			return nil
+		}
+		if c[0] == engine.WorkingTree {
+			return then("")
+		}
+		return then(c[0])
+	})
+	return nil
+}
+
+func askShipTag(m *model, names, chosen []string, ref string) tea.Cmd {
+	a := m.app
+	tag, hint := a.DefaultTag(m.ctx, ref), "image tag"
+	if !slices.Contains(chosen, "build") {
+		st, _ := a.LoadState(m.ctx)
+		tag, hint = st["tag"], "image tag (empty: the last built one)"
+	}
+	m.ask(label(strings.Join(chosen, "+"), names)+": "+hint, tag, func(tag string) tea.Cmd {
+		tag = strings.TrimSpace(tag)
+		if tag == "" && !slices.Equal(chosen, []string{"deploy"}) {
+			m.setStatus("building and pushing need a tag", true)
+			return nil
+		}
+		if !slices.Contains(chosen, "deploy") {
+			return runShip(m, names, chosen, tag, ref, nil, nil)
+		}
+		plan := &shipPlan{names: names, steps: chosen, tag: tag, ref: ref, env: map[string]map[string]string{}}
+		return plan.env_(m, 0)
 	})
 	return nil
 }
@@ -158,7 +207,7 @@ func pickDeployVars(m *model, changed map[string]string, run func(map[string]str
 // that the deploy takes.
 type shipPlan struct {
 	names, steps []string
-	tag          string
+	tag, ref     string
 	env          map[string]map[string]string
 	vars         map[string]string
 }
@@ -167,7 +216,7 @@ type shipPlan struct {
 // change any before the deploy; the last service's "go on" ships.
 func (p *shipPlan) env_(m *model, i int) tea.Cmd {
 	if i >= len(p.names) {
-		return runShip(m, p.names, p.steps, p.tag, p.vars, p.env)
+		return runShip(m, p.names, p.steps, p.tag, p.ref, p.vars, p.env)
 	}
 	a, ctx, name := m.app, m.ctx, p.names[i]
 	m.setStatus("reading the env of "+name+"…", false)
@@ -272,10 +321,14 @@ func (p *shipPlan) pickEnv(m *model, i int, env map[string]string, over map[stri
 	return nil
 }
 
-func runShip(m *model, names, steps []string, tag string, vars map[string]string, env map[string]map[string]string) tea.Cmd {
+func runShip(m *model, names, steps []string, tag, ref string, vars map[string]string, env map[string]map[string]string) tea.Cmd {
 	a := m.app
 	has := func(s string) bool { return slices.Contains(steps, s) }
-	return m.act(label(strings.Join(steps, "+"), names)+tagNote(tag), true, func(ctx context.Context) error {
+	what := label(strings.Join(steps, "+"), names) + tagNote(tag)
+	if ref != "" && has("build") {
+		what += " from " + ref
+	}
+	return m.act(what, true, func(ctx context.Context) error {
 		out := jobOut(ctx)
 		if len(vars) > 0 {
 			fmt.Fprintf(out, "→ environment variables: %s\n", strings.Join(sortedKeys(vars), ", "))
@@ -310,10 +363,10 @@ func runShip(m *model, names, steps []string, tag string, vars map[string]string
 			switch {
 			case has("build") && has("push"):
 				fmt.Fprintf(out, "→ %s: build and push %s\n", n, tag)
-				img, err = a.Build(ctx, s, tag, out)
+				img, err = a.BuildFrom(ctx, s, tag, ref, out)
 			case has("build"):
 				fmt.Fprintf(out, "→ %s: build %s\n", n, tag)
-				img, err = a.BuildLocal(ctx, s, tag, out)
+				img, err = a.BuildLocal(ctx, s, tag, ref, out)
 			case has("push"):
 				fmt.Fprintf(out, "→ %s: push %s\n", n, tag)
 				err = a.Push(ctx, s, tag, out)

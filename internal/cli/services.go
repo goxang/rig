@@ -146,7 +146,7 @@ func serviceCommands() []*cobra.Command {
 					return nil
 				}
 				if noPush {
-					_, err := a.BuildLocal(ctx, a.Spec.Services[n], tag, os.Stdout)
+					_, err := a.BuildLocal(ctx, a.Spec.Services[n], tag, ref, os.Stdout)
 					return err
 				}
 				_, err := a.BuildFrom(ctx, a.Spec.Services[n], tag, ref, os.Stdout)

@@ -279,17 +279,24 @@ shows it over the step's commands in the selected task's details.
 `rig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `rig down`
 with no targets leaves it running: `rig infra up|down|restart|status` changes it.
 
+Write every task so running it twice is safe: a task is retried after a failure, run again from
+history, or started by an assistant that cannot know what already ran. Create with `IF NOT EXISTS` /
+`CREATE OR REPLACE` / `kubectl apply`, delete what may be missing without failing (`DELETE`, `rm -f`,
+`--ignore-not-found`), clear state before rebuilding it rather than adding to it, and check the
+result (poll until healthy, retry or fail loudly) instead of assuming a fixed `sleep` was enough.
+
 Each step runs with `sh -c` from the project directory and the task stops at the first failure.
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
 `rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
 Write `$$` for a shell `$`, since `${...}` is rig's own expansion. `rig task ship parser load` passes
 the words after the name as `$1...` and `$RIG_ARGS`. A `NAME=value` word sets that env var for the
-task instead: `rig task ship RIG_REF=feature-x TAG=v3` sets `$RIG_REF` and `$TAG`, overriding a
+task instead: `rig task ship BRANCH=feature-x TAG=v3` sets `$BRANCH` and `$TAG`, overriding a
 manifest var or pre-set shell env of the same name, so a task never needs one pre-exported just to
 run it with different parameters.
 
-`args:` declares a task's inputs (`name`, `help`, `default`, `choices` or `from: services|hosts`,
-`multi`): on a terminal `rig task <name>` asks for each, and `name=value` presets one by name
+`args:` declares a task's inputs (`name`, `help`, `default`, `choices` or `from: services|branches|hosts`,
+`multi`): `from: branches` offers `(working tree)` (the checkout as it is: the arg is passed empty), then
+the git branches, newest first, local before `origin/` ones; on a terminal `rig task <name>` asks for each, and `name=value` presets one by name
 (`rig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
 first step on any environment. Neither asks with `--yes` or without a terminal (agents, CI, a step
 of another task). A protected environment asks once on a terminal instead of refusing without

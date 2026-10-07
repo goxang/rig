@@ -306,7 +306,8 @@ type Task struct {
 
 // TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).
 // An UPPER_CASE name reaches the steps as that env var; a lower-case one as positional words ($1...,
-// $RIG_ARGS). Choices, or From (services: every service and group; hosts), offer a pick list.
+// $RIG_ARGS). Choices, or From (services: every service and group; branches: the git branches;
+// hosts), offer a pick list.
 type TaskArg struct {
 	Name    string   `yaml:"name"`
 	Help    string   `yaml:"help"`

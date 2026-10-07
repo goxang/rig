@@ -239,7 +239,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		Use:   "task [name [args...]]",
 		Short: "run a task from rig.yaml (its shell steps, in order), or list them",
 		Example: `  rig task ship core shaparak              # positional args: $1... and $RIG_ARGS
-  rig task ship RIG_REF=feature-x TAG=v3   # NAME=value args: set that env var instead of pre-exporting it
+  rig task ship BRANCH=feature-x TAG=v3    # NAME=value args: set that env var instead of pre-exporting it
   rig task nexus-prune keep=3 DRY_RUN=1    # name=value presets a declared arg; the rest take their defaults
   rig task ship                            # on a terminal, asks for the args the task declares
   rig -y task ship minimum                 # --yes (or no terminal, as for agents) never asks`,

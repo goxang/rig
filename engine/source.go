@@ -66,6 +66,38 @@ func (a *App) Source(ctx context.Context, ref string) (string, error) {
 	return filepath.Join(root, rel), nil
 }
 
+// WorkingTree is the branch choice that builds the checkout as it is, uncommitted changes included.
+const WorkingTree = "(working tree)"
+
+// Branches are the repository's branches, local then origin's not checked out, newest commit first.
+func (a *App) Branches(ctx context.Context) []string {
+	c := sh.New("git", "for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
+	c.Dir = a.Spec.Dir
+	out, err := c.Output(ctx)
+	if err != nil {
+		return nil
+	}
+	var local, remote []string
+	seen := map[string]bool{}
+	for _, b := range strings.Fields(string(out)) {
+		if r, ok := strings.CutPrefix(b, "origin/"); ok {
+			if r != "HEAD" {
+				remote = append(remote, b)
+			}
+			continue
+		}
+		if b != "origin" {
+			local, seen[b] = append(local, b), true
+		}
+	}
+	for _, r := range remote {
+		if !seen[strings.TrimPrefix(r, "origin/")] {
+			local = append(local, r)
+		}
+	}
+	return local
+}
+
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // imageExists reports whether the registry already has ref; unreachable registries count as "no".
