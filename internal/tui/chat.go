@@ -38,6 +38,84 @@ type chat struct {
 	err     string
 	// all is ctrl+a's select-all of the draft: the next key copies, replaces or drops it
 	all bool
+	// cmdSel is the highlighted row of the command menu that opens while a / command is typed
+	cmdSel int
+}
+
+type chatCmd struct{ name, args, help string }
+
+var chatCommands = []chatCmd{
+	{"/new", "", "start a new conversation"},
+	{"/sessions", "", "pick a conversation (ctrl+d closes one there)"},
+	{"/close", "", "forget this conversation"},
+	{"/stop", "", "stop the running turn (ctrl+x)"},
+	{"/why", "<service>", "gather an incident's evidence, ask for its root cause"},
+	{"/connect", "", "use your installed opencode or Claude Code"},
+	{"/model", "", "the chat's model"},
+	{"/effort", "", "the chat's reasoning level"},
+	{"/fast", "", "the model of completions while typing"},
+	{"/autocomplete", "", "suggestions while typing: on or off"},
+	{"/redact", "", "masking of secrets in what the model sees: on or off"},
+	{"/help", "", "these commands"},
+}
+
+// cmdMenu is what the command menu offers for draft v: the commands starting with what is typed,
+// then those containing it; nothing once v is more than one word or no command.
+func cmdMenu(v string) []chatCmd {
+	if !strings.HasPrefix(v, "/") || strings.ContainsAny(v, " \n") {
+		return nil
+	}
+	var pre, in []chatCmd
+	for _, c := range chatCommands {
+		switch {
+		case strings.HasPrefix(c.name, v):
+			pre = append(pre, c)
+		case strings.Contains(c.name, v[1:]):
+			in = append(in, c)
+		}
+	}
+	return append(pre, in...)
+}
+
+// nearestCommand is the command closest to a mistyped one, by edit distance, if any is close.
+func nearestCommand(v string) string {
+	best, dist := "", 3
+	for _, c := range chatCommands {
+		if d := editDistance(v, c.name); d < dist {
+			best, dist = c.name, d
+		}
+	}
+	return best
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
+func commandsHelp() string {
+	var b strings.Builder
+	b.WriteString("Commands (type / for the menu):\n")
+	for _, c := range chatCommands {
+		b.WriteString("- " + strings.TrimSpace(c.name+" "+c.args) + " — " + c.help + "\n")
+	}
+	b.WriteString("\nAnything else goes to the assistant with what this screen shows. esc hides the chat, @ brings it back.")
+	return b.String()
 }
 
 type (
@@ -175,6 +253,34 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 			c.input.SetValue("")
 		}
 	}
+	if menu := cmdMenu(c.input.Value()); len(menu) > 0 {
+		c.cmdSel = min(c.cmdSel, len(menu)-1)
+		pick := menu[c.cmdSel]
+		switch k.String() {
+		case "up":
+			c.cmdSel = (c.cmdSel + len(menu) - 1) % len(menu)
+			return nil
+		case "down":
+			c.cmdSel = (c.cmdSel + 1) % len(menu)
+			return nil
+		case "tab":
+			c.input.SetValue(pick.name + map[bool]string{true: " ", false: ""}[pick.args != ""])
+			c.input.CursorEnd()
+			return nil
+		case "enter":
+			if v := c.input.Value(); v != pick.name && pick.args != "" {
+				c.input.SetValue(pick.name + " ")
+				c.input.CursorEnd()
+				return nil
+			}
+			c.input.SetValue(pick.name)
+		case "esc":
+			c.input.SetValue("")
+			return nil
+		}
+	} else {
+		c.cmdSel = 0
+	}
 	switch k.String() {
 	case "@":
 		if c.input.Value() != "" {
@@ -288,8 +394,14 @@ func (m *model) chatCommand(v string) tea.Cmd {
 		m.toggleAutocomplete()
 	case "/redact":
 		m.toggleRedact()
+	case "/help", "/?":
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: commandsHelp()})
 	default:
-		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /connect uses your installed opencode or Claude Code as set up · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off, /redact the masking of secrets in what the model sees · /why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
+		text := "Unknown command " + strings.Fields(v)[0] + "."
+		if near := nearestCommand(strings.Fields(v)[0]); near != "" {
+			text += " Did you mean " + near + "?"
+		}
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: text + " Type / for the menu, /help for the list."})
 	}
 	return nil
 }
@@ -709,13 +821,33 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sDim.Render(wordWrap("  → "+t, iw)))
 		}
 	}
-	status := sDim.Render("enter send · alt+enter newline · tab ideas · /model /effort /sessions /new · esc hide")
+	status := sDim.Render("enter send · alt+enter newline · tab ideas · / commands · esc hide")
 	if c.busy {
 		status = sAmber.Render(fmt.Sprintf("⟳ working %s", time.Since(c.started).Round(time.Second))) + sDim.Render(" · ctrl+x stops")
 	} else if m.confirm != nil {
 		status = sAmber.Render("↓ answer the question below")
 	}
-	room := max(1, h-4-(chatInputHeight-1))
+	var menuLines []string
+	if menu := cmdMenu(c.input.Value()); len(menu) > 0 && c.focus {
+		c.cmdSel = min(c.cmdSel, len(menu)-1)
+		from := max(0, c.cmdSel-5)
+		for i := from; i < len(menu) && i < from+6; i++ {
+			cm := menu[i]
+			name := cm.name
+			if cm.args != "" {
+				name += " " + cm.args
+			}
+			row := fmt.Sprintf(" %-22s %s", name, cm.help)
+			if i == c.cmdSel {
+				row = sCursor.Render(truncate(row, iw) + strings.Repeat(" ", max(0, iw-lipgloss.Width(row))))
+			} else {
+				row = sAccent.Render(fmt.Sprintf(" %-22s", name)) + " " + sDim.Render(truncate(cm.help, max(0, iw-24)))
+			}
+			menuLines = append(menuLines, row)
+		}
+		menuLines = append(menuLines, sDim.Render(" ↑↓ pick · tab completes · enter runs"))
+	}
+	room := max(1, h-4-(chatInputHeight-1)-len(menuLines))
 	c.scroll = min(c.scroll, max(0, len(lines)-room))
 	end := len(lines) - c.scroll
 	start := max(0, end-room)
@@ -730,6 +862,9 @@ func (c *chat) view(m *model, x, w, h int) string {
 	if c.all {
 		input = sSel.Render(ansi.Wrap(c.input.Value(), iw-3, " "))
 		input += strings.Repeat("\n", max(0, chatInputHeight-1-strings.Count(input, "\n")))
+	}
+	if len(menuLines) > 0 {
+		body += "\n" + strings.Join(menuLines, "\n")
 	}
 	body += "\n" + input + "\n" + status
 	return panel(title, body, w, h, c.focus)

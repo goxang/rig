@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -87,6 +88,12 @@ type model struct {
 	// errLog keeps the last errors, newest last; ! shows them in full
 	errLog     []loggedErr
 	showErrors bool
+	// jobs are the operations started this session (act, do, tasks), shown with their output under !
+	jobsMu    sync.Mutex
+	jobs      []*job
+	jobSel    int
+	jobScroll int
+	actErrors bool
 	// kubeEnv is the environment that last failed on its kubeconfig: ctrl+k fetches one for it
 	kubeEnv string
 	busy    int
@@ -413,6 +420,9 @@ func batch(cmds ...tea.Cmd) tea.Cmd {
 // screen but not the mouse, so Update turns it on again.
 type execDoneMsg struct{ msg tea.Msg }
 
+// thenMsg carries what to do on the UI loop once work done off it (a read, say) is back.
+type thenMsg func() tea.Cmd
+
 func execProcess(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
 	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{fn(err)} })
 }
@@ -473,7 +483,10 @@ func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 	m.setStatus(label+"…", false)
 	ctx := m.work()
 	return func() tea.Msg {
-		if err := f(ctx); err != nil {
+		ctx, j := m.startJob(ctx, label)
+		err := f(ctx)
+		j.finish(err)
+		if err != nil {
 			return failed(label, err)
 		}
 		return statusMsg{text: label + " ✓"}
@@ -498,7 +511,10 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 	run := func() tea.Msg {
 		a.Confirmed = true
 		defer func() { a.Confirmed = false }()
-		if err := f(ctx); err != nil {
+		ctx, j := m.startJob(ctx, label)
+		err := f(ctx)
+		j.finish(err)
+		if err != nil {
 			return failed(label, err)
 		}
 		return statusMsg{text: label + " ✓"}
@@ -674,6 +690,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, inner
 		}
 		return m, batch(tea.EnableMouseAllMotion, inner)
+	case thenMsg:
+		return m, msg()
 	case tickMsg:
 		cmds := []tea.Cmd{tick(), m.sched.due(m)}
 		if time.Since(m.svcAt) >= 3*time.Second {
@@ -1247,18 +1265,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if m.showErrors {
-		m.showErrors = false
-		if k.String() == "y" {
-			var all []string
-			for _, e := range m.errLog {
-				all = append(all, e.at.Format("15:04:05")+" "+e.text)
-			}
-			copyText(strings.Join(all, "\n"))
-			m.setStatus("copied the errors", false)
-		} else if m.statusErr {
-			m.status = ""
-		}
-		return nil
+		return m.activityKey(k)
 	}
 	if c := m.chat; c != nil && c.open && c.focus {
 		return m.chatKey(k)
@@ -1290,7 +1297,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.showAlerts = true
 			return nil
 		case "!":
-			m.showErrors = true
+			m.showErrors, m.jobSel, m.jobScroll, m.actErrors = true, 0, 0, false
 			return nil
 		case "ctrl+e":
 			return m.fetchEnvInfo()
@@ -1495,34 +1502,40 @@ func (m *model) askTaskArgs(name string, args []spec.TaskArg, answers []string) 
 
 // runTask confirms, then runs rig task in the terminal; ctrl+c stops the task, not the shell
 // that waits for enter after it.
+// runTask runs a task in the background, its output under ! as it goes and the outcome in the footer.
 func (m *model) runTask(name string, args []string) {
+	what := name
+	if len(args) > 0 {
+		what += " " + strings.Join(args, " ")
+	}
+	label := "task " + what
+	file, env, base := m.app.Spec.File, m.app.Env.Name, m.work()
 	run := func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
 			return statusMsg{text: err.Error(), err: true}
 		}
-		script := `trap 'echo; echo "✖ stopped"' INT; "$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
-		cmd := exec.Command("sh", append([]string{"-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name}, args...)...)
-		errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d.err", os.Getpid()))
-		_ = os.Remove(errFile)
-		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile)
-		return execProcess(cmd, func(err error) tea.Msg {
-			if err != nil {
-				text := "task " + name + " failed"
-				if raw, rerr := os.ReadFile(errFile); rerr == nil {
-					text = strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n ", " ·")
-				}
-				_ = os.Remove(errFile)
-				return statusMsg{text: text, err: true}
+		ctx, j := m.startJob(base, label)
+		cmd := exec.CommandContext(ctx, self, append([]string{"-f", file, "-e", env, "--yes", "task", name}, args...)...)
+		errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d-%d.err", os.Getpid(), time.Now().UnixNano()))
+		defer os.Remove(errFile)
+		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile, "NO_COLOR=1")
+		cmd.Stdout, cmd.Stderr = j, j
+		err = cmd.Run()
+		j.finish(err)
+		if err != nil {
+			text := label + " failed"
+			if raw, rerr := os.ReadFile(errFile); rerr == nil {
+				text = strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n ", " ·")
 			}
-			return statusMsg{text: "task " + name + " ✓"}
-		})()
+			if ctx.Err() != nil {
+				return statusMsg{text: label + ": stopped"}
+			}
+			return statusMsg{text: text + " · ! shows its output", err: true}
+		}
+		return statusMsg{text: label + " ✓"}
 	}
-	what := name
-	if len(args) > 0 {
-		what += " " + strings.Join(args, " ")
-	}
-	m.confirm = &confirm{text: "run task " + what + " on " + m.app.Env.Name + "?", run: run}
+	m.confirm = &confirm{text: "run " + label + " on " + m.app.Env.Name + "?", run: run}
 }
 
 type namespacesMsg struct {
@@ -1716,7 +1729,7 @@ func (m *model) View() string {
 	case m.showAlerts:
 		body = m.overlay(m.alertsView(), bodyH)
 	case m.showErrors:
-		body = m.overlay(m.errorsView(bodyH), bodyH)
+		body = m.overlay(m.activityView(bodyH), bodyH)
 	case m.envInfo != nil:
 		body = m.overlay(m.envInfo.view(bodyH), bodyH)
 	case m.prompt != nil && m.prompt.popup:
@@ -1835,55 +1848,26 @@ func (m *model) tabBar() string {
 	return bar + sBand.Render(strings.Repeat(" ", max(0, m.w-lipgloss.Width(bar))))
 }
 
+func keyHints(hs [][2]string) string {
+	var out []string
+	for _, h := range hs {
+		if h[1] == "" {
+			out = append(out, sDim.Render(h[0]))
+			continue
+		}
+		out = append(out, sKey.Render(h[0])+" "+sDim.Render(h[1]))
+	}
+	return " " + strings.Join(out, "  ")
+}
+
+// footer is, bottom up: the status line, the keys of what has the focus, the box of a question or
+// an input when one is open (apart from the keys, so it never reads as one of them), an error that
+// does not fit the status line, and the operation running in the background.
 func (m *model) footer() string {
-	var line string
-	switch {
-	case m.confirm != nil:
-		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3, m.h-2)
-		if m.confirm.always != nil {
-			line += sDim.Render("  a: always, this session")
-		}
-	case m.prompt != nil && m.prompt.popup:
-		var hs []string
-		for _, h := range [][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a shift+←→", "select"}, {"ctrl+c ctrl+x ctrl+v", "copy cut paste"}, {"ctrl+⌫", "word"}, {"tab", "take the AI's / the template"}} {
-			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
-		}
-		line = " " + strings.Join(hs, "  ")
-	case m.prompt != nil:
-		line = m.promptView()
-	case m.picker != nil:
-		line = " " + m.picker.hints()
-	case m.chat != nil && m.chat.open && m.chat.focus:
-		var hs []string
-		for _, h := range [][2]string{{"enter", "send"}, {"tab", "ideas"}, {"↑↓ wheel", "scroll"}, {"ctrl+x", "stop"}, {"/sessions /new /close", ""}, {"esc", "hide"}, {"click left", "back to the screen"}} {
-			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
-		}
-		line = " " + strings.Join(hs, "  ")
-	default:
-		// the first few keys of the screen only: ? lists them all, so the footer stays readable
-		var hs []string
-		n := footerHints
-		if m.simple {
-			n = 3
-		}
-		for i, h := range m.tabs[m.active].hints() {
-			if i == n {
-				break
-			}
-			hs = append(hs, sKey.Render(h[0])+" "+sDim.Render(h[1]))
-		}
-		hs = append(hs, sKey.Render("?")+" "+sDim.Render("all keys"), sKey.Render("@")+" "+sDim.Render("AI"))
-		if m.simple {
-			hs = append(hs, sKey.Render("V")+" "+sDim.Render("detailed view"))
-		} else {
-			hs = append(hs, sKey.Render("E")+" "+sDim.Render("env"))
-			if m.app.Namespace() != "" && !m.app.Env.Protected {
-				hs = append(hs, sKey.Render("N")+" "+sDim.Render("namespace"))
-			}
-			hs = append(hs, sKey.Render("T")+" "+sDim.Render("tasks"))
-		}
-		hs = append(hs, sKey.Render("q q")+" "+sDim.Render("quit"))
-		line = " " + strings.Join(hs, "  ")
+	box, keys := m.interaction()
+	var parts []string
+	if jl := m.jobLine(); jl != "" {
+		parts = append(parts, clip(jl, m.w, 1))
 	}
 	status := ""
 	if m.status != "" && time.Since(m.statusAt) < 30*time.Second {
@@ -1892,68 +1876,157 @@ func (m *model) footer() string {
 			st = sRed
 		}
 		if m.statusErr && (strings.Contains(m.status, "\n") || lipgloss.Width(m.status) > m.w-2) {
-			return m.errorPanel() + "\n" + clip(line, m.w, m.h/2)
+			parts = append(parts, m.errorPanel())
+		} else {
+			status = " " + st.Render(truncate(m.status, m.w-2))
 		}
-		status = " " + st.Render(truncate(m.status, m.w-2))
 	}
-	return clip(line, m.w, m.h/2) + "\n" + status
+	if box != "" {
+		parts = append(parts, box)
+	}
+	parts = append(parts, clip(keys, m.w, 2), status)
+	return strings.Join(parts, "\n")
 }
 
-// promptView is the footer's input: one line while it fits, else the label above a full-width input
-// with the whole text wrapped over it, so a long query stays readable while the cursor scrolls.
-func (m *model) promptView() string {
-	p := m.prompt
-	label := p.label
+// interaction is the open question's box (empty when none) and the keys line under it.
+func (m *model) interaction() (box, keys string) {
 	switch {
-	case p.waiting:
-		label += sDim.Render(" ⋯ai")
-	case p.hint != "" && p.input.ShowSuggestions && len(p.input.MatchedSuggestions()) > 0:
-		label += sDim.Render(" (tab accepts)")
-	case p.input.Value() == "" && p.template != "":
-		label += sDim.Render(" (tab fills, enter runs)")
+	case m.confirm != nil:
+		hs := [][2]string{{"enter", "confirm"}, {"any other key", "cancel"}}
+		if m.confirm.always != nil {
+			hs = append(hs[:1], [2]string{"a", "yes, and always this session"}, hs[1])
+		}
+		return m.confirmBox(), keyHints(hs)
+	case m.prompt != nil && m.prompt.popup:
+		return "", keyHints([][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a shift+←→", "select"}, {"ctrl+c ctrl+x ctrl+v", "copy cut paste"}, {"ctrl+⌫", "word"}, {"tab", "take the AI's / the template"}})
+	case m.prompt != nil:
+		return m.promptBox(), m.promptKeys()
+	case m.picker != nil:
+		return "", " " + m.picker.hints()
+	case m.chat != nil && m.chat.open && m.chat.focus:
+		return "", keyHints([][2]string{{"enter", "send"}, {"/", "commands"}, {"tab", "ideas, completes a command"}, {"↑↓ wheel", "scroll"}, {"ctrl+x", "stop"}, {"esc", "hide"}, {"click left", "back to the screen"}})
 	}
+	// the first few keys of the screen only: ? lists them all, so the footer stays readable
+	n := footerHints
+	if m.simple {
+		n = 3
+	}
+	hs := m.tabs[m.active].hints()
+	hs = append(hs[:min(n, len(hs)):min(n, len(hs))], [2]string{"?", "all keys"}, [2]string{"@", "AI"})
+	if m.simple {
+		hs = append(hs, [2]string{"V", "detailed view"})
+	} else {
+		hs = append(hs, [2]string{"E", "env"})
+		if m.app.Namespace() != "" && !m.app.Env.Protected {
+			hs = append(hs, [2]string{"N", "namespace"})
+		}
+		hs = append(hs, [2]string{"T", "tasks"})
+	}
+	if len(m.jobList()) > 0 || len(m.errLog) > 0 {
+		hs = append(hs, [2]string{"!", "activity"})
+	}
+	return "", keyHints(append(hs, [2]string{"q q", "quit"}))
+}
+
+// boxed draws a full-width box with title in its top border, border in color, rows inside.
+func boxed(title string, rows []string, w int, color lipgloss.TerminalColor) string {
+	bc := lipgloss.NewStyle().Foreground(color)
+	t := " " + title + " "
+	if lipgloss.Width(t) > w-4 {
+		t = truncate(t, w-4)
+	}
+	out := []string{bc.Render("╭─") + lipgloss.NewStyle().Foreground(color).Bold(true).Render(t) + bc.Render(strings.Repeat("─", max(0, w-3-lipgloss.Width(t)))+"╮")}
+	for _, r := range rows {
+		r = truncate(r, w-4)
+		out = append(out, bc.Render("│ ")+r+strings.Repeat(" ", max(0, w-4-lipgloss.Width(r)))+bc.Render(" │"))
+	}
+	out = append(out, bc.Render("╰"+strings.Repeat("─", max(0, w-2))+"╯"))
+	return strings.Join(out, "\n")
+}
+
+// the box's last row sits 4 lines from the bottom: its border, the keys and the status line are under it
+func (m *model) boxRowY() int { return m.h - 4 }
+
+func (m *model) confirmBox() string {
+	c := m.confirm
+	color, title := lipgloss.TerminalColor(cAmber), "confirm"
+	if m.app.Env.Protected {
+		color, title = cRed, "confirm · PROTECTED environment "+m.app.Env.Name
+	}
+	const yes, no = "confirm (enter)", "cancel (esc)"
+	bw := lipgloss.Width(sTabOn.Render(yes)) + 1 + lipgloss.Width(sTabOff.Render(no))
+	room := m.w - 4 - bw - 2
+	lines := strings.Split(wordWrap(c.text, room), "\n")
+	rows := make([]string, len(lines))
+	for i, l := range lines {
+		rows[i] = sTitle.Render(l)
+	}
+	last := rows[len(rows)-1]
+	rows[len(rows)-1] = last + strings.Repeat(" ", max(0, room-lipgloss.Width(last))) + "  " + m.buttons(yes, no, 2+room+2, m.boxRowY())
+	return boxed(title, rows, m.w, color)
+}
+
+func (m *model) promptKeys() string {
+	p := m.prompt
+	hs := [][2]string{{"enter", "ok"}, {"esc", "cancel"}}
+	switch {
+	case p.described != "" && p.describedFor == p.input.Value():
+		hs = append(hs, [2]string{"tab", "take the AI's"})
+	case p.input.Value() == "" && p.template != "":
+		hs = append(hs, [2]string{"tab", "fill in the template"})
+	case p.hint != "" && p.input.ShowSuggestions && len(p.input.MatchedSuggestions()) > 0:
+		hs = append(hs, [2]string{"tab", "take the suggestion"})
+	}
+	hs = append(hs, [2]string{"ctrl+a ⇧←→", "select"}, [2]string{"ctrl+c/x/v", "copy cut paste"}, [2]string{"ctrl+⌫", "word"})
 	if p.hint != "" && m.ai != nil {
-		state := "ai off · ctrl+t"
+		state := "AI completion: off"
 		if m.ai.Setup.AutocompleteOn() {
-			state = "ai on · ctrl+t"
+			state = "AI completion: on"
 			if p.took > 0 {
-				state = fmt.Sprintf("ai on %.1fs · ctrl+t", p.took.Seconds())
+				state = fmt.Sprintf("AI completion: on, %.1fs", p.took.Seconds())
 			}
 		}
-		label += sDim.Render("  " + state)
+		hs = append(hs, [2]string{"ctrl+t", state})
 	}
-	head := sAccent.Render(" " + label + ": ")
-	const buttonsW = 28
-	text := p.input.Value()
-	if text == "" {
-		text = p.template
+	return keyHints(hs)
+}
+
+// promptBox is an input in its own box above the keys: the label as its title, the text wrapped
+// over it once it outgrows the line, so a long query stays readable while the cursor scrolls.
+func (m *model) promptBox() string {
+	p := m.prompt
+	title := p.label
+	if p.waiting {
+		title += " · the AI is writing…"
 	}
-	if p.input.EchoMode == textinput.EchoPassword {
-		text = strings.Repeat("•", len([]rune(text)))
-	}
-	above := ""
+	const yes, no = "ok (enter)", "cancel (esc)"
+	bw := lipgloss.Width(sTabOn.Render(yes)) + 1 + lipgloss.Width(sTabOff.Render(no))
+	room := max(10, m.w-4-2-bw-2)
+	var rows []string
 	if p.described != "" && p.describedFor == p.input.Value() {
-		above = panel("✦ ai suggests", sTitle.Render(p.described)+sDim.Render("   tab takes it, enter runs it"), m.w, 4, false) + "\n"
-	} else if _, _, ok := describing(p.input.Value()); ok && p.hint != "" && !p.waiting {
-		above = sDim.Render(" ✦ describe what you want after "+aiTrigger+" — the AI writes it here") + "\n"
-	}
-	if room := m.w - lipgloss.Width(head) - 3 - buttonsW; lipgloss.Width(text)+2 <= room {
-		p.input.Width = room
-		m.zones = append(m.zones, zone{id: "prompt:input", x: lipgloss.Width(head), y: m.h - 2, w: room, h: 1})
-		head += inputView(p.input, p.sel, room, &p.off)
-		return above + head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-2)
-	}
-	p.input.Width = m.w - 4
-	var preview []string
-	if lipgloss.Width(p.input.Value()) > p.input.Width {
-		for _, l := range strings.Split(wordWrap(p.input.Value(), m.w-2), "\n") {
-			preview = append(preview, " "+sDim.Render(l))
+		for _, l := range strings.Split(wordWrap(p.described, m.w-8), "\n") {
+			rows = append(rows, sAccent.Render("✦ ")+sTitle.Render(l))
 		}
-		preview = preview[max(0, len(preview)-8):]
+		rows = append(rows, sDim.Render("  the AI suggests this: tab takes it, enter runs it"))
+	} else if _, _, ok := describing(p.input.Value()); ok && p.hint != "" && !p.waiting {
+		rows = append(rows, sDim.Render("✦ describe what you want after "+aiTrigger+" — the AI writes it here"))
 	}
-	top := head + "   " + m.buttons("ok (enter)", "cancel (esc)", lipgloss.Width(head)+3, m.h-3-len(preview))
-	m.zones = append(m.zones, zone{id: "prompt:input", x: 1, y: m.h - 2, w: p.input.Width, h: 1})
-	return above + strings.Join(append(append([]string{top}, preview...), " "+inputView(p.input, p.sel, p.input.Width, &p.off)), "\n")
+	if v := p.input.Value(); lipgloss.Width(v) > room && p.input.EchoMode != textinput.EchoPassword {
+		var wrapped []string
+		for _, l := range strings.Split(wordWrap(v, m.w-6), "\n") {
+			wrapped = append(wrapped, sDim.Render(l))
+		}
+		rows = append(rows, wrapped[max(0, len(wrapped)-8):]...)
+	}
+	p.input.Width = room
+	m.zones = append(m.zones, zone{id: "prompt:input", x: 4, y: m.boxRowY(), w: room, h: 1})
+	in := inputView(p.input, p.sel, room, &p.off)
+	if p.input.Value() == "" && p.template != "" {
+		in = sCursor.Render(" ") + sDim.Render(truncate(p.template, room-1))
+	}
+	row := sAccent.Render("› ") + in
+	row += strings.Repeat(" ", max(0, 2+room-lipgloss.Width(row))) + "  " + m.buttons(yes, no, 2+2+room+2, m.boxRowY())
+	return boxed(title, append(rows, row), m.w, cAccent)
 }
 
 const footerHints = 5
@@ -1979,7 +2052,7 @@ func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "errors of this session in full (y copies)"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output, and the errors (tab); y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

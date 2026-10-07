@@ -421,6 +421,28 @@ func (a *App) EnvOverrides(name string) map[string]string { return a.overrides()
 // SetEnv sets (an empty value removes) environment variables of services in this environment's state,
 // so every later deploy keeps them, and redeploys the services that run so they take effect.
 func (a *App) SetEnv(ctx context.Context, names []string, kv map[string]string) error {
+	if err := a.KeepEnv(ctx, names, kv); err != nil {
+		return err
+	}
+	for _, n := range names {
+		st, err := a.Status(ctx, n)
+		if err != nil || st.Desired == 0 {
+			continue
+		}
+		rt, s, err := a.Owner(n)
+		if err == nil {
+			// same image and replica count, new env
+			err = rt.Deploy(ctx, s, core.Release{Replicas: st.Desired})
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", n, err)
+		}
+	}
+	return nil
+}
+
+// KeepEnv is SetEnv without the redeploy: the next deploy of names takes the variables.
+func (a *App) KeepEnv(ctx context.Context, names []string, kv map[string]string) error {
 	if err := a.Guard(); err != nil {
 		return err
 	}
@@ -436,20 +458,6 @@ func (a *App) SetEnv(ctx context.Context, names []string, kv map[string]string) 
 	a.envMu.Lock()
 	a.envOverrides = nil
 	a.envMu.Unlock()
-	for _, n := range names {
-		st, err := a.Status(ctx, n)
-		if err != nil || st.Desired == 0 {
-			continue
-		}
-		rt, s, err := a.Owner(n)
-		if err == nil {
-			// same image and replica count, new env
-			err = rt.Deploy(ctx, s, core.Release{Replicas: st.Desired})
-		}
-		if err != nil {
-			return fmt.Errorf("%s: %w", n, err)
-		}
-	}
 	return nil
 }
 

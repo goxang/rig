@@ -71,7 +71,7 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 (dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
-`T` runs a task from rig.yaml, `ctrl+e` shows the environment (variables with secrets hidden, each
+`T` runs a task from rig.yaml in the background, `ctrl+e` shows the environment (variables with secrets hidden, each
 component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
@@ -81,8 +81,14 @@ forwards) or keep going without it (generators, services), and it asks.
 
 On the Services screen, `d` deploys a tag or a whole image (the running one is filled in), `$` edits a
 service's env, `F` opens its manifests (edit the file, or the live object on the cluster), and `b` runs
-any of build, push and deploy for the selected or marked services with a tag you choose, then lets you
-change the environment's variables (database names, say) before the deploy.
+any of build, push and deploy for the selected or marked services with a tag you choose, then shows the
+env each service deploys with (on Kubernetes, its live workload's) to change or add any first; its
+last row reaches the environment's deploy variables (database names, say).
+
+What you start (a build, a deploy, a task) runs in the background: the line above the keys shows the
+running one and its last output line, and `!` opens the activity view with every operation of the
+session, the full output of the one picked (`y` copies it) and the errors (`tab`). A question or an
+input opens in its own box above the keys, which then show the keys that box takes.
 
 A Kubernetes environment can name its cluster by address as well: `runtime: { context: local, server:
 https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has
@@ -115,7 +121,8 @@ bordered "✦ ai suggests" box above the input, `tab` takes it, `enter` runs it.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
 AI or not.
 
-In the chat, `/model` and `/effort` pick the chat's model (opencode's whole list, or opus/sonnet/haiku) and
+In the chat, `/` opens a menu of its commands with what each does (`↑↓` picks, `tab` completes, `enter`
+runs; `/help` lists them). `/model` and `/effort` pick the chat's model (opencode's whole list, or opus/sonnet/haiku) and
 reasoning level, `/fast` the completion model, `/autocomplete` switches suggestions. Completions through
 the backend start it every time (seconds); `fast_url` + `fast_api_key` (any OpenAI-compatible endpoint, e.g.
 `https://api.anthropic.com/v1` or a router) make them one HTTP request on a kept-alive connection.
