@@ -584,6 +584,18 @@ type LoadScaler interface {
 	SetReplicas(ctx context.Context, n int) error
 }
 
+// Activity is a server's work so far (operations since it started) and its open connections; two
+// readings make a rate.
+type Activity struct {
+	Ops   float64
+	Conns int
+}
+
+// ActivityReader reads a database's or cache's Activity.
+type ActivityReader interface {
+	Activity(ctx context.Context) (Activity, error)
+}
+
 // Pinger reports whether a component is reachable.
 type Pinger interface {
 	Ping(ctx context.Context) error

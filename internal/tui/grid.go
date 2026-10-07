@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ type grid struct {
 	xcol   []int  // the column each x0 starts
 	// simple are the columns the simple view shows; empty shows them all
 	simple []int
+	// want is a row id to select once a set brings it
+	want string
 }
 
 type gcol struct {
@@ -75,11 +78,14 @@ func (g *grid) remember() {
 func col(title string, width int) gcol  { return gcol{title: title, width: width} }
 func rcol(title string, width int) gcol { return gcol{title: title, width: width, right: true} }
 
-// set replaces the rows, keeping the selected row (by id) selected.
+// set replaces the rows, keeping the selected row (by id) selected, or selecting want once it shows.
 func (g *grid) set(rows []grow) {
 	cur := ""
 	if g.sel < len(g.rows) {
 		cur = g.rows[g.sel].id
+	}
+	if g.want != "" && slices.ContainsFunc(rows, func(r grow) bool { return r.id == g.want }) {
+		cur, g.want = g.want, ""
 	}
 	g.rows = rows
 	g.sortRows()

@@ -27,6 +27,7 @@ links:
   - { from: queue, to: worker }
   - { from: worker, to: db }
   - { from: worker, to: api }
+  - { from: worker, to: cache }
 `
 
 func TestLayoutFlowRoutesEveryLinkBetweenItsBoxes(t *testing.T) {
@@ -37,10 +38,15 @@ func TestLayoutFlowRoutesEveryLinkBetweenItsBoxes(t *testing.T) {
 	if got := strings.Join(f.NodeOrder, ","); got != "load,api,queue,cache,worker,db" {
 		t.Fatalf("order %s", got)
 	}
-	const w, h = 140, 18
-	l := layoutFlow(&f, w, h)
+	f.Nodes["worker"].Label = "a worker with a name far longer than any box used to be"
+	l := layoutFlow(&f, 1)
+	w, h := l.w, l.h
 	if c := l.cols; c["load"] != 0 || c["api"] != 1 || c["queue"] != 2 || c["worker"] != 3 || c["db"] != 4 {
 		t.Fatalf("columns %v", c)
+	}
+	cache := l.boxes[l.index["cache"]]
+	if cache.col != -1 || cache.y <= l.boxes[l.index["worker"]].y {
+		t.Fatalf("cache, used from two columns, should be on the shared row under the others: %+v", cache)
 	}
 	for i, a := range l.boxes {
 		if a.x < 0 || a.y < 0 || a.x+a.w > w || a.y+a.h > h {
@@ -55,6 +61,12 @@ func TestLayoutFlowRoutesEveryLinkBetweenItsBoxes(t *testing.T) {
 	for i, k := range f.Links {
 		p := l.paths[i]
 		from, to := l.boxes[l.index[k.From]], l.boxes[l.index[k.To]]
+		if k.To == "cache" {
+			if end := p[len(p)-1]; end.y != to.y-1 || end.x <= to.x || end.x >= to.x+to.w {
+				t.Fatalf("link %s→cache should come down into its top: %v", k.From, p)
+			}
+			continue
+		}
 		if len(p) < 2 || p[0] != (pt{from.x + from.w, from.y + from.h/2}) || p[len(p)-1] != (pt{to.x - 1, to.y + to.h/2}) {
 			t.Fatalf("link %s→%s path %v", k.From, k.To, p)
 		}
@@ -64,7 +76,7 @@ func TestLayoutFlowRoutesEveryLinkBetweenItsBoxes(t *testing.T) {
 		cv.line(p, fsDim)
 	}
 	for _, b := range l.boxes {
-		cv.box(b, b.name, fsGreen, fsTitle, b.name == "api", [][]seg{{{"12/s", fsTitle}}})
+		cv.box(b, flowTitle(&f, b.name), fsGreen, fsTitle, b.name == "api", [][]seg{{{"12/s", fsTitle}}})
 	}
 	lines := strings.Split(cv.String(), "\n")
 	if len(lines) != h {
@@ -75,7 +87,7 @@ func TestLayoutFlowRoutesEveryLinkBetweenItsBoxes(t *testing.T) {
 			t.Fatalf("line width %d: %q", n, ansi.Strip(ln))
 		}
 	}
-	if s := ansi.Strip(cv.String()); !strings.Contains(s, "┏") || !strings.Contains(s, "▶") || !strings.Contains(s, "12/s") {
+	if s := ansi.Strip(cv.String()); !strings.Contains(s, "┏") || !strings.Contains(s, "▶") || !strings.Contains(s, "▼") || !strings.Contains(s, "12/s") || !strings.Contains(s, f.Nodes["worker"].Label) {
 		t.Fatalf("missing the picked box, arrows or numbers:\n%s", s)
 	}
 }
@@ -99,6 +111,27 @@ func TestFlowStateFromTheNumbers(t *testing.T) {
 		if got, why := ft.state(m, "api"); got != c.want {
 			t.Fatalf("%+v: state %d (%v), want %d", c.s, got, why, c.want)
 		}
+	}
+	ft.levels = map[string][3]float64{"api": {20, 40, 60}}
+	for rate, want := range map[float64]int{10: stLow, 30: stOK, 50: stHot, 70: stOver} {
+		ft.stats["api"] = &flowStat{rate: rate, has: hasRate}
+		if got, _ := ft.state(m, "api"); got != want {
+			t.Fatalf("rate %v with levels 20/40/60: state %d, want %d", rate, got, want)
+		}
+	}
+}
+
+func TestFitZoomPicksTheRoomiestThatFits(t *testing.T) {
+	var f spec.Flow
+	if err := yaml.Unmarshal([]byte(testFlow), &f); err != nil {
+		t.Fatal(err)
+	}
+	big := layoutFlow(&f, len(flowZooms)-1)
+	if z := fitZoom(&f, big.w, big.h); z != len(flowZooms)-1 {
+		t.Fatalf("zoom %d on a screen the roomiest fits", z)
+	}
+	if z := fitZoom(&f, 20, 5); z != 0 {
+		t.Fatalf("zoom %d where nothing fits", z)
 	}
 }
 

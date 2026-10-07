@@ -570,11 +570,33 @@ func flatten(out string) string {
 	out = strings.TrimSuffix(strings.TrimSpace(out), "```")
 	var parts []string
 	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
+		if l = strings.TrimSpace(stripComment(l)); l != "" {
 			parts = append(parts, l)
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// stripComment drops a line's -- comment, or the whole line when it is a # or // comment: joined
+// into one line, a comment would swallow the rest of the query.
+func stripComment(l string) string {
+	if t := strings.TrimSpace(l); strings.HasPrefix(t, "# ") || strings.HasPrefix(t, "//") {
+		return ""
+	}
+	var quote rune
+	for i, r := range l {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"' || r == '`':
+			quote = r
+		case r == '-' && strings.HasPrefix(l[i:], "--"):
+			return l[:i]
+		}
+	}
+	return l
 }
 
 // Ask puts one question to the chat model, without tools, and returns its whole answer.

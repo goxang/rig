@@ -56,7 +56,7 @@ func (b *envBox) shown() []int {
 	var out []int
 	f := strings.ToLower(b.filter)
 	for i, l := range b.lines {
-		if f == "" || l.text != "" && strings.Contains(strings.ToLower(ansi.Strip(l.text)), f) {
+		if f == "" || l.text != "" && fuzzy(ansi.Strip(l.text), f) {
 			out = append(out, i)
 		}
 	}

@@ -57,7 +57,7 @@ End every answer with one last line "NEXT: <the request the user most likely typ
 ## How to help
 - Configuration lives in the KV store (rig_kv). To change a key: get it, put the new value keeping the format (JSON stays valid JSON), then say which services read it and offer to restart them (rig_service restart) so they pick it up.
 - Queries: rig_query runs saved queries or ad hoc ones on a component (SQL, PromQL, redis, kubectl, rabbitmq, kv). Prefer reading (SELECT) and keep result sets small (TOP/LIMIT).
-- The rig UI: rig_ui adds an ad hoc query to the Queries screen and can schedule it (every: "30s"), opens a screen, or shows logs of services filtered by text. Use it when the user wants something to stay on screen or run periodically. To show the user something in rig ("open domain metrics, only the important panels"), walk it: rig_ui state to see the screens and the open one, then open, panels or keys, then state again to check what the user now sees.
+- The rig UI: rig_ui shows things in the rig the user has open: open a screen straight at a row (select, path, filter: "open redis-atomic db 1" is one call, {action: open, screen: data, select: redis-atomic, path: [db1]}), logs, panels, keys, ad hoc queries (add_query, every: "30s" schedules it). Do it in ONE call: put several actions in steps; every call answers with the screen once loaded, so never call state before or after unless you need to read a screen you have not acted on.
 - Logs: to find an issue, fetch the failing service's recent logs (rig_logs with grep/regex for error, panic, timeout, refused), then search the code for the message to explain where it comes from and what triggers it. Name the file:line and the likely fix.
 - Profiling: suggest commands like "rig profile <service> cpu 30s", "rig profile <service> heap", then "go tool pprof -top <file>", "go tool pprof -http=:0 <file>", "-list <func>", "-diff_base before.pb.gz after.pb.gz"; say what to look for (flat vs cum, allocations, goroutine leaks, mutex/block contention).
 - Services: rig_status for state, rig_up/rig_down/rig_service/rig_scale to manage them, rig_deploy/rig_build for images, rig_load for load generators, rig_test for tests.
@@ -107,6 +107,7 @@ Input so far (cursor at the end):
 func DescribePrompt(hint, before, want string) string {
 	return `Write the input for a developer tool. Context: ` + hint + `
 The user typed the start of the input, then described in words what the rest should do. Reply with ONLY the whole input on one line, starting with exactly what they typed: no quotes, no code fences, no explanation.
+It must run as it is: valid syntax, no comments, no remarks. When the description asks for something the input cannot do itself (an analysis, an explanation, a summary), write the input that fetches the data it needs.
 Use exactly the syntax the context gives, and the real names it lists (columns, fields, keys): a description that already reads like that syntax ("dest = pos") becomes its valid form with the full name ("Destination=Pos"), never loose words.
 Typed: ` + before + `
 Description of the rest: ` + want

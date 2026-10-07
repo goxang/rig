@@ -611,7 +611,7 @@ func (t *testsTab) rows(r *engine.TestRun) []grow {
 			if c.Name == "" && t.filter != filterAll {
 				continue
 			}
-			if !t.matches(c.Status) || t.search != nil && !t.search.MatchString(c.Package+" "+c.Name) {
+			if !t.matches(c.Status) || t.search != nil && !t.searchHit(c.Package+" "+c.Name) {
 				continue
 			}
 			label := c.Name
@@ -1053,3 +1053,8 @@ func (t *testsTab) benchView(m *model, r *engine.TestRun, benches []engine.Bench
 }
 
 func (t *testsTab) atRoot() bool { return !t.outFocus }
+
+// searchHit matches the search as a regexp, or fuzzily as typed.
+func (t *testsTab) searchHit(s string) bool {
+	return t.search.MatchString(s) || fuzzy(s, strings.TrimPrefix(t.search.String(), "(?i)"))
+}

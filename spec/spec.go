@@ -371,6 +371,8 @@ type Flow struct {
 	Source string               `yaml:"source"`
 	Nodes  map[string]*FlowNode `yaml:"nodes"`
 	Links  []FlowLink           `yaml:"links"`
+	// Live false opens the screen without live data (no queries) until it is turned on.
+	Live *bool `yaml:"live"`
 	// NodeOrder is Nodes as rig.yaml lists them: their order down a column.
 	NodeOrder []string `yaml:"-"`
 }
@@ -405,6 +407,14 @@ type FlowNode struct {
 	Max float64 `yaml:"max"`
 	// Slow is a latency (ms) past which the node counts as overloaded.
 	Slow float64 `yaml:"slow"`
+	// Low, Hot and Over are rates (per second): below Low it is barely used, from Hot it runs hot,
+	// from Over it is overloaded. Hot and Over default to 70% and 90% of Max.
+	Low  float64 `yaml:"low"`
+	Hot  float64 `yaml:"hot"`
+	Over float64 `yaml:"over"`
+	// Shared draws the node on the row under the others, reached by every node that links to it (a
+	// cache or database many use). Left out, a cache or database linked from several columns is shared.
+	Shared *bool `yaml:"shared"`
 }
 
 type FlowLink struct {

@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/goxang/rig/internal/viz"
 	"github.com/goxang/rig/spec"
 )
 
@@ -27,6 +30,8 @@ type flowLayout struct {
 	// end is missing
 	paths [][]pt
 	cols  map[string]int
+	// w and h are the canvas the drawing needs; the screen shows a window of it
+	w, h int
 }
 
 func flowOrder(f *spec.Flow) []string {
@@ -95,62 +100,134 @@ func flowColumns(f *spec.Flow) map[string]int {
 	return col
 }
 
-// layoutFlow fits the nodes into w×h: columns spread across, each column's nodes spread down,
-// links routed through the gaps; links going left or within a column run along lanes at the bottom.
-func layoutFlow(f *spec.Flow, w, h int) flowLayout {
-	l := flowLayout{index: map[string]int{}, cols: flowColumns(f)}
-	order := flowOrder(f)
-	ncol := 1
-	for _, c := range l.cols {
-		ncol = max(ncol, c+1)
-	}
-	byCol := make([][]string, ncol)
-	for _, n := range order {
-		byCol[l.cols[n]] = append(byCol[l.cols[n]], n)
-	}
-	back, skip := 0, 0
-	for _, k := range f.Links {
-		if f.Nodes[k.From] == nil || f.Nodes[k.To] == nil {
+// flowShared are the nodes drawn on the row under the others: shared: true, or a cache or database
+// with no links out that nodes in several columns link to.
+func flowShared(f *spec.Flow, cols map[string]int) map[string]bool {
+	out := map[string]bool{}
+	for name, n := range f.Nodes {
+		if n.Shared != nil {
+			out[name] = *n.Shared
 			continue
 		}
-		switch d := l.cols[k.To] - l.cols[k.From]; {
-		case d <= 0:
-			back++
-		case d > 1:
-			skip++
+		if n.Kind != "cache" && n.Kind != "database" {
+			continue
+		}
+		from, leaves := map[int]bool{}, false
+		for _, l := range f.Links {
+			if l.To == name && f.Nodes[l.From] != nil {
+				from[cols[l.From]] = true
+			}
+			if l.From == name {
+				leaves = true
+			}
+		}
+		out[name] = !leaves && len(from) >= 2
+	}
+	return out
+}
+
+func flowTitle(f *spec.Flow, name string) string {
+	n := f.Nodes[name]
+	return strings.TrimSpace(flowIcons[n.Kind] + " " + firstNonEmpty(n.Label, name))
+}
+
+// flowZooms are the spacings from tight to roomy: gap between columns, rows between boxes, the
+// narrowest box, box height.
+var flowZooms = []struct{ gap, vgap, minW, bh int }{{4, 0, 18, 3}, {6, 1, 22, 4}, {9, 1, 24, 4}, {12, 2, 26, 4}, {16, 3, 28, 5}}
+
+// fitZoom is the roomiest zoom whose drawing fits w×h, else the tightest.
+func fitZoom(f *spec.Flow, w, h int) int {
+	for z := len(flowZooms) - 1; z > 0; z-- {
+		if l := layoutFlow(f, z); l.w <= w && l.h <= h {
+			return z
 		}
 	}
-	// links back run along lanes at the bottom, links over a column along lanes at the top
-	back, skip = min(back, h/4), min(skip, h/4)
-	// gaps shrink from 12 to 5 before boxes shrink below 18; links back need a channel on the right
-	lw := w
-	if back > 0 {
-		lw = w - 3
+	return 0
+}
+
+// layoutFlow draws the nodes at a zoom on a canvas as big as they need: columns as wide as their
+// longest name, links through the gaps, links over a column or back along lanes at the top, and
+// shared nodes on a row at the bottom, reached over a bus.
+func layoutFlow(f *spec.Flow, zoom int) flowLayout {
+	z := flowZooms[min(max(zoom, 0), len(flowZooms)-1)]
+	l := flowLayout{index: map[string]int{}, cols: flowColumns(f)}
+	shared := flowShared(f, l.cols)
+	order := flowOrder(f)
+	ncol := 1
+	for n, c := range l.cols {
+		if !shared[n] {
+			ncol = max(ncol, c+1)
+		}
 	}
-	gap, bw := 0, max(12, min(26, lw))
-	if ncol > 1 {
-		gap = max(5, min(12, (lw-ncol*18)/(ncol-1)))
-		bw = max(12, min(26, (lw-(ncol-1)*gap)/ncol))
-		gap = max(3, min(22, (lw-ncol*bw)/(ncol-1)))
+	byCol := make([][]string, ncol)
+	var bottom []string
+	for _, n := range order {
+		if shared[n] {
+			bottom = append(bottom, n)
+		} else {
+			byCol[l.cols[n]] = append(byCol[l.cols[n]], n)
+		}
 	}
-	left := max(0, (lw-ncol*bw-(ncol-1)*gap)/2)
-	avail := max(3, h-back-skip)
+	lanes := 0
+	for _, k := range f.Links {
+		if f.Nodes[k.From] != nil && f.Nodes[k.To] != nil && !shared[k.To] && !shared[k.From] && l.cols[k.To]-l.cols[k.From] != 1 {
+			lanes++
+		}
+	}
+	widths, xs := make([]int, ncol), make([]int, ncol)
+	x := 1
+	for c, names := range byCol {
+		widths[c] = z.minW
+		for _, n := range names {
+			widths[c] = max(widths[c], ansi.StringWidth(flowTitle(f, n))+6)
+		}
+		xs[c] = x
+		x += widths[c] + z.gap
+	}
+	l.w = x - z.gap + z.gap/2 + 2
 	most := 1
 	for _, c := range byCol {
 		most = max(most, len(c))
 	}
-	bh := 4
-	if most*bh > avail {
-		bh = 3
-	}
+	top := lanes + min(lanes, 1)
+	tall := most*(z.bh+z.vgap) - z.vgap
 	for c, names := range byCol {
-		slot := avail / max(len(names), 1)
-		for r, n := range names {
+		y := top + (tall-(len(names)*(z.bh+z.vgap)-z.vgap))/2
+		for _, n := range names {
 			l.index[n] = len(l.boxes)
-			l.boxes = append(l.boxes, flowBox{name: n, col: c, x: left + c*(bw+gap), y: skip + r*slot + max(0, (slot-bh)/2), w: bw, h: bh})
+			l.boxes = append(l.boxes, flowBox{name: n, col: c, x: xs[c], y: y, w: widths[c], h: z.bh})
+			y += z.bh + z.vgap
 		}
 	}
-	lane, top := h-1, skip-1
+	l.h = top + tall
+	// shared nodes: one bus lane each, then their row, each under the middle of what links to it
+	busTop := l.h + 1
+	rowY := busTop + len(bottom) + 1
+	next := 1
+	for _, n := range bottom {
+		w := max(z.minW, ansi.StringWidth(flowTitle(f, n))+6)
+		sum, k := 0, 0
+		for _, lk := range f.Links {
+			if i, ok := l.index[lk.From]; ok && lk.To == n {
+				sum += l.boxes[i].x + l.boxes[i].w
+				k++
+			}
+		}
+		bx := next
+		if k > 0 {
+			bx = max(next, sum/k-w/2)
+		}
+		l.index[n] = len(l.boxes)
+		l.boxes = append(l.boxes, flowBox{name: n, col: -1, x: bx, y: rowY, w: w, h: z.bh})
+		next = bx + w + 3
+		l.w = max(l.w, next)
+	}
+	if len(bottom) > 0 {
+		l.h = rowY + z.bh
+	}
+	lane := top - 2
+	arrivals := map[string]int{}
+	var used [][3]int
 	for _, k := range f.Links {
 		ai, ok1 := l.index[k.From]
 		bi, ok2 := l.index[k.To]
@@ -161,22 +238,88 @@ func layoutFlow(f *spec.Flow, w, h int) flowLayout {
 		a, b := l.boxes[ai], l.boxes[bi]
 		ya, yb := a.y+a.h/2, b.y+b.h/2
 		start, end := pt{a.x + a.w, ya}, pt{b.x - 1, yb}
-		xc := min(w-1, a.x+a.w+max(1, gap/2))
+		xc := a.x + a.w + max(1, z.gap/2)
+		xd := max(0, b.x-max(1, (z.gap+1)/2))
 		var p []pt
-		xd := max(0, b.x-max(1, (gap+1)/2))
-		switch d := l.cols[k.To] - l.cols[k.From]; {
-		case d == 1:
+		switch {
+		case shared[k.To] && !shared[k.From]:
+			// down the gap right of the source to the target's bus, along it, into the box's top
+			bus := busTop + slices.Index(bottom, k.To)
+			ins := 0
+			for _, o := range f.Links {
+				if o.To == k.To {
+					ins++
+				}
+			}
+			cx := b.x + 2 + arrivals[k.To]*max(1, (b.w-4)/max(ins, 1))
+			arrivals[k.To]++
+			p = route(start, pt{xc - 1, ya}, pt{xc - 1, bus}, pt{cx, bus}, pt{cx, b.y - 1})
+		case shared[k.From]:
+			p = route(pt{a.x + a.w/2, a.y - 1}, pt{a.x + a.w/2, busTop - 1}, pt{xd, busTop - 1}, pt{xd, yb}, end)
+		case l.cols[k.To]-l.cols[k.From] == 1:
 			p = route(start, pt{xc, ya}, pt{xc, yb}, end)
-		case d > 1:
-			p = route(start, pt{xc, ya}, pt{xc, max(top, 0)}, pt{xd, max(top, 0)}, pt{xd, yb}, end)
-			top--
 		default:
-			p = route(start, pt{xc, ya}, pt{xc, lane}, pt{xd, lane}, pt{xd, yb}, end)
+			if y, ok := l.detour(l.cols[k.From], l.cols[k.To], xc, xd, ya, top, &used); ok {
+				p = route(start, pt{xc, ya}, pt{xc, y}, pt{xd, y}, pt{xd, yb}, end)
+				break
+			}
+			p = route(start, pt{xc, ya}, pt{xc, max(lane, 0)}, pt{xd, max(lane, 0)}, pt{xd, yb}, end)
 			lane--
 		}
 		l.paths = append(l.paths, p)
 	}
+	// rows kept for lanes that detours made unneeded go
+	usedLanes := top - 2 - lane
+	if d := top - usedLanes - min(usedLanes, 1); d > 0 {
+		for i := range l.boxes {
+			l.boxes[i].y -= d
+		}
+		for _, p := range l.paths {
+			for i := range p {
+				p[i].y -= d
+			}
+		}
+		l.h -= d
+	}
 	return l
+}
+
+// detour is the row a forward link over columns runs along: its own row when nothing in the columns
+// between is on it, else the first free row just above them; false sends it to the top lanes.
+func (l *flowLayout) detour(from, to, x0, x1, y, top int, used *[][3]int) (int, bool) {
+	if to <= from {
+		return 0, false
+	}
+	topmost := l.h
+	free := func(y int) bool {
+		for _, b := range l.boxes {
+			if b.col > from && b.col < to && y >= b.y-1 && y <= b.y+b.h {
+				return false
+			}
+		}
+		for _, u := range *used {
+			if u[0] == y && x0 <= u[2] && u[1] <= x1 {
+				return false
+			}
+		}
+		return true
+	}
+	for _, b := range l.boxes {
+		if b.col > from && b.col < to {
+			topmost = min(topmost, b.y)
+		}
+	}
+	try := []int{y}
+	for c := topmost - 1; c >= top; c-- {
+		try = append(try, c)
+	}
+	for _, c := range try {
+		if free(c) {
+			*used = append(*used, [3]int{c, x0, x1})
+			return c, true
+		}
+	}
+	return 0, false
 }
 
 // route is the cells of straight runs through the corners, one step at a time.
@@ -217,7 +360,15 @@ const (
 	fsPanel
 	fsRedRev
 	fsPacket
+	// fsOrigin+i is the colour of the i-th node requests start from, and of its packets
+	fsOrigin
 )
+
+func originStyle(i int) flowStyle { return fsOrigin + flowStyle(i%len(originColors())) }
+
+func originColors() []lipgloss.TerminalColor {
+	return []lipgloss.TerminalColor{cAccent, cPurple, viz.Palette[2], viz.Palette[3], viz.Palette[6], viz.Palette[1]}
+}
 
 func (s flowStyle) style() lipgloss.Style {
 	switch s {
@@ -241,6 +392,9 @@ func (s flowStyle) style() lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(cRed).Reverse(true).Bold(true)
 	case fsPacket:
 		return lipgloss.NewStyle().Foreground(cGreen).Bold(true)
+	}
+	if s >= fsOrigin {
+		return lipgloss.NewStyle().Foreground(originColors()[int(s-fsOrigin)%len(originColors())]).Bold(true)
 	}
 	return lipgloss.NewStyle()
 }
@@ -319,10 +473,19 @@ func (c *canvas) line(p []pt, st flowStyle) {
 			}
 		}
 	}
-	if len(p) > 0 {
-		end := p[len(p)-1]
+	if n := len(p); n > 1 {
+		end, prev := p[n-1], p[n-2]
+		arrow := '▶'
+		switch {
+		case end.y > prev.y:
+			arrow = '▼'
+		case end.y < prev.y:
+			arrow = '▲'
+		case end.x < prev.x:
+			arrow = '◀'
+		}
 		if cl := c.at(end.x, end.y); cl != nil {
-			cl.r = '▶'
+			cl.r = arrow
 		}
 	}
 }
@@ -415,6 +578,19 @@ func (c *canvas) String() string {
 		}
 	}
 	return b.String()
+}
+
+// window is the w×h part of c whose top-left is at (-dx, -dy) in c.
+func (c *canvas) window(dx, dy, w, h int) *canvas {
+	out := newCanvas(w, h)
+	for y := 0; y < out.h; y++ {
+		for x := 0; x < out.w; x++ {
+			if cl := c.at(x-dx, y-dy); cl != nil {
+				out.cells[y*out.w+x] = *cl
+			}
+		}
+	}
+	return out
 }
 
 // runIn is the last straight horizontal run of a path.

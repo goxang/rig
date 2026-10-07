@@ -236,18 +236,24 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		began := time.Now()
 		if err := cmd.Attach(ctx, os.Stdin, out, out); err != nil {
 			if ctx.Err() != nil {
-				return fmt.Errorf("task %s stopped at step %d of %d (%s): interrupted", name, i+1, len(steps), title)
+				return fmt.Errorf("task %s stopped at step %d of %d (%s) after %s: interrupted", name, i+1, len(steps), title, took(began))
 			}
-			return fmt.Errorf("task %s failed at step %d of %d: %s\n  %s; the step's output is above", name, i+1, len(steps), title, exitText(err))
+			return fmt.Errorf("task %s failed at step %d of %d after %s: %s\n  %s; the step's output is above", name, i+1, len(steps), took(began), title, exitText(err))
 		}
-		if d := time.Since(began); d >= time.Second {
-			fmt.Fprintf(out, "  ✓ %s\n", d.Round(100*time.Millisecond))
-		}
+		fmt.Fprintf(out, "  ✓ %s\n", took(began))
 	}
-	if d := time.Since(start); len(steps) > 1 {
-		fmt.Fprintf(out, "✓ %s done in %s\n", name, d.Round(100*time.Millisecond))
+	if len(steps) > 1 {
+		fmt.Fprintf(out, "✓ %s done in %s\n", name, took(start))
 	}
 	return nil
+}
+
+func took(since time.Time) time.Duration {
+	d := time.Since(since)
+	if d < time.Second {
+		return d.Round(time.Millisecond)
+	}
+	return d.Round(100 * time.Millisecond)
 }
 
 var argRef = regexp.MustCompile(`\$\{?([1-9])(:-[^}]*)?\}?`)

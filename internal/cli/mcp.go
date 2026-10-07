@@ -287,8 +287,54 @@ func uiTool(args map[string]any) (string, bool) {
 	if sock == "" {
 		return "no rig UI is attached to this session: use rig_query instead", true
 	}
+	steps := []map[string]any{args}
+	if v, ok := args["steps"].([]any); ok && len(v) > 0 {
+		steps = steps[:0]
+		for _, x := range v {
+			if st, ok := x.(map[string]any); ok {
+				steps = append(steps, st)
+			}
+		}
+	}
+	var out []string
+	acted := false
+	for i, st := range steps {
+		req := uiRequest(st)
+		if req.Action == "state" {
+			continue
+		}
+		if q := req.Args["query"]; q != "" && ai.ClassifyQuery(q) != ai.Read {
+			return strings.Join(append(out, "refused: only reading queries go on the Queries screen; run a change once with rig_query"), "\n"), true
+		}
+		r, err := ai.Call(sock, req, 30*time.Second)
+		if err != nil {
+			return strings.Join(append(out, err.Error()), "\n"), true
+		}
+		if len(steps) > 1 {
+			r.Text = fmt.Sprintf("%d. %s", i+1, r.Text)
+		}
+		out = append(out, r.Text)
+		if !r.OK {
+			return strings.Join(append(out, "stopped here; the screen:", uiSettled(sock)), "\n"), true
+		}
+		acted = true
+		if i < len(steps)-1 {
+			uiSettled(sock)
+		}
+	}
+	if !acted {
+		r, err := ai.Call(sock, ai.Request{Op: "ui", Action: "state"}, 30*time.Second)
+		if err != nil {
+			return err.Error(), true
+		}
+		return r.Text, !r.OK
+	}
+	return strings.Join(append(out, "now:", uiSettled(sock)), "\n"), false
+}
+
+func uiRequest(args map[string]any) ai.Request {
 	req := ai.Request{Op: "ui", Action: str(args, "action"), Args: map[string]string{}}
-	for _, k := range []string{"name", "component", "query", "every", "screen", "services", "grep", "dashboard"} {
+	for _, k := range []string{"name", "component", "query", "every", "screen", "services", "grep", "dashboard", "select", "filter"} {
 		if v := str(args, k); v != "" {
 			req.Args[k] = v
 		}
@@ -296,19 +342,30 @@ func uiTool(args map[string]any) (string, bool) {
 	if v := list(args, "services"); len(v) > 0 {
 		req.Args["services"] = strings.Join(v, " ")
 	}
-	for _, k := range []string{"keys", "panels"} {
+	for _, k := range []string{"keys", "panels", "path"} {
 		if v := list(args, k); len(v) > 0 {
 			req.Args[k] = strings.Join(v, "\n")
 		}
 	}
-	if q := req.Args["query"]; q != "" && ai.ClassifyQuery(q) != ai.Read {
-		return "refused: only reading queries go on the Queries screen; run a change once with rig_query", true
+	return req
+}
+
+// uiSettled is the screen once what an action started has loaded: the state, read until it holds
+// still (or a few seconds pass), so one call both acts and shows the result.
+func uiSettled(sock string) string {
+	var last string
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		time.Sleep(250 * time.Millisecond)
+		r, err := ai.Call(sock, ai.Request{Op: "ui", Action: "state"}, 10*time.Second)
+		if err != nil {
+			return err.Error()
+		}
+		if r.Text == last && !strings.Contains(r.Text, "loading") || time.Now().After(deadline) {
+			return r.Text
+		}
+		last = r.Text
 	}
-	r, err := ai.Call(sock, req, 30*time.Second)
-	if err != nil {
-		return err.Error(), true
-	}
-	return r.Text, !r.OK
 }
 
 func runTool(ctx context.Context, argv []string, env string, yes bool) (string, bool) {
@@ -582,12 +639,19 @@ func mcpTools() []mcpTool {
 				}
 				return argv, nil
 			}},
-		{Name: "rig_ui", Description: "act in the rig UI the user has open: add_query (component, query, optional name and every like \"30s\" to schedule it), schedule (name, every), unschedule (name), open (screen: services, logs, metrics, traces, queries, kv, data, load, manifests, hosts, tests), logs (services, optional grep), state (the screens, the open one's settings, dashboards and panel titles on Metrics, and the screen's text: call it first and after acting), keys (keys: pressed in order on the open screen as the user would, e.g. [\"3\", \"/\", \"api\", \"enter\"]; enter, esc, tab, up, down, left, right, ctrl+r, space; any other entry is typed as text; any change they start waits for the user's confirmation), panels (dashboard, panels: show only these panel titles on Metrics, none shows all)",
+		{Name: "rig_ui", Description: "act in the rig UI the user has open; every action answers with the screen once it has loaded, so one call does it (no state call after). " +
+			"open (screen: services, logs, metrics, traces, queries, kv, data, load, manifests, hosts, tests, flow; select: the row to land on — Data a component, Services a service, Load a generator, Metrics a dashboard, Manifests an object name; path: Data's walk into the component, e.g. [\"db1\"] for a Redis database or [\"Switch\", \"tables\"]; filter: narrows the list), " +
+			"keys (keys pressed in order on the open screen, e.g. [\"/\", \"api\", \"enter\"]; enter, esc, tab, up, down, left, right, ctrl+r, space; anything else is typed; changes wait for the user's confirmation), " +
+			"logs (services, optional grep), panels (dashboard, panels: show only these panel titles on Metrics, none shows all), add_query (component, query, optional name and every like \"30s\"), schedule (name, every), unschedule (name), state (the screen, without acting). " +
+			"steps: several of these objects run in order in ONE call, e.g. [{action: open, screen: data, select: redis-atomic, path: [db1]}, {action: keys, keys: [\"/\", \"key\"]}]",
 			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"add_query", "schedule", "unschedule", "open", "logs", "state", "keys", "panels"}},
-				"keys": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "dashboard": pString("Metrics dashboard"),
+				"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "actions run in order in one call, each an object with action and its fields"},
+				"keys":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "dashboard": pString("Metrics dashboard"),
 				"panels": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"select": pString("open: the row to land on"), "path": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "open on Data: the walk into the component"},
+				"filter": pString("open: narrows the screen's list"),
 				"name":   pString("query name"), "component": pString("component to query"), "query": pString("query text"), "every": pString("schedule interval, e.g. 30s"),
-				"screen": pString("screen to open"), "services": pTargets, "grep": pString("log filter")}, "action")},
+				"screen": pString("screen to open"), "services": pTargets, "grep": pString("log filter")})},
 		{Name: "rig_file", Description: "the project's files, inside its directory only: list (path, recursive), read (path), write (path, content: creates or replaces), edit (path, old, new: old must be exact and unique unless all: true), move (path, to), delete (path: a file, or a directory with what is in it; needs the user's go-ahead). Paths are relative to the project. Credentials and .git are out of reach.",
 			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"list", "read", "write", "edit", "move", "delete"}},
 				"path": pString("file or directory, relative to the project"), "to": pString("move: the new path"), "content": pString("write: the whole new content"),

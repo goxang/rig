@@ -387,6 +387,13 @@
           },
           "type": "array"
         },
+        "live": {
+          "description": "False opens the screen without live data (no queries) until it is turned on.",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
         "nodes": {
           "additionalProperties": {
             "$ref": "#/definitions/FlowNode"
@@ -477,6 +484,12 @@
             "boolean"
           ]
         },
+        "hot": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
         "kind": {
           "description": "Picks the icon and colour: load, gateway, service, queue, database, cache, external.",
           "type": [
@@ -510,6 +523,13 @@
           },
           "type": "array"
         },
+        "low": {
+          "description": "Low, Hot and Over are rates (per second): below Low it is barely used, from Hot it runs hot, from Over it is overloaded. Hot and Over default to 70% and 90% of Max.",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
         "max": {
           "description": "What the node handles per second: past 70% it runs hot, past 90% it is overloaded.",
           "type": [
@@ -525,12 +545,25 @@
             "boolean"
           ]
         },
+        "over": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
         "rate": {
           "description": "Rate, Errors, Latency (ms) and Backlog are instant metrics queries.",
           "type": [
             "string",
             "number",
             "boolean"
+          ]
+        },
+        "shared": {
+          "description": "Draws the node on the row under the others, reached by every node that links to it (a cache or database many use). Left out, a cache or database linked from several columns is shared.",
+          "type": [
+            "boolean",
+            "string"
           ]
         },
         "slow": {
@@ -1684,7 +1717,7 @@
           "$ref": "#/definitions/Flow"
         }
       ],
-      "description": "{help, source, nodes, links}: the Flow screen, requests moving through the system"
+      "description": "{help, source, live, nodes, links}: the Flow screen, requests moving through the system"
     },
     "help": {
       "description": "Shown by `rig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `rig -h` shows only its own generic help.",

@@ -389,6 +389,28 @@ func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
 	return t.lt.start(m)
 }
 
+// focusService shows the list on name's section with name selected, its page closed.
+func (t *servicesTab) focusService(m *model, name string) {
+	if t.open_ != "" {
+		t.closeLogs()
+		t.open_ = ""
+	}
+	t.filter = ""
+	if s := m.app.Spec.Services[name]; s != nil {
+		t.setSection(t.sectionOf(s))
+	}
+	t.list.want = name
+	t.list.set(t.rows(m))
+}
+
+// closeService leaves the service's page: back to the screen that opened it, else the list.
+func (t *servicesTab) closeService(m *model) tea.Cmd {
+	t.closeLogs()
+	t.open_ = ""
+	cmd, _ := m.back()
+	return cmd
+}
+
 func (t *servicesTab) closeLogs() {
 	if t.lt != nil && t.lt.cancel != nil {
 		t.lt.cancel()
@@ -432,9 +454,7 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 			t.onPods = false
 			return nil
 		case "esc", "backspace", "left":
-			t.closeLogs()
-			t.open_ = ""
-			return nil
+			return t.closeService(m)
 		}
 	}
 	switch k.String() {
@@ -514,9 +534,7 @@ func (t *servicesTab) click(m *model, h hit) tea.Cmd {
 		return nil
 	}
 	if h.id == "back" {
-		t.closeLogs()
-		t.open_ = ""
-		return nil
+		return t.closeService(m)
 	}
 	t.onPods = strings.HasPrefix(h.id, "pods")
 	if t.prof != nil && t.prof.grid.click(h) {
@@ -608,7 +626,7 @@ func (t *servicesTab) rows(m *model) []grow {
 			continue
 		}
 		groups := strings.Join(s.Groups, ",")
-		if !fuzzy(st.Service+" "+groups+" "+s.Role, f) {
+		if !fuzzy(st.Service+" "+groups+" "+s.Role+" "+lastPath(st.Image)+" "+st.Message, f) {
 			continue
 		}
 		cpu, mem, restarts := usage(st)

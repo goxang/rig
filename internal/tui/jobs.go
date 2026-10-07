@@ -40,6 +40,9 @@ type job struct {
 	lines   []string
 	partial string
 	wrote   time.Time
+	// step is the task step running ("3/7") and since when, for its live timer
+	step   string
+	stepAt time.Time
 }
 
 const jobLines = 2000
@@ -54,7 +57,14 @@ func (j *job) Write(p []byte) (int, error) {
 		if i := strings.LastIndex(l, "\r"); i >= 0 {
 			l = l[i+1:]
 		}
-		j.lines = append(j.lines, ansi.Strip(l))
+		l = ansi.Strip(l)
+		if n, ok := strings.CutPrefix(l, "▸ ["); ok {
+			j.step, _, _ = strings.Cut(n, "]")
+			j.stepAt = time.Now()
+		} else if strings.HasPrefix(l, "  ✓ ") {
+			j.step = ""
+		}
+		j.lines = append(j.lines, l)
 	}
 	if over := len(j.lines) - jobLines; over > 0 {
 		j.lines = append(j.lines[:0], j.lines[over:]...)
@@ -124,6 +134,16 @@ func (j *job) output() []string {
 		out = append(out, ansi.Strip(j.partial))
 	}
 	return out
+}
+
+// stepTimer is the task step running and how long it has run.
+func (j *job) stepTimer() (string, time.Duration) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.step == "" || !j.end.IsZero() {
+		return "", 0
+	}
+	return j.step, time.Since(j.stepAt).Round(time.Second)
 }
 
 func (j *job) took() time.Duration {
@@ -252,6 +272,9 @@ func (m *model) jobLine() string {
 		icon, st = "✓", sGreen
 	}
 	head := " " + st.Render(icon+" "+j.label) + sDim.Render(" · "+j.took().String())
+	if step, d := j.stepTimer(); step != "" {
+		head += sDim.Render(" · step "+step+" ") + sAccent.Render(d.String())
+	}
 	if n := len(running); n > 1 {
 		head += sDim.Render(fmt.Sprintf(" · +%d more", n-1))
 	}
@@ -296,6 +319,9 @@ func (m *model) activityView(h int) string {
 			icon = sGreen.Render("✓")
 		}
 		note := j.start.Format("15:04:05") + " · " + j.took().String()
+		if step, d := j.stepTimer(); step != "" {
+			note += " · step " + step + " " + d.String()
+		}
 		if _, ok := j.waiting(); ok {
 			note += " · " + sAmber.Render("waits for input")
 		}

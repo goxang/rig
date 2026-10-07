@@ -112,3 +112,10 @@ func TestSplitNext(t *testing.T) {
 		t.Fatalf("%q %q", rest, next)
 	}
 }
+
+func TestFlattenDropsComments(t *testing.T) {
+	got := flatten("SELECT TOP 100 * FROM [dbo].[look_ups] -- a business analysis\nWHERE name = 'a--b'\n# note\nORDER BY id")
+	if got != "SELECT TOP 100 * FROM [dbo].[look_ups] WHERE name = 'a--b' ORDER BY id" {
+		t.Fatalf("flatten = %q", got)
+	}
+}

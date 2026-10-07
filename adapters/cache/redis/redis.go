@@ -147,6 +147,19 @@ func (r *Cache) Info(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
+func (r *Cache) Activity(ctx context.Context) (core.Activity, error) {
+	info, err := r.Info(ctx)
+	if err != nil {
+		return core.Activity{}, err
+	}
+	ops, err := strconv.ParseFloat(strings.TrimSpace(info["total_commands_processed"]), 64)
+	if err != nil {
+		return core.Activity{}, fmt.Errorf("total_commands_processed: %w", err)
+	}
+	conns, _ := strconv.Atoi(strings.TrimSpace(info["connected_clients"]))
+	return core.Activity{Ops: ops, Conns: conns}, nil
+}
+
 func (r *Cache) QueryLanguage() string { return "redis" }
 
 func (r *Cache) Actions() []core.Action {

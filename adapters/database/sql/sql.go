@@ -71,6 +71,8 @@ type dialect struct {
 	drop    []string
 	dsn     func(o Options, addr, db string) string
 	batches func(string) []string
+	// activity is one row: operations since the server started, open connections
+	activity string
 }
 
 var dialects = map[string]dialect{
@@ -88,7 +90,8 @@ var dialects = map[string]dialect{
 			u.RawQuery = q.Encode()
 			return u.String()
 		},
-		batches: whole,
+		batches:  whole,
+		activity: "SELECT (SELECT sum(xact_commit + xact_rollback) FROM pg_stat_database), (SELECT count(*) FROM pg_stat_activity)",
 	},
 	"mssql": {
 		driver: "sqlserver",
@@ -107,7 +110,8 @@ var dialects = map[string]dialect{
 			u.RawQuery = q.Encode()
 			return u.String()
 		},
-		batches: goBatches,
+		batches:  goBatches,
+		activity: "SELECT (SELECT cntr_value FROM sys.dm_os_performance_counters WHERE counter_name LIKE 'Batch Requests/sec%'), (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1)",
 	},
 	"mysql": {
 		driver: "mysql",
@@ -121,7 +125,8 @@ var dialects = map[string]dialect{
 			}
 			return fmt.Sprintf("%s:%s@tcp(%s)/%s?%s", o.User, o.Password, addr, db, q.Encode())
 		},
-		batches: whole,
+		batches:  whole,
+		activity: "SELECT (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Questions'), (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected')",
 	},
 }
 
@@ -286,6 +291,22 @@ func (d *DB) Databases(ctx context.Context) ([]string, error) {
 		out = append(out, r[0])
 	}
 	return out, nil
+}
+
+func (d *DB) Activity(ctx context.Context) (core.Activity, error) {
+	t, err := d.Query(ctx, d.adminDB(), d.dialect.activity)
+	if err != nil {
+		return core.Activity{}, err
+	}
+	if len(t.Rows) == 0 || len(t.Rows[0]) < 2 {
+		return core.Activity{}, fmt.Errorf("no activity counters")
+	}
+	ops, err := strconv.ParseFloat(t.Rows[0][0], 64)
+	if err != nil {
+		return core.Activity{}, fmt.Errorf("operations counter %q: %w", t.Rows[0][0], err)
+	}
+	conns, _ := strconv.Atoi(t.Rows[0][1])
+	return core.Activity{Ops: ops, Conns: conns}, nil
 }
 
 func (d *DB) adminDB() string {

@@ -2,8 +2,12 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,11 +36,26 @@ type flowTab struct {
 	paused  bool
 	last    time.Time
 	lay     flowLayout
+
+	loaded bool
+	live   bool
+	levels map[string][3]float64 // per node low, hot, over set with t, over rig.yaml's
+	// origins are the nodes nothing links to; reach[n] the ones whose requests get to n
+	origins []string
+	reach   map[string][]int
+	oacc    [][]float64
+
+	fit        bool
+	zoom       int
+	offX, offY int
+	follow     bool
+	dragFrom   [4]int // where a drag began and the offsets then
 }
 
 type packet struct {
 	p      float64
 	failed bool
+	origin int
 }
 
 type flowStat struct {
@@ -45,6 +64,10 @@ type flowStat struct {
 	hist, blog                        []float64
 	running, gens                     int
 	err                               string
+	// ops is a database's or cache's operations counter at at, conns its connections
+	ops   float64
+	at    time.Time
+	conns int
 }
 
 const (
@@ -53,6 +76,7 @@ const (
 	hasLat
 	hasBacklog
 	hasOffered
+	hasOps
 )
 
 type flowLinkStat struct {
@@ -70,22 +94,151 @@ type flowTickMsg struct{ gen int }
 
 const flowFrame = 60 * time.Millisecond
 
-func (t *flowTab) name() string                           { return "Flow" }
-func (t *flowTab) typing() bool                           { return false }
-func (t *flowTab) interval() time.Duration                { return 2 * time.Second }
-func (t *flowTab) refresh(m *model) tea.Cmd               { return batch(t.fetch(m), t.tick(m)) }
+func (t *flowTab) name() string            { return "Flow" }
+func (t *flowTab) typing() bool            { return false }
+func (t *flowTab) interval() time.Duration { return 2 * time.Second }
+func (t *flowTab) refresh(m *model) tea.Cmd {
+	if !t.live {
+		return nil
+	}
+	return batch(t.fetch(m), t.tick(m))
+}
 func (t *flowTab) flow(m *model) *spec.Flow               { return m.app.Spec.Flow }
 func (t *flowTab) node(m *model, n string) *spec.FlowNode { return t.flow(m).Nodes[n] }
 
 func (t *flowTab) hints() [][2]string {
-	return [][2]string{{"←→↑↓", "pick a node"}, {"enter click", "open its page (esc ⌫ come back)"}, {"p", "pause packets"}}
+	return [][2]string{{"←→↑↓", "pick a node"}, {"enter click", "open it"}, {"+ - z", "zoom, fit"}, {"HJKL wheel drag", "scroll"},
+		{"t", "set low/hot/over"}, {"e", "live data on/off"}, {"p", "pause"}}
+}
+
+type flowSaved struct {
+	Live   *bool                 `json:"live,omitempty"`
+	Levels map[string][3]float64 `json:"levels,omitempty"`
+}
+
+func flowFile(m *model) string { return filepath.Join(m.app.Spec.Dir, ".rig", "flow.json") }
+
+func (t *flowTab) save(m *model) {
+	live := t.live
+	raw, _ := json.MarshalIndent(flowSaved{Live: &live, Levels: t.levels}, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(flowFile(m)), 0o755); err == nil {
+		_ = os.WriteFile(flowFile(m), append(raw, '\n'), 0o644)
+	}
+}
+
+func (t *flowTab) load(m *model) {
+	t.loaded, t.fit = true, true
+	f := t.flow(m)
+	t.live = f.Live == nil || *f.Live
+	t.levels = map[string][3]float64{}
+	var saved flowSaved
+	if raw, err := os.ReadFile(flowFile(m)); err == nil && json.Unmarshal(raw, &saved) == nil {
+		if saved.Live != nil {
+			t.live = *saved.Live
+		}
+		for n, l := range saved.Levels {
+			t.levels[n] = l
+		}
+	}
+}
+
+// originsOf finds the nodes requests start from and, for every node, which of them reach it.
+func (t *flowTab) originsOf(f *spec.Flow) {
+	t.origins, t.reach = nil, map[string][]int{}
+	fed := map[string]bool{}
+	for _, l := range f.Links {
+		if l.From != l.To {
+			fed[l.To] = true
+		}
+	}
+	for _, n := range flowOrder(f) {
+		if !fed[n] {
+			t.origins = append(t.origins, n)
+		}
+	}
+	for i, o := range t.origins {
+		seen, todo := map[string]bool{o: true}, []string{o}
+		for len(todo) > 0 {
+			n := todo[0]
+			todo = todo[1:]
+			t.reach[n] = append(t.reach[n], i)
+			for _, l := range f.Links {
+				if l.From == n && !seen[l.To] {
+					seen[l.To] = true
+					todo = append(todo, l.To)
+				}
+			}
+		}
+	}
+}
+
+// levelsOf are a node's low, hot and over rates: set with t, else rig.yaml's; hot and over default
+// to 70% and 90% of max.
+func (t *flowTab) levelsOf(name string, n *spec.FlowNode) (low, hot, over float64) {
+	low, hot, over = n.Low, n.Hot, n.Over
+	if hot == 0 {
+		hot = 0.7 * n.Max
+	}
+	if over == 0 {
+		over = 0.9 * n.Max
+	}
+	if l, ok := t.levels[name]; ok {
+		low, hot, over = l[0], l[1], l[2]
+	}
+	return
+}
+
+func (t *flowTab) askLevels(m *model) {
+	n := t.node(m, t.sel)
+	if n == nil {
+		return
+	}
+	name := t.sel
+	low, hot, over := t.levelsOf(name, n)
+	cur := fmt.Sprintf("%g %g %g", low, hot, over)
+	m.ask("low hot over for "+name+" (per second; 0 is none, empty puts rig.yaml's back)", cur, func(v string) tea.Cmd {
+		if strings.TrimSpace(v) == "" {
+			delete(t.levels, name)
+			t.save(m)
+			return nil
+		}
+		var l [3]float64
+		words := strings.Fields(strings.ReplaceAll(v, ",", " "))
+		if len(words) != 3 {
+			m.setStatus("three numbers: low hot over, like 5 300 450", true)
+			return nil
+		}
+		for i, w := range words {
+			x, err := strconv.ParseFloat(w, 64)
+			if err != nil || x < 0 {
+				m.setStatus(fmt.Sprintf("%q is not a rate", w), true)
+				return nil
+			}
+			l[i] = x
+		}
+		if l[2] > 0 && l[1] > l[2] {
+			m.setStatus("hot must not be above over", true)
+			return nil
+		}
+		t.levels[name] = l
+		t.save(m)
+		return nil
+	})
 }
 
 func (t *flowTab) open(m *model) tea.Cmd {
 	f := t.flow(m)
+	if f == nil {
+		return nil
+	}
+	if !t.loaded {
+		t.load(m)
+	}
+	t.originsOf(f)
 	t.stats = map[string]*flowStat{}
 	t.links = make([]flowLinkStat, len(f.Links))
 	t.packets, t.emit, t.errAcc = make([][]packet, len(f.Links)), make([]float64, len(f.Links)), make([]float64, len(f.Links))
+	t.oacc = make([][]float64, len(f.Links))
 	if order := flowOrder(f); t.sel == "" && len(order) > 0 {
 		t.sel = order[0]
 	}
@@ -184,6 +337,16 @@ func (t *flowTab) fetch(m *model) tea.Cmd {
 						}
 					}
 				}
+				// a database or cache without a rate query counts by itself: operations and connections
+				if k, _, err := a.Kind(n.Open); err == nil && (k == core.KindDatabase || k == core.KindCache) && n.Rate == "" {
+					if ar, _, err := engine.Get[core.ActivityReader](a, k, n.Open); err == nil {
+						if act, err := ar.Activity(c); err == nil {
+							s.ops, s.at, s.conns, s.has = act.Ops, time.Now(), act.Conns, s.has|hasOps
+						} else {
+							errs = append(errs, err.Error())
+						}
+					}
+				}
 				s.err = strings.Join(errs, "; ")
 				mu.Lock()
 				out.nodes[name] = s
@@ -217,6 +380,11 @@ func (t *flowTab) update(m *model, msg tea.Msg) tea.Cmd {
 		for n, s := range msg.nodes {
 			if old := t.stats[n]; old != nil {
 				s.hist, s.blog = old.hist, old.blog
+				if s.has&hasOps != 0 && old.has&hasOps != 0 && s.ops >= old.ops {
+					if dt := s.at.Sub(old.at).Seconds(); dt > 0 {
+						s.rate, s.has = (s.ops-old.ops)/dt, s.has|hasRate
+					}
+				}
 			}
 			if s.has&hasRate != 0 {
 				s.hist = last(append(s.hist, s.rate), 90)
@@ -228,7 +396,7 @@ func (t *flowTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		t.links = msg.links
 	case flowTickMsg:
-		if msg.gen != m.gen || m.tabs[m.active] != tab(t) {
+		if msg.gen != m.gen || m.tabs[m.active] != tab(t) || !t.live {
 			t.ticking = false
 			return nil
 		}
@@ -245,13 +413,76 @@ func (t *flowTab) update(m *model, msg tea.Msg) tea.Cmd {
 		switch msg.String() {
 		case "left", "h", "right", "l", "up", "k", "down", "j":
 			t.move(msg.String())
+			t.follow = true
 		case "enter", "o":
 			return t.openNode(m, t.sel)
 		case "p", " ":
 			t.paused = !t.paused
+		case "+", "=":
+			t.zoomBy(1)
+		case "-", "_":
+			t.zoomBy(-1)
+		case "z", "0":
+			t.fit, t.offX, t.offY = true, 0, 0
+		case "H":
+			t.offX -= 8
+		case "L":
+			t.offX += 8
+		case "K":
+			t.offY -= 3
+		case "J":
+			t.offY += 3
+		case "t":
+			t.askLevels(m)
+		case "e":
+			t.live = !t.live
+			t.save(m)
+			if t.live {
+				m.setStatus("Flow: live data on", false)
+				return t.refresh(m)
+			}
+			t.stats, t.links = map[string]*flowStat{}, make([]flowLinkStat, len(t.flow(m).Links))
+			for i := range t.packets {
+				t.packets[i] = nil
+			}
+			m.setStatus("Flow: live data off, no queries", false)
 		}
 	}
 	return nil
+}
+
+func (t *flowTab) zoomBy(d int) {
+	t.zoom = min(max(t.zoom+d, 0), len(flowZooms)-1)
+	t.fit, t.follow = false, true
+}
+
+func (t *flowTab) wheel(m *model, z hit, up bool) (tea.Cmd, bool) {
+	if !strings.HasPrefix(z.id, "flow:") {
+		return nil, false
+	}
+	d := 3
+	if up {
+		d = -3
+	}
+	if z.mod {
+		t.offX += 3 * d
+	} else {
+		t.offY += d
+	}
+	return nil, true
+}
+
+func (t *flowTab) drag(m *model, z hit, phase dragPhase) bool {
+	if phase == dragPress {
+		if z.id != "flow:canvas" {
+			return false
+		}
+		t.dragFrom = [4]int{z.x, z.y, t.offX, t.offY}
+		return true
+	}
+	t.offX = t.dragFrom[2] - (z.x - t.dragFrom[0])
+	t.offY = t.dragFrom[3] - (z.y - t.dragFrom[1])
+	return true
 }
 
 // ---- what the numbers mean ----
@@ -259,6 +490,7 @@ func (t *flowTab) update(m *model, msg tea.Msg) tea.Cmd {
 const (
 	stUnknown = iota
 	stIdle
+	stLow
 	stOK
 	stHot
 	stOver
@@ -282,16 +514,20 @@ func (t *flowTab) state(m *model, name string) (int, []string) {
 	if s.rate > 0 || s.running > 0 {
 		level = stOK
 	}
+	low, hot, over := t.levelsOf(name, n)
+	if r, ok := s.shown(); ok && r > 0 && r < low {
+		level, why = stLow, []string{fmt.Sprintf("below its low %s", viz.Human(low, "/s"))}
+	}
 	raise := func(to int, reason string) {
 		level = max(level, to)
 		why = append(why, reason)
 	}
-	if u, ok := s.util(n); ok {
+	if r, ok := s.shown(); ok {
 		switch {
-		case u >= 0.9:
-			raise(stOver, fmt.Sprintf("at %.0f%% of its %s", u*100, viz.Human(n.Max, "/s")))
-		case u >= 0.7:
-			raise(stHot, fmt.Sprintf("at %.0f%% of its %s", u*100, viz.Human(n.Max, "/s")))
+		case over > 0 && r >= over:
+			raise(stOver, fmt.Sprintf("%s, over %s", viz.Human(r, "/s"), viz.Human(over, "/s")))
+		case hot > 0 && r >= hot:
+			raise(stHot, fmt.Sprintf("%s, hot from %s", viz.Human(r, "/s"), viz.Human(hot, "/s")))
 		}
 	}
 	if n.Slow > 0 && s.has&hasLat != 0 {
@@ -497,11 +733,46 @@ func (t *flowTab) advance(m *model, dt float64) {
 				if failed {
 					t.errAcc[i]--
 				}
-				ps = append(ps, packet{failed: failed})
+				ps = append(ps, packet{failed: failed, origin: t.pickOrigin(i, f.Links[i].From)})
 			}
 		}
 		t.packets[i] = ps
 	}
+}
+
+// pickOrigin is whose request the next packet on link i is: the origins reaching its source take
+// turns in proportion to their rates.
+func (t *flowTab) pickOrigin(i int, from string) int {
+	rs := t.reach[from]
+	switch len(rs) {
+	case 0:
+		return -1
+	case 1:
+		return rs[0]
+	}
+	if len(t.oacc[i]) != len(rs) {
+		t.oacc[i] = make([]float64, len(rs))
+	}
+	sum := 0.0
+	ws := make([]float64, len(rs))
+	for k, o := range rs {
+		r, _ := t.stats[t.origins[o]].shown()
+		ws[k] = r
+		sum += r
+	}
+	best := 0
+	for k := range rs {
+		if sum > 0 {
+			t.oacc[i][k] += ws[k] / sum
+		} else {
+			t.oacc[i][k] += 1 / float64(len(rs))
+		}
+		if t.oacc[i][k] > t.oacc[i][best] {
+			best = k
+		}
+	}
+	t.oacc[i][best]--
+	return rs[best]
 }
 
 // inflow is what the links into a node carry, for a node with no numbers of its own.
@@ -581,7 +852,9 @@ func (t *flowTab) openNode(m *model, name string) tea.Cmd {
 	if m.app.Spec.Services[target] != nil {
 		for i, tb := range m.tabs {
 			if st, ok := tb.(*servicesTab); ok {
-				return batch(m.jumpDirect(i), st.openService(m, target, ""))
+				cmd := m.jumpDirect(i)
+				st.focusService(m, target)
+				return cmd
 			}
 		}
 	}
@@ -641,14 +914,31 @@ flow:
     - { from: load, to: api }
     - { from: api, to: db }`))
 	}
+	if !t.loaded {
+		t.load(m)
+	}
 	head := t.header(m, w)
 	detail := t.detail(m, w)
 	ch := max(4, h-lipgloss.Height(head)-lipgloss.Height(detail)-1)
-	t.lay = layoutFlow(f, w, ch)
+	if t.fit {
+		t.zoom = fitZoom(f, w, ch)
+	}
+	t.lay = layoutFlow(f, t.zoom)
 	if _, ok := t.lay.index[t.sel]; !ok && len(t.lay.boxes) > 0 {
 		t.sel = t.lay.boxes[0].name
 	}
-	cv := newCanvas(w, ch)
+	if b, ok := t.lay.index[t.sel]; ok && t.follow {
+		bx := t.lay.boxes[b]
+		t.offX = min(max(t.offX, bx.x+bx.w+1-w), bx.x-1)
+		t.offY = min(max(t.offY, bx.y+bx.h+1-ch), bx.y-1)
+		t.follow = false
+	}
+	t.offX = min(max(t.offX, 0), max(0, t.lay.w-w))
+	t.offY = min(max(t.offY, 0), max(0, t.lay.h-ch))
+	dx, dy := max(0, (w-t.lay.w)/2)-t.offX, max(0, (ch-t.lay.h)/2)-t.offY
+	hy := lipgloss.Height(head)
+	m.zone("flow:canvas", 0, hy, w, ch)
+	cv := newCanvas(t.lay.w, t.lay.h)
 	states := map[string]int{}
 	whys := map[string][]string{}
 	for _, b := range t.lay.boxes {
@@ -678,6 +968,9 @@ flow:
 		for _, pk := range ps {
 			k := int(pk.p * float64(len(p)-1))
 			glyph, st := '●', fsPacket
+			if pk.origin >= 0 {
+				st = originStyle(pk.origin)
+			}
 			if pk.failed {
 				glyph, st = '◆', fsRed
 			}
@@ -695,10 +988,17 @@ flow:
 		}
 	}
 	blink := (t.frame/6)%2 == 0
+	origin := map[string]int{}
+	for i, o := range t.origins {
+		origin[o] = i
+	}
 	for _, b := range t.lay.boxes {
 		n, s := f.Nodes[b.name], t.stats[b.name]
-		title := strings.TrimSpace(flowIcons[n.Kind] + " " + firstNonEmpty(n.Label, b.name))
+		title := flowTitle(f, b.name)
 		border, titleSt := fsPanel, fsTitle
+		if o, ok := origin[b.name]; ok {
+			border, titleSt = originStyle(o), originStyle(o)
+		}
 		switch states[b.name] {
 		case stOK:
 			border = fsGreen
@@ -709,17 +1009,40 @@ flow:
 			if blink {
 				titleSt = fsRedRev
 			}
-		case stIdle:
-			border, titleSt = fsPanel, fsDim
+		case stIdle, stLow:
+			if _, ok := origin[b.name]; !ok {
+				border, titleSt = fsPanel, fsDim
+			}
 		}
 		picked := b.name == t.sel
 		if picked && states[b.name] < stHot {
-			border = fsAccent
+			if _, ok := origin[b.name]; !ok {
+				border = fsAccent
+			}
 		}
 		cv.box(b, title, border, titleSt, picked, t.boxLines(m, b, n, s, states[b.name]))
-		m.zone("flow:node:"+b.name, b.x, lipgloss.Height(head)+b.y, b.w, b.h)
+		if rs := t.reach[b.name]; len(t.origins) > 1 && len(rs) > 0 {
+			x := b.x + b.w - 2 - len(rs)
+			for _, o := range rs {
+				cv.set(x, b.y+b.h-1, '●', originStyle(o))
+				x++
+			}
+		}
+		x0, y0 := max(b.x+dx, 0), max(b.y+dy, 0)
+		if x1, y1 := min(b.x+dx+b.w, w), min(b.y+dy+b.h, ch); x1 > x0 && y1 > y0 {
+			m.zone("flow:node:"+b.name, x0, hy+y0, x1-x0, y1-y0)
+		}
 	}
-	return head + "\n" + cv.String() + "\n" + detail
+	view := cv.window(dx, dy, w, ch)
+	if !t.live {
+		msg := " live data off: no queries to metrics, queues, databases or caches · e turns it on "
+		view.put(max(0, (w-ansi.StringWidth(msg))/2), 0, msg, fsAmber, w)
+	}
+	if t.lay.w > w || t.lay.h > ch {
+		pos := fmt.Sprintf(" %d,%d of %dx%d ", t.offX, t.offY, t.lay.w, t.lay.h)
+		view.put(w-ansi.StringWidth(pos), ch-1, pos, fsDim, w)
+	}
+	return head + "\n" + view.String() + "\n" + detail
 }
 
 // boxLines are a node's two lines: its rate, trend and load bar; then latency, errors, backlog or
@@ -737,10 +1060,10 @@ func (t *flowTab) boxLines(m *model, b flowBox, n *spec.FlowNode, s *flowStat, s
 			if room := inner - used - 6; room >= 3 {
 				full := min(room, int(math.Round(u*float64(room))))
 				st := fsGreen
-				switch {
-				case u >= 0.9:
+				switch state {
+				case stOver:
 					st = fsRed
-				case u >= 0.7:
+				case stHot:
 					st = fsAmber
 				}
 				one = append(one, seg{" " + strings.Repeat("▰", full), st}, seg{strings.Repeat("▱", room-full), fsDim}, seg{fmt.Sprintf("%3.0f%%", min(u*100, 999)), st})
@@ -750,6 +1073,8 @@ func (t *flowTab) boxLines(m *model, b flowBox, n *spec.FlowNode, s *flowStat, s
 		one = append(one, seg{"≈" + viz.Human(in, "/s"), fsText}, seg{" in", fsDim})
 	} else if s != nil && s.err != "" {
 		one = append(one, seg{"✖ " + s.err, fsRed})
+	} else if s == nil && !t.live {
+		one = append(one, seg{"–", fsDim})
 	} else if s == nil {
 		one = append(one, seg{spinner(), fsDim})
 	} else {
@@ -779,6 +1104,9 @@ func (t *flowTab) boxLines(m *model, b flowBox, n *spec.FlowNode, s *flowStat, s
 		}
 		if s.gens > 0 {
 			two = append(two, seg{fmt.Sprintf("%d/%d running ", s.running, s.gens), fsDim})
+		}
+		if s.has&hasOps != 0 {
+			two = append(two, seg{fmt.Sprintf("⇄%d conns ", s.conns), fsDim})
 		}
 	}
 	if svc, ok := t.service(m, n.Open); ok {
@@ -857,6 +1185,9 @@ func (t *flowTab) header(m *model, w int) string {
 	if t.paused {
 		verdict += sDim.Render(" · ❚❚ paused")
 	}
+	if !t.live {
+		verdict = sAmber.Render("○ live data off")
+	}
 	parts := []string{sDim.Render("in ") + sTitle.Render(viz.Human(in, "/s")), sDim.Render("out ") + sTitle.Render(viz.Human(out, "/s"))}
 	if rate > 0 {
 		pct := errs / rate * 100
@@ -873,7 +1204,11 @@ func (t *flowTab) header(m *model, w int) string {
 		parts = append(parts, sDim.Render("busiest ")+st.Render(fmt.Sprintf("%s %.0f%%", worst, worstU*100)))
 	}
 	line := " " + verdict + "   " + strings.Join(parts, sDim.Render("  ·  "))
-	legend := sDim.Render("● request  ") + sRed.Render("◆") + sDim.Render(" failed  ▶ flow")
+	var legend string
+	for i, o := range t.origins {
+		legend += originStyle(i).style().Render("●") + sDim.Render(" "+firstNonEmpty(f.Nodes[o].Label, o)+"  ")
+	}
+	legend += sRed.Render("◆") + sDim.Render(" failed")
 	if gap := w - lipgloss.Width(line) - lipgloss.Width(legend) - 1; gap > 0 {
 		line += strings.Repeat(" ", gap) + legend
 	}
@@ -897,7 +1232,13 @@ func (t *flowTab) detail(m *model, w int) string {
 			nums = append(nums, fmt.Sprintf("%.0f%% of %s", u*100, viz.Human(n.Max, "/s")))
 		}
 	}
+	if low, hot, over := t.levelsOf(t.sel, n); low+hot+over > 0 {
+		nums = append(nums, sDim.Render(fmt.Sprintf("low %s hot %s over %s", viz.Human(low, "/s"), viz.Human(hot, "/s"), viz.Human(over, "/s"))))
+	}
 	if s != nil {
+		if s.has&hasOps != 0 {
+			nums = append(nums, fmt.Sprintf("%d connections", s.conns))
+		}
 		if s.has&hasOffered != 0 {
 			nums = append(nums, fmt.Sprintf("asked %s by %d/%d generators", viz.Human(s.offered, "/s"), s.running, s.gens))
 		}
@@ -931,7 +1272,11 @@ func (t *flowTab) detail(m *model, w int) string {
 		line2 += sDim.Render(firstLine(n.Help))
 	}
 	target := firstNonEmpty(n.Open, t.sel)
-	line3 := sDim.Render(" enter or click opens " + target + " · esc or backspace there comes back here")
+	what := "opens " + target
+	if m.app.Spec.Services[target] != nil {
+		what = "selects " + target + " on Services"
+	}
+	line3 := sDim.Render(" enter or click " + what + " · esc or backspace there comes back · t sets low/hot/over")
 	return strings.Join([]string{sDim.Render(strings.Repeat("─", w)), truncate(line1, w), truncate(line2, w), truncate(line3, w)}, "\n")
 }
 
@@ -940,7 +1285,7 @@ func (t *flowTab) aiContext(m *model) string {
 	for _, n := range flowOrder(t.flow(m)) {
 		st, why := t.state(m, n)
 		r, _ := t.stats[n].shown()
-		fmt.Fprintf(&b, "%s: %s state=%s %s\n", n, viz.Human(r, "/s"), []string{"unknown", "idle", "ok", "hot", "overloaded"}[st], strings.Join(why, "; "))
+		fmt.Fprintf(&b, "%s: %s state=%s %s\n", n, viz.Human(r, "/s"), []string{"unknown", "idle", "low", "ok", "hot", "overloaded"}[st], strings.Join(why, "; "))
 	}
 	return "picked node: " + t.sel + "\n" + b.String()
 }

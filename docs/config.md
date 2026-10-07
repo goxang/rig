@@ -23,7 +23,7 @@ is out of date.
 | `environments` | below |
 | `components` | below; shared by every environment |
 | `dashboards` | `name: [panel, ...]` or `name: {help, vars, panels}` (see below) |
-| `flow` | `{help, source, nodes, links}`: the Flow screen, requests moving through the system (see below) |
+| `flow` | `{help, source, live, nodes, links}`: the Flow screen, requests moving through the system (see below) |
 | `tests` | test suites for `rig test` and the Tests screen (see below) |
 | `sections` | `name: {help, services: [names, groups or roles]}`: the Services screen's parts, in this order; services in none show under `other` |
 | `manifests` | folders `rig manifests` and the Manifests screen read (default: the runtime's `manifests`, else the `kubernetes` imports). The screen lists only the objects a service deploys; `u` shows the rest |
@@ -189,6 +189,7 @@ out, and `enter` or a click opens the node's page; `esc` or `⌫` there comes st
 flow:
   help: an order from the load generator to the shipping worker
   source: prom                           # the metrics component (default: the first)
+  live: true                             # false: no live data until e turns it on
   nodes:                                 # down each column in this order
     orders: { kind: load, load: [orders], open: orders, max: 300 }
     api:    { kind: service, max: 250, slow: 200,
@@ -216,7 +217,13 @@ flow:
 | `rate`, `errors`, `latency`, `backlog` | instant metrics queries: per second, per second, ms, items waiting |
 | `load` | load generators: their target rates are the offered load, and a node sending well below it runs hot |
 | `max` | what it handles per second: past 70% it runs hot, past 90% it is overloaded |
+| `low`, `hot`, `over` | rates per second: under `low` it is barely used, from `hot` it runs hot, from `over` it is overloaded (`hot`/`over` default to 70%/90% of `max`); `t` on the screen sets them for you |
 | `slow` | latency (ms) past which it is overloaded (70% of it: hot) |
+| `shared` | draw it on the row under the others, reached by everything that links to it; left out, a cache or database linked from several columns is shared |
+
+`live: false` opens the screen without live data: no query reaches metrics, queues, caches or
+databases until `e` turns it on (the choice is kept in `.rig/flow.json`). Live, a cache or database
+node with no `rate` shows its own operations per second and connections, read from the server.
 
 A link's `rate` and `errors` are instant queries too; left out, a link carries its target's rate shared
 over the target's inputs (else its source's over its outputs). A node also runs hot on 1% errors

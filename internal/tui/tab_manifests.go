@@ -24,10 +24,12 @@ type manifestsTab struct {
 	set    *manifest.Set
 	err    string
 	filter string
-	sel    int
-	offset int
-	issues string // "", "file" or "all"
-	marked map[string]bool
+	// filtering: letters typed on the list go into filter as they come
+	filtering bool
+	sel       int
+	offset    int
+	issues    string // "", "file" or "all"
+	marked    map[string]bool
 
 	// fields is the selected object field by field; inFields gives it the keys, and edits save into the file
 	fields    *jsonTree
@@ -194,7 +196,29 @@ type applier interface {
 }
 
 func (t *manifestsTab) name() string { return "Manifests" }
-func (t *manifestsTab) typing() bool { return false }
+func (t *manifestsTab) typing() bool { return t.filtering }
+
+// filterKey takes a key while the list filters as typed: enter keeps the filter, esc drops it,
+// arrows still move. It reports whether it used the key.
+func (t *manifestsTab) filterKey(k tea.KeyMsg) bool {
+	switch k.Type {
+	case tea.KeyEnter:
+		t.filtering = false
+	case tea.KeyEsc:
+		t.filtering, t.filter, t.sel, t.offset = false, "", 0, 0
+	case tea.KeyBackspace:
+		if r := []rune(t.filter); len(r) > 0 {
+			t.filter, t.sel, t.offset = string(r[:len(r)-1]), 0, 0
+		} else {
+			t.filtering = false
+		}
+	case tea.KeyRunes, tea.KeySpace:
+		t.filter, t.sel, t.offset = t.filter+string(k.Runes), 0, 0
+	default:
+		return false
+	}
+	return true
+}
 func (t *manifestsTab) hints() [][2]string {
 	if t.inFields {
 		back := "back to objects"
@@ -203,12 +227,15 @@ func (t *manifestsTab) hints() [][2]string {
 		}
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"esc", back}}
 	}
+	if t.filtering {
+		return [][2]string{{"type", "filter by name"}, {"↑↓", "move"}, {"enter", "keep the filter"}, {"esc", "clear"}}
+	}
 	if t.cluster {
 		return [][2]string{{"c", "files instead of the cluster"}, {"→ tab", "edit fields (applied to the cluster)"}, {"v enter", "go to its service"}, {"e L", "edit on the cluster"},
-			{"s", "sync into its file"}, {"/", "search fields and values"}, {"f", "filter"}, {"i/I", "issues"}, {"r", "reload"}, {"o", "editor"}}
+			{"s", "sync into its file"}, {"/", "search fields and values"}, {"f or any free letter", "filter as you type"}, {"i/I", "issues"}, {"r", "reload"}, {"o", "editor"}}
 	}
 	return [][2]string{{"c", "what runs on the cluster"}, {"t ctrl+←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
-		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"u", "also what no service deploys"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
+		{"a", "apply"}, {"/", "search fields and values"}, {"f or any free letter", "filter as you type"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"u", "also what no service deploys"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
@@ -268,6 +295,19 @@ func (t *manifestsTab) objects() []*manifest.Object {
 			out = append(out, o)
 		}
 	}
+	if t.filter != "" {
+		q := strings.ToLower(t.filter)
+		tier := func(o *manifest.Object) int {
+			switch {
+			case strings.Contains(strings.ToLower(o.Name), q):
+				return 0
+			case fuzzy(o.ID(), q):
+				return 1
+			}
+			return 2
+		}
+		sort.SliceStable(out, func(i, j int) bool { return tier(out[i]) < tier(out[j]) })
+	}
 	return out
 }
 
@@ -281,7 +321,7 @@ func abs(p string) string {
 
 // entries is what the list shows: objects, or the tree's folders and files under cwd.
 func (t *manifestsTab) entries() []entry {
-	if !t.tree || t.file != "" {
+	if !t.tree || t.file != "" || t.filter != "" {
 		var out []entry
 		for _, o := range t.objects() {
 			out = append(out, entry{obj: o})
@@ -430,6 +470,9 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if t.inFields && t.fields != nil {
 			return t.fieldKey(m, msg)
 		}
+		if t.filtering && t.filterKey(msg) {
+			return nil
+		}
 		if listKeys(msg, &t.sel, len(t.entries())) {
 			t.viaSearch = false
 			return nil
@@ -438,16 +481,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "/":
 			return t.search(m)
 		case "f":
-			var items []string
-			if t.set != nil {
-				for _, o := range t.set.Objects {
-					items = append(items, o.ID()+" "+o.File)
-				}
-			}
-			m.askChecked("filter", t.filter, "a filter of Kubernetes objects (Kind/name and file): "+fuzzyHint+within("objects", items), matchesSome(items, fuzzy), func(v string) tea.Cmd {
-				t.filter, t.sel, t.offset = v, 0, 0
-				return nil
-			})
+			t.filtering = true
 		case "u":
 			t.all, t.sel, t.offset = !t.all, 0, 0
 		case "c":
@@ -566,6 +600,10 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			root := m.app.Spec.Dir
 			m.setStatus("looking for manifest folders…", false)
 			return func() tea.Msg { return manifestFoldersMsg{root: root, folders: manifest.Folders(root)} }
+		default:
+			if msg.Type == tea.KeyRunes && !msg.Alt && len(msg.Runes) == 1 {
+				t.filtering, t.filter, t.sel, t.offset = true, string(msg.Runes), 0, 0
+			}
 		}
 	}
 	return nil
@@ -822,7 +860,9 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 			title = relTo(m.app.Spec.Dir, t.file)
 		}
 	}
-	if t.filter != "" {
+	if t.filtering {
+		title += " · filter " + sAccent.Render(t.filter+"▏")
+	} else if t.filter != "" {
 		title += " · " + t.filter
 	}
 	if n := len(t.marked); n > 0 {

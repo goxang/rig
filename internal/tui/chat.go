@@ -951,7 +951,9 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 	case "open":
 		for i, t := range m.tabs {
 			if strings.EqualFold(t.name(), a["screen"]) {
-				return true, "opened " + t.name(), m.openTab(i)
+				cmd := m.openTab(i)
+				ok, text, sel := m.uiSelect(t, a["select"], a["path"], a["filter"])
+				return ok, "opened " + t.name() + text, batch(cmd, sel)
 			}
 		}
 		return false, "no screen " + a["screen"], nil
@@ -974,6 +976,50 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 		return m.uiPanels(a["dashboard"], a["panels"])
 	}
 	return false, "unknown action " + r.Action, nil
+}
+
+// uiSelect points the screen just opened at a row: Data a component (and path, the walk into it,
+// e.g. db1), Services a service, Load a generator, Metrics a dashboard; filter narrows the list.
+func (m *model) uiSelect(t tab, sel, path, filter string) (bool, string, tea.Cmd) {
+	if sel == "" && path == "" && filter == "" {
+		return true, "", nil
+	}
+	switch t := t.(type) {
+	case *dataTab:
+		if sel == "" {
+			sel = t.current().name
+		}
+		if _, err := m.app.Component(sel); err != nil {
+			return false, ": " + err.Error(), nil
+		}
+		t.filter, t.query = filter, ""
+		t.paths[sel] = nil
+		if path != "" {
+			t.paths[sel] = strings.Split(path, "\n")
+		}
+		return true, " at " + strings.Join(append([]string{sel}, t.paths[sel]...), " › "), t.pick(m, sel)
+	case *servicesTab:
+		if sel != "" {
+			if m.app.Spec.Services[sel] == nil {
+				return false, ": no service " + sel, nil
+			}
+			t.focusService(m, sel)
+		}
+		t.filter = filter
+		return true, "", nil
+	case *loadTab:
+		t.pick(sel)
+		return true, "", nil
+	case *metricsTab:
+		if sel != "" {
+			ok, text, cmd := m.uiPanels(sel, "")
+			return ok, " · " + text, cmd
+		}
+	case *manifestsTab:
+		t.filter, t.sel, t.offset = filter+sel, 0, 0
+		return true, "", nil
+	}
+	return true, " (select, path and filter do not apply to " + t.name() + ")", nil
 }
 
 // uiState is what rig_ui "state" answers: the screens, the open one's settings and its text.
@@ -1770,6 +1816,9 @@ type describeMsg struct {
 	took        time.Duration
 }
 
+// completeDelay is how long typing pauses before the AI is asked: each ask is a model call.
+const completeDelay = 1500 * time.Millisecond
+
 // completeLater asks for a completion, or for what ":?" describes, once typing pauses.
 func (m *model) completeLater() tea.Cmd {
 	p := m.prompt
@@ -1781,7 +1830,7 @@ func (m *model) completeLater() tea.Cmd {
 	}
 	p.seq++
 	seq := p.seq
-	return tea.Tick(350*time.Millisecond, func(time.Time) tea.Msg { return completeTickMsg{seq: seq} })
+	return tea.Tick(completeDelay, func(time.Time) tea.Msg { return completeTickMsg{seq: seq} })
 }
 
 func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
@@ -1791,9 +1840,10 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 	}
 	v := p.input.Value()
 	before, want, describe := describing(v)
-	if strings.TrimSpace(v) == "" || !describe && len(p.input.MatchedSuggestions()) > 0 {
+	if strings.TrimSpace(v) == "" || !describe && len(p.input.MatchedSuggestions()) > 0 || v == p.asked {
 		return nil
 	}
+	p.asked = v
 	if m.completeCancel != nil {
 		m.completeCancel()
 	}
@@ -1830,12 +1880,14 @@ func (m *model) describedMsg(msg describeMsg) {
 		p.waiting = false
 	}
 	if msg.err != nil {
+		// an answer that failed its check is not offered: it would not run
 		if !errors.Is(msg.err, context.Canceled) && p.seq == msg.seq {
 			m.setStatus("AI: "+msg.err.Error(), true)
 		}
-		if msg.text == "" {
-			return
+		if p.asked == msg.value {
+			p.asked = ""
 		}
+		return
 	}
 	p.took = msg.took
 	if msg.value == p.input.Value() && msg.text != "" {
@@ -1857,6 +1909,9 @@ func (m *model) completed(msg completeMsg) {
 	if msg.err != nil {
 		if !errors.Is(msg.err, context.Canceled) && p.seq == msg.seq {
 			m.setStatus("AI completion: "+msg.err.Error(), true)
+		}
+		if p.asked == msg.value {
+			p.asked = ""
 		}
 		return
 	}

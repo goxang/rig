@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/internal/viz"
@@ -992,11 +993,35 @@ func (t *dataTab) askQuery(m *model, c dataComp, at []string, value, template st
 	}
 	label := "query " + c.name + " › " + strings.Join(at, " › ")
 	defer m.asPopup()
+	check := pathQueryCheck(m, c.name, at)
 	if value != "" || template == "" {
-		m.askAI(label, value, hint, run)
+		m.askChecked(label, value, hint, check, run)
 		return
 	}
-	m.askTemplate(label, template, hint, nil, run)
+	m.askTemplate(label, template, hint, check, run)
+}
+
+// pathQueryCheck runs an AI-written reading query where it would run, so one that fails is
+// corrected before it is offered; a change is not run, only offered.
+func pathQueryCheck(m *model, comp string, at []string) func(context.Context, string) error {
+	a := m.app
+	return func(ctx context.Context, q string) error {
+		if ai.ClassifyQuery(q) != ai.Read {
+			return nil
+		}
+		v, err := a.Component(comp)
+		if err != nil {
+			return nil
+		}
+		pq, ok := v.(core.PathQuerier)
+		if !ok {
+			return nil
+		}
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		_, err = pq.QueryAt(c, at, q)
+		return err
+	}
 }
 
 func (t *dataTab) click(m *model, h hit) tea.Cmd {
