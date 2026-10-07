@@ -214,7 +214,7 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 `rig load`, `rig data`, `rig alerts`.
 
 Tools: `rig_init` (draft or write rig.yaml for the project, with infrastructure presets), `rig_docs` (every
-rig.yaml key), `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
+rig.yaml key; `search` returns only the sections holding some words), `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
 `rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, `rig_ui` (acts in a rig UI that
 started the agent), `rig_file` (list, read, write, edit, move, delete inside the project; credentials and `.git`
 refused, delete needs `"confirm": true`), and `rig` for any other command.
@@ -222,4 +222,5 @@ Each runs the CLI, so protections apply: changes to a protected environment need
 
 `rig skill --install` puts a skill into `.claude/skills/rig` and `.agents/skills/rig`, so Claude Code, Codex,
 opencode and others know how to write and extend rig.yaml (services, infrastructure, `otel:`, `ui.tabs`,
-dashboards, tests) and check it with `rig env`; `rig docs config` is the reference they read.
+dashboards, tests) and check it with `rig env`; `rig docs config` is the reference they read, and `rig docs <words>`
+prints only the sections that hold them (`rig docs tasks steps`), across every doc.
