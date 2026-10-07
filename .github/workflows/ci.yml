@@ -50,7 +50,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go test -count=1 ./...
+      # failures as annotations too: they read without a login, unlike the log
+      - shell: bash
+        run: |
+          go test -count=1 ./... 2>&1 | tee out.txt; rc=${PIPESTATUS[0]}
+          grep -E -- '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' out.txt | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+          exit "$rc"
 
   version:
     runs-on: ubuntu-latest
@@ -145,5 +150,5 @@ jobs:
           cp install.sh dist/
           (cd dist && sha256sum * > checksums.txt)
           git tag "$TAG" "$GITHUB_SHA"
-          git push origin "$TAG"
-          gh release create "$TAG" dist/* --title "rig $TAG" --generate-notes
+          for i in 1 2 3; do git push origin "$TAG" && break; sleep $((i * 10)); done
+          for i in 1 2 3; do gh release create "$TAG" dist/* --title "rig $TAG" --generate-notes && break; sleep $((i * 10)); done
