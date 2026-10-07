@@ -164,6 +164,33 @@ func (b *Builder) Build(ctx context.Context, s *spec.Service, o core.BuildOption
 	return ref, sh.New("docker", "load", "-i", file).Run(ctx)
 }
 
+// Push sends an image from the local Docker daemon straight to its registry: docker push goes
+// through the daemon's proxy, which some networks break.
+func (b *Builder) Push(ctx context.Context, ref string, out io.Writer) error {
+	tmp, err := os.MkdirTemp("", "rig-push-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	file := filepath.Join(tmp, "image.tar")
+	if err := sh.New("docker", "save", "-o", file, ref).Run(ctx); err != nil {
+		return err
+	}
+	tagRef, err := name.NewTag(ref, b.nameOpts(ref)...)
+	if err != nil {
+		return err
+	}
+	img, err := tarball.ImageFromPath(file, &tagRef)
+	if err != nil {
+		return err
+	}
+	if err := remote.Write(tagRef, img, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain), remote.WithTransport(registryTransport)); err != nil {
+		return pushError(ref, err)
+	}
+	fmt.Fprintf(out, "  ⇪ %s\n", ref)
+	return nil
+}
+
 func (b *Builder) nameOpts(ref string) []name.Option {
 	if b.opt.Insecure || strings.HasPrefix(ref, "localhost") || strings.HasPrefix(ref, "127.0.0.1") {
 		return []name.Option{name.Insecure}

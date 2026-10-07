@@ -543,3 +543,29 @@ func ignoreState(dir string) {
 	defer f.Close()
 	_, _ = f.WriteString(text)
 }
+
+func lastEnvFile(dir string) string { return filepath.Join(dir, ".rig", "last-env") }
+
+// LastEnv is the environment the UI last showed in the project of file ("" finds rig.yaml from here up).
+func LastEnv(file string) string {
+	if file == "" {
+		f, err := spec.Find(".")
+		if err != nil {
+			return ""
+		}
+		file = f
+	}
+	raw, _ := os.ReadFile(lastEnvFile(filepath.Dir(file)))
+	return strings.TrimSpace(string(raw))
+}
+
+// RememberEnv makes this environment the one the next `rig` opens on.
+func (a *App) RememberEnv() {
+	if a.Env == nil || a.Inferred {
+		return
+	}
+	f := lastEnvFile(a.Spec.Dir)
+	if os.MkdirAll(filepath.Dir(f), 0o755) == nil {
+		_ = os.WriteFile(f, []byte(a.Env.Name+"\n"), 0o644)
+	}
+}

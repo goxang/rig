@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/spec"
 )
 
@@ -312,6 +313,50 @@ func (a *App) Build(ctx context.Context, s *spec.Service, tag string, out io.Wri
 // BuildFrom builds one service's image with the builder its build section asks for, from a git ref
 // when given, and returns the reference. Pushing over a tag the registry already has needs confirmation.
 func (a *App) BuildFrom(ctx context.Context, s *spec.Service, tag, ref string, out io.Writer) (string, error) {
+	return a.build(ctx, s, tag, ref, true, out)
+}
+
+// BuildLocal builds s's image into the local Docker daemon (a kind cluster's nodes, when the
+// environment has no registry) without pushing it; Push sends it later.
+func (a *App) BuildLocal(ctx context.Context, s *spec.Service, tag string, out io.Writer) (string, error) {
+	return a.build(ctx, s, tag, "", false, out)
+}
+
+// Push sends s's image at tag from the local Docker daemon to the environment's registry.
+func (a *App) Push(ctx context.Context, s *spec.Service, tag string, out io.Writer) error {
+	if err := a.Writable(); err != nil {
+		return err
+	}
+	if s.Build == nil {
+		return nil
+	}
+	reg := ""
+	if r, ok := a.runtime.(core.Registrar); ok {
+		reg = r.Registry()
+	}
+	if reg == "" {
+		return fmt.Errorf("%s has no registry to push to", a.Env.Name)
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	img := core.ImageRef(s, reg, tag)
+	if !core.Confirmed(ctx) && imageExists(ctx, img) {
+		return fmt.Errorf("%s: %w", img, core.ErrTagExists)
+	}
+	typ := "docker"
+	if s.Build.Go != "" {
+		typ = "go"
+	}
+	if b, err := a.builder(typ); err == nil {
+		if p, ok := b.(core.Pusher); ok {
+			return p.Push(ctx, img, out)
+		}
+	}
+	return sh.New("docker", "push", img).Attach(ctx, nil, out, out)
+}
+
+func (a *App) build(ctx context.Context, s *spec.Service, tag, ref string, push bool, out io.Writer) (string, error) {
 	if err := a.Writable(); err != nil {
 		return "", err
 	}
@@ -343,7 +388,7 @@ func (a *App) BuildFrom(ctx context.Context, s *spec.Service, tag, ref string, o
 		}
 	}
 	// services sharing one build (same source, same image name) are built once per tag
-	key := fmt.Sprintf("%s|%+v|%s|%s|%s", typ, *s.Build, core.ImageRef(s, reg, tag), reg, ref)
+	key := fmt.Sprintf("%s|%+v|%s|%s|%s|%t", typ, *s.Build, core.ImageRef(s, reg, tag), reg, ref, push)
 	a.mu.Lock()
 	once, ok := a.builds[key]
 	if !ok {
@@ -357,11 +402,11 @@ func (a *App) BuildFrom(ctx context.Context, s *spec.Service, tag, ref string, o
 	once.Do(func() {
 		buildSlots <- struct{}{}
 		defer func() { <-buildSlots }()
-		if reg != "" && !core.Confirmed(ctx) && imageExists(ctx, core.ImageRef(s, reg, tag)) {
+		if push && reg != "" && !core.Confirmed(ctx) && imageExists(ctx, core.ImageRef(s, reg, tag)) {
 			once.err = fmt.Errorf("%s: %w", core.ImageRef(s, reg, tag), core.ErrTagExists)
 			return
 		}
-		once.img, once.err = b.Build(ctx, s, core.BuildOptions{Tag: tag, Registry: reg, Push: reg != "", Out: out, Dir: dir})
+		once.img, once.err = b.Build(ctx, s, core.BuildOptions{Tag: tag, Registry: reg, Push: push && reg != "", Out: out, Dir: dir})
 	})
 	img, err := once.img, once.err
 	if err != nil {

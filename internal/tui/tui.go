@@ -88,6 +88,9 @@ type model struct {
 	workCtx  context.Context
 	stopWork context.CancelFunc
 
+	// quitArmed is the quit key pressed once; pressing it again right after quits
+	quitArmed string
+
 	confirm *confirm
 	prompt  *prompt
 	picker  *picker
@@ -335,6 +338,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	if a.Env == nil {
 		return fmt.Errorf("no environment: define one under environments: and set default")
 	}
+	a.RememberEnv()
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
@@ -362,6 +366,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	}
 	program = tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx))
 	_, err = program.Run()
+	setPointer("default")
 	if err == tea.ErrProgramKilled {
 		return nil
 	}
@@ -712,6 +717,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tabs = newTabs(m.app, m.all, m.simple)
 		m.sched = newScheduler(m.app)
 		m.setStatus("environment "+m.app.Env.Name, false)
+		m.app.RememberEnv()
 		m.ai = nil
 		if m.chat != nil {
 			m.chat.reset()
@@ -739,6 +745,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) mouse(e tea.MouseMsg) tea.Cmd {
 	m.hx, m.hy = e.X, e.Y
+	m.pointerAt(e.X, e.Y)
 	if m.dragZone != "" && (e.Action == tea.MouseActionMotion || e.Action == tea.MouseActionRelease) {
 		return m.dragTo(e)
 	}
@@ -1031,6 +1038,8 @@ func stripHit(h hit, id string) (int, bool) {
 }
 
 func (m *model) key(k tea.KeyMsg) tea.Cmd {
+	again := m.quitArmed == k.String()
+	m.quitArmed = ""
 	if k.String() == "ctrl+c" && m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) {
 		if m.working() && m.stopWork != nil {
 			m.stopWork()
@@ -1040,14 +1049,19 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 					d.loading, d.seq = false, d.seq+1
 				}
 			}
+			m.quitArmed = "ctrl+c"
 			m.setStatus("stopped what was running; ctrl+c again quits", false)
 			return nil
 		}
-		return m.quit()
+		return m.quitTwice("ctrl+c", again)
 	}
 	m.sel = nil
-	// alt+arrows switch screens from anywhere: they close what is open over the screen first
-	if s := k.String(); (s == "alt+left" || s == "alt+right") && len(m.tabs) > 0 {
+	// alt+arrows switch screens from anywhere: they close what is open over the screen first. Some
+	// terminals keep alt+arrows for themselves, so ctrl+arrows do the same where they move no cursor.
+	s := k.String()
+	ctrlArrow := (s == "ctrl+left" || s == "ctrl+right") && m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) &&
+		len(m.tabs) > 0 && !m.tabs[m.active].typing()
+	if (s == "alt+left" || s == "alt+right" || ctrlArrow) && len(m.tabs) > 0 {
 		if m.confirm != nil && m.confirm.cancel != nil {
 			m.confirm.cancel()
 		}
@@ -1060,7 +1074,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.chat.focus = false
 		}
 		step := 1
-		if s == "alt+left" {
+		if s == "alt+left" || s == "ctrl+left" {
 			step = len(m.tabs) - 1
 		}
 		return batch(esc, m.openTab((m.active+step)%len(m.tabs)))
@@ -1189,7 +1203,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		case "q":
-			return m.quit()
+			return m.quitTwice("q", again)
 		case "S":
 			id, err := m.saveSession()
 			if err != nil {
@@ -1246,6 +1260,16 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		}
 	}
 	return t.update(m, k)
+}
+
+// quitTwice quits on the second press of the same key in a row, so a stray q or ctrl+c is harmless.
+func (m *model) quitTwice(key string, again bool) tea.Cmd {
+	if !again {
+		m.quitArmed = key
+		m.setStatus("press "+key+" again to quit", false)
+		return nil
+	}
+	return m.quit()
 }
 
 // quit leaves at once unless that would cut something short: a test run and operations still
@@ -1717,7 +1741,7 @@ func (m *model) footer() string {
 			}
 			hs = append(hs, sKey.Render("T")+" "+sDim.Render("tasks"))
 		}
-		hs = append(hs, sKey.Render("q")+" "+sDim.Render("quit"))
+		hs = append(hs, sKey.Render("q q")+" "+sDim.Render("quit"))
 		line = " " + strings.Join(hs, "  ")
 	}
 	status := ""
@@ -1806,7 +1830,7 @@ var screenHelp = map[string]string{
 // unchanged from before, just no longer rendered as one fixed block.
 func (m *model) helpLines() []string {
 	rows := [][2]string{
-		{"1-9 0 `  tab ⇧tab  alt+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
+		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
 		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ ctrl+⇧↑↓", "sort column, order (or click a header)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
 		{"esc", "back"}, {"drag a border", "resize panes (kept for next time)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session (rig resume <id>)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}

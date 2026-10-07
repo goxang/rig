@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,4 +106,31 @@ func saveSplits(s map[string]float64) {
 	raw, _ := json.MarshalIndent(s, "", "  ")
 	_ = os.MkdirAll(filepath.Dir(f), 0o755)
 	_ = os.WriteFile(f, raw, 0o644)
+}
+
+var pointer = "default"
+
+// setPointer changes the mouse pointer's shape with OSC 22 (xterm, kitty, foot, ghostty, WezTerm);
+// terminals without it ignore the sequence.
+func setPointer(shape string) {
+	if shape != pointer {
+		pointer = shape
+		fmt.Fprint(os.Stdout, "\x1b]22;"+shape+"\x1b\\")
+	}
+}
+
+// pointerAt shows a resize pointer over a draggable border and while one is dragged.
+func (m *model) pointerAt(x, y int) {
+	name := m.splitting
+	if name == "" {
+		name = m.borderAt(x, y)
+	}
+	switch {
+	case name == "":
+		setPointer("default")
+	case m.splitGeo[name].down:
+		setPointer("row-resize")
+	default:
+		setPointer("col-resize")
+	}
 }

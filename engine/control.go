@@ -125,7 +125,10 @@ func (a *App) Deploy(ctx context.Context, name, tag string) error {
 		return err
 	}
 	rel := core.Release{}
-	if tag != "" && s.Build != nil {
+	switch {
+	case strings.ContainsAny(tag, "/:@"):
+		rel.Image = tag
+	case tag != "" && s.Build != nil:
 		rel.Image = a.TagImage(s, tag)
 	}
 	return rt.Deploy(ctx, s, rel)

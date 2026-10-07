@@ -76,6 +76,7 @@ func serviceCommands() []*cobra.Command {
 	})
 
 	var tag, ref string
+	var noPush bool
 	var buildFirst bool
 	deploy := &cobra.Command{
 		Use:   "deploy <service|group...>",
@@ -144,6 +145,10 @@ func serviceCommands() []*cobra.Command {
 				if a.Spec.Services[n].Build == nil {
 					return nil
 				}
+				if noPush {
+					_, err := a.BuildLocal(ctx, a.Spec.Services[n], tag, os.Stdout)
+					return err
+				}
 				_, err := a.BuildFrom(ctx, a.Spec.Services[n], tag, ref, os.Stdout)
 				return err
 			})
@@ -155,6 +160,24 @@ func serviceCommands() []*cobra.Command {
 	}
 	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag (default: <branch>-<date>-<time>)")
 	build.Flags().StringVar(&ref, "ref", "", "build from this git branch, tag or commit instead of the working tree")
+	build.Flags().BoolVar(&noPush, "no-push", false, "keep the image in the local Docker daemon (rig push sends it later)")
+
+	push := &cobra.Command{
+		Use:   "push <service|group...> -t <tag>",
+		Short: "push images rig build --no-push left in the local Docker daemon to the environment's registry",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			if tag == "" {
+				return errors.New("push needs the tag: -t <tag>")
+			}
+			names, err := a.Targets(args, false)
+			if err != nil {
+				return err
+			}
+			return parallelNames(names, func(n string) error { return a.Push(ctx, a.Spec.Services[n], tag, os.Stdout) })
+		}),
+	}
+	push.Flags().StringVarP(&tag, "tag", "t", "", "image tag to push")
 
 	scale := &cobra.Command{
 		Use:   "scale <service|group...> <replicas|+n|-n>",
@@ -353,7 +376,7 @@ func serviceCommands() []*cobra.Command {
 			})
 		}),
 	}
-	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, logs, exec, setenv, watchCmd}
+	return []*cobra.Command{upCmd, down, status, discover, start, stop, restart, scale, deploy, build, push, logs, exec, setenv, watchCmd}
 }
 
 func envLabel(a *engine.App) string {

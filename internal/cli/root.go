@@ -68,7 +68,17 @@ Run rig with no arguments for the terminal UI.`,
 		SilenceErrors: true,
 		Version:       Version,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			remembered := false
+			if g.env == "" && os.Getenv("RIG_ENV") == "" && UI != nil {
+				g.env = engine.LastEnv(g.file)
+				remembered = g.env != ""
+			}
 			a, err := open()
+			if err != nil && remembered {
+				// the remembered environment is gone from rig.yaml: fall back to the default
+				g.env = ""
+				a, err = open()
+			}
 			if err != nil {
 				return err
 			}
@@ -80,7 +90,7 @@ Run rig with no arguments for the terminal UI.`,
 		},
 	}
 	root.PersistentFlags().StringVarP(&g.file, "file", "f", "", "project file (default: rig.yaml found from here up, or $RIG_FILE)")
-	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default)")
+	root.PersistentFlags().StringVarP(&g.env, "env", "e", "", "environment (default: $RIG_ENV, then the project's default; the UI opens on the one it last showed)")
 	root.PersistentFlags().StringVar(&engine.NamespaceOverride, "namespace", "", "Kubernetes namespace for this run, instead of the environment's (rig ns switches it for good)")
 	root.PersistentFlags().BoolVar(&brief, "brief", brief, "terse output for agents and scripts: no colour, tab-separated, long cells cut (or $RIG_BRIEF=1)")
 	root.PersistentPreRun = func(*cobra.Command, []string) { setBrief(brief) }

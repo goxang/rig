@@ -11,6 +11,7 @@ rig infra up                  # infrastructure, once
 rig up test                   # every service tagged test, and what they depend on
 rig up --build                # build images and deploy everything, phase by phase
 rig build app -t v1 --ref main && rig deploy app -t v1   # apps only; infrastructure untouched
+rig build app -t v1 --no-push && rig push app -t v1      # build locally, push later
 rig scale core +1             # every service in group core, one more replica
 rig status
 rig -e kind logs -F api worker
@@ -65,7 +66,8 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | Hosts | nodes as htop-style CPU, memory and disk bars, the selected one's CPU history, a shell (double-click), and `p` the pods on a node, sortable by CPU, memory or age |
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
-Screens switch with `1`-`0` and `` ` `` (the eleventh), or a click on their name; tabs inside a screen
+`rig` opens on the environment it last showed (`-e` or `$RIG_ENV` picks another). Screens switch with
+`1`-`0` and `` ` `` (the eleventh), `alt+←→` or `ctrl+←→`, or a click on their name; tabs inside a screen
 (dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
@@ -73,9 +75,18 @@ logs, data, tests] }` picks the screens and their order, and the number keys fol
 component's address and database), `N` switches or creates a Kubernetes namespace, and the Metrics screen's
 `m` points the dashboards at another metrics source. `S` saves the session (screens, query results and history) for `rig resume`,
 under the user's config directory (`~/.config/rig/projects/...`); `M` frees the mouse so
-the terminal can select text; the header shows alerts (`A`). `q` quits at once unless a test run or an
+the terminal can select text; the header shows alerts (`A`). `q q` (or `ctrl+c ctrl+c`) quits, at once unless a test run or an
 operation is still going, or load generators are sending: those stop with rig (tests, queries, port
 forwards) or keep going without it (generators, services), and it asks.
+
+On the Services screen, `d` deploys a tag or a whole image (the running one is filled in), `$` edits a
+service's env, `F` opens its manifests (edit the file, or the live object on the cluster), and `b` runs
+any of build, push and deploy for the selected or marked services with a tag you choose, then lets you
+change the environment's variables (database names, say) before the deploy.
+
+A Kubernetes environment can name its cluster by address as well: `runtime: { context: local, server:
+https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has
+one, else whichever context points at that server (Rancher names downloaded kubeconfigs per user).
 
 ## AI
 

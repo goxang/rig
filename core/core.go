@@ -212,6 +212,12 @@ type Builder interface {
 	Build(ctx context.Context, s *spec.Service, o BuildOptions) (image string, err error)
 }
 
+// Pusher is a builder that can push an image already in the local Docker daemon; without one,
+// rig runs docker push.
+type Pusher interface {
+	Push(ctx context.Context, image string, out io.Writer) error
+}
+
 // ---- observability ----
 
 type Point struct {

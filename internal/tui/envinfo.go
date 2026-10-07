@@ -189,7 +189,8 @@ func (m *model) editEnvVar(box *envBox) tea.Cmd {
 		}
 		a := m.app
 		return m.act("set var "+key, false, func(ctx context.Context) error {
-			return a.SetState(ctx, map[string]string{"var." + key: v})
+			_, err := setVars(ctx, a, map[string]string{key: v})
+			return err
 		})
 	})
 	return nil

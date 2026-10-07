@@ -120,11 +120,11 @@ func (t *servicesTab) hints() [][2]string {
 		return [][2]string{{"esc", "back"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
 			{"w", "wrap"}, {"s", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
 			{"r", "restart"}, {"u/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests: edit, sync, apply"},
-			{"d", "deploy"}, {"b", "build+deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
+			{"d", "deploy a tag/image"}, {"b", "build, push, deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
-	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-		{"h", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
+	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"d", "image"}, {"$", "env"}, {"F", "live manifests"}, {"b", "build/push/deploy"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"},
+		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -301,40 +301,20 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 	case "$":
 		return readEnv(m, names)
 	case "d":
-		m.ask(label("deploy", names)+": image tag (empty: the last built one)", "", func(tag string) tea.Cmd {
+		live := ""
+		for _, st := range m.services {
+			if st.Service == names[0] {
+				live = st.Image
+			}
+		}
+		m.ask(label("deploy", names)+": image tag or whole image (empty: the last built one)", live, func(tag string) tea.Cmd {
 			tag = strings.TrimSpace(tag)
 			return m.act(label("deploy", names)+tagNote(tag), true, func(ctx context.Context) error {
 				return each(names, func(n string) error { return a.Deploy(ctx, n, tag) })
 			})
 		})
 	case "b":
-		m.ask(label("build and deploy", names)+": image tag", a.DefaultTag(m.ctx, ""), func(tag string) tea.Cmd {
-			tag = strings.TrimSpace(tag)
-			if tag == "" {
-				return nil
-			}
-			return m.act(label("build and deploy", names)+tagNote(tag), true, func(ctx context.Context) error {
-				err := each(names, func(n string) error {
-					rt, s, err := a.Owner(n)
-					if err != nil || s.Build == nil || !a.ImageBased() {
-						if err == nil {
-							err = rt.Deploy(ctx, s, core.Release{})
-						}
-						return err
-					}
-					img, err := a.Build(ctx, s, tag, nil)
-					if err != nil {
-						return err
-					}
-					return rt.Deploy(ctx, s, core.Release{Image: img})
-				})
-				if err != nil {
-					return err
-				}
-				return a.SetState(ctx, map[string]string{"tag": tag})
-			})
-		})
-		return nil
+		return ship(m, names)
 	case "l":
 		for i, tb := range m.tabs {
 			if lt, ok := tb.(*logsTab); ok {
