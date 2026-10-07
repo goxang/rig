@@ -51,7 +51,7 @@ var chatCommands = []chatCmd{
 	{"/sessions", "", "pick a conversation (ctrl+d closes one there)"},
 	{"/close", "", "forget this conversation"},
 	{"/stop", "", "stop the running turn (ctrl+x)"},
-	{"/why", "<service>", "gather an incident's evidence, ask for its root cause"},
+	{"/why", "[--fix] <service or symptom>", "gather an incident's logs, traces, metrics and changes, ask for its root cause and a fix; answer fix to apply it"},
 	{"/connect", "", "use your installed opencode or Claude Code"},
 	{"/model", "", "the chat's model"},
 	{"/effort", "", "the chat's reasoning level"},
@@ -561,29 +561,37 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 		return nil
 	}
 	if !c.enabled() || c.busy {
-		return m.chatSend("/why " + args[0])
+		return m.chatSend("/why " + strings.Join(args, " "))
 	}
 	if c.sess == nil {
 		c.newSession(m)
 	}
-	svc := args[0]
-	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "/why " + svc, At: time.Now()})
+	fix := args[0] == "--fix"
+	if fix {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		m.setStatus("/why --fix needs a service or a symptom", true)
+		return nil
+	}
+	what := strings.Join(args, " ")
+	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "/why " + what, At: time.Now()})
 	c.busy, c.started, c.scroll = true, time.Now(), 0
 	ctx, cancel := context.WithCancel(m.ctx)
 	c.cancel = cancel
 	r, s, a := c.runner, c.sess, m.app
 	return func() tea.Msg {
 		defer cancel()
-		inc, err := a.Investigate(ctx, svc, 15*time.Minute)
+		inc, err := a.InvestigateSymptom(ctx, args, 15*time.Minute)
 		if err != nil {
 			return chatDoneMsg{s: s, err: err}
 		}
-		var top []string
-		for _, x := range inc.Suspects {
-			top = append(top, fmt.Sprintf("%s (%d)", x.Service, x.Score))
+		program.Send(chatEventMsg{s: s, e: ai.Event{Kind: "tool", Text: "rig why " + what + ": " + inc.Brief()}})
+		prompt := inc.Prompt()
+		if fix {
+			prompt += "\nThe user already answered: " + engine.FixPrompt
 		}
-		program.Send(chatEventMsg{s: s, e: ai.Event{Kind: "tool", Text: fmt.Sprintf("rig why %s: %d pieces of evidence; suspects %s", svc, len(inc.Evidence), strings.Join(top, ", "))}})
-		err = r.Turn(ctx, s, inc.Prompt(), "", func(e ai.Event) { program.Send(chatEventMsg{s: s, e: e}) })
+		err = r.Turn(ctx, s, prompt, "", func(e ai.Event) { program.Send(chatEventMsg{s: s, e: e}) })
 		return chatDoneMsg{s: s, err: err}
 	}
 }

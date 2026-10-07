@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,12 +17,13 @@ import (
 
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
 )
 
 // Evidence is one fact rig why found, cited by its ID.
 type Evidence struct {
 	ID      string    `json:"id"`
-	Kind    string    `json:"kind"` // status, health, reach, logs, traces, alert, change
+	Kind    string    `json:"kind"` // status, health, reach, logs, traces, metrics, alert, change
 	Service string    `json:"service,omitempty"`
 	At      time.Time `json:"at,omitempty"`
 	Bad     bool      `json:"bad"`
@@ -39,7 +42,9 @@ type Suspect struct {
 
 // Incident is what rig why gathered about one service and what it depends on.
 type Incident struct {
-	Service  string     `json:"service"`
+	Service string `json:"service"`
+	// Symptom is what the user described, when they said more than a service's name.
+	Symptom  string     `json:"symptom,omitempty"`
 	Env      string     `json:"env"`
 	At       time.Time  `json:"at"`
 	Window   string     `json:"window"`
@@ -53,11 +58,16 @@ var errorLine = regexp.MustCompile(`(?i)\b(error|err=|panic|fatal|exception|time
 // Investigate gathers evidence about service and everything it depends on over the last window:
 // state and restarts, health probes, the components they host, error lines in their logs, failed
 // traces, firing alerts and recent changes; then ranks the likely culprits. It needs no AI.
+// An empty service checks every service.
 func (a *App) Investigate(ctx context.Context, service string, window time.Duration) (*Incident, error) {
-	if _, err := a.Service(service); err != nil {
-		return nil, err
+	var targets []string
+	if service != "" {
+		if _, err := a.Service(service); err != nil {
+			return nil, err
+		}
+		targets = []string{service}
 	}
-	names, err := a.Targets([]string{service}, true)
+	names, err := a.Targets(targets, true)
 	if err != nil {
 		return nil, err
 	}
@@ -98,8 +108,16 @@ func (a *App) Investigate(ctx context.Context, service string, window time.Durat
 			}()
 		}
 	}
+	traced := []string{service}
+	if service == "" {
+		traced = names[:min(10, len(names))]
+	}
+	for _, n := range traced {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.traceEvidence(ctx, n, window, add) }()
+	}
 	wg.Add(1)
-	go func() { defer wg.Done(); a.traceEvidence(ctx, service, window, add) }()
+	go func() { defer wg.Done(); a.metricEvidence(ctx, names, window, add) }()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -245,6 +263,89 @@ func (a *App) traceEvidence(ctx context.Context, service string, window time.Dur
 		Summary: fmt.Sprintf("%d of %d traces of %s failed; slowest %s (%s, trace %s)", failed, len(ts), service, slowest.Duration.Round(time.Millisecond), slowest.Root, slowest.ID)})
 }
 
+// InvestigateSymptom investigates what the user described: the first service its words name (by
+// name, image or SERVICE_NAME), else every service.
+func (a *App) InvestigateSymptom(ctx context.Context, words []string, window time.Duration) (*Incident, error) {
+	service := ""
+	for _, w := range words {
+		if n := a.serviceNamed(strings.Trim(w, ",.:;?!'\"")); n != "" {
+			service = n
+			break
+		}
+	}
+	inc, err := a.Investigate(ctx, service, window)
+	if err != nil {
+		return nil, err
+	}
+	if len(words) > 1 || service == "" {
+		inc.Symptom = strings.Join(words, " ")
+	}
+	return inc, nil
+}
+
+func (a *App) serviceNamed(w string) string {
+	if w == "" {
+		return ""
+	}
+	for n, s := range a.Spec.Services {
+		if strings.EqualFold(n, w) || strings.EqualFold(path.Base(strings.Split(s.Image, ":")[0]), w) || strings.EqualFold(s.Env["SERVICE_NAME"], w) {
+			return n
+		}
+	}
+	return ""
+}
+
+var worseUp = regexp.MustCompile(`(?i)err|fail|5\d\d|latenc|duration|p9\d|timeout|restart|lag|queue|pending|reject|drop`)
+
+// metricEvidence reads the dashboard panels about the checked services (a $service variable, or the
+// service's name in the query) over the window: where each started and where it is now.
+func (a *App) metricEvidence(ctx context.Context, names []string, window time.Duration, add func(Evidence)) {
+	step := max(window/20, 15*time.Second)
+	n := 0
+	for _, dn := range SortedKeys(a.Spec.Dashboards) {
+		d := a.Spec.Dashboards[dn]
+		for _, p := range d.Panels {
+			for _, t := range p.Targets() {
+				for _, svc := range names {
+					if n >= 20 {
+						return
+					}
+					var vars map[string][]string
+					switch {
+					case strings.Contains(t.Query, "$service") && d.Vars["service"] != nil:
+						vars = map[string][]string{"service": {svc}}
+					case !strings.Contains(t.Query, svc):
+						continue
+					}
+					src, _, err := Get[core.Metrics](a, core.KindMetrics, p.Source)
+					if err != nil {
+						return
+					}
+					to := time.Now()
+					ss, err := src.Range(ctx, ExpandQuery(t.Query, vars, window, step), to.Add(-window), to, step)
+					if err != nil || len(ss) == 0 {
+						continue
+					}
+					n++
+					first, last := 0.0, 0.0
+					for _, sr := range ss {
+						if len(sr.Points) == 0 {
+							continue
+						}
+						k := min(3, len(sr.Points))
+						f, _ := summarise(sr.Points[:k], "avg")
+						l, _ := summarise(sr.Points[len(sr.Points)-k:], "avg")
+						first, last = first+f, last+l
+					}
+					bad := worseUp.MatchString(p.Title+" "+t.Query) && last > 2*first && last > 0
+					add(Evidence{Kind: "metrics", Service: svc, Bad: bad, Summary: fmt.Sprintf("%s (%s) for %s: %s at the start of the window, %s now",
+						cmp.Or(p.Title, t.Query), dn, svc, viz.Human(first, p.Unit), viz.Human(last, p.Unit))})
+				}
+			}
+		}
+	}
+}
+
 // changeEvidence: what the assistant changed, and when rig last changed the environment's state.
 func (a *App) changeEvidence(window time.Duration, add func(Evidence)) {
 	es, _ := ai.ReadAudit(a.AuditFile())
@@ -312,7 +413,7 @@ func Rank(target string, ev []Evidence) []Suspect {
 			for _, b := range e.Blames {
 				blame(b, 3, e.ID)
 			}
-		case "traces", "alert":
+		case "traces", "alert", "metrics":
 			blame(e.Service, 1, e.ID)
 		}
 	}
@@ -342,11 +443,40 @@ func contains(xs []string, x string) bool {
 	return false
 }
 
+// FixPrompt is what "fix" after a rig why analysis tells the assistant.
+const FixPrompt = `fix: apply the fix you proposed, now, with rig's tools (rig_file edits, rig_kv, rig_service, rig_deploy, ...); every change waits for the user's yes. Then check it worked with the same evidence (logs, traces, metrics) and say whether the symptom is gone.`
+
+// Brief is one line about what was gathered: how much evidence, how much of it bad, the top suspects.
+func (inc *Incident) Brief() string {
+	bad := 0
+	for _, e := range inc.Evidence {
+		if e.Bad {
+			bad++
+		}
+	}
+	var top []string
+	for _, s := range inc.Suspects[:min(3, len(inc.Suspects))] {
+		top = append(top, fmt.Sprintf("%s (%d)", s.Service, s.Score))
+	}
+	line := fmt.Sprintf("%d pieces of evidence over %d services, %d bad", len(inc.Evidence), len(inc.Checked), bad)
+	if len(top) > 0 {
+		line += "; suspects: " + strings.Join(top, ", ")
+	}
+	return line
+}
+
 // Prompt is what the assistant is asked about the incident.
 func (inc *Incident) Prompt() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Service %q on environment %s misbehaves. rig gathered this evidence over the last %s (services checked: %s).\n\n",
-		inc.Service, inc.Env, inc.Window, strings.Join(inc.Checked, ", "))
+	what := fmt.Sprintf("Service %q", inc.Service)
+	if inc.Service == "" {
+		what = "Something"
+	}
+	fmt.Fprintf(&b, "%s on environment %s misbehaves. rig gathered this evidence over the last %s (services checked: %s).\n\n",
+		what, inc.Env, inc.Window, strings.Join(inc.Checked, ", "))
+	if inc.Symptom != "" {
+		fmt.Fprintf(&b, "The user describes the symptom as: %q\n\n", inc.Symptom)
+	}
 	inc.writeEvidence(&b)
 	b.WriteString("\nrig's rule-based ranking of suspects: ")
 	for i, s := range inc.Suspects {
@@ -362,9 +492,14 @@ Answer in Markdown, short:
 one or two sentences naming the most likely root cause.
 ## Hypotheses
 a numbered list, most likely first; each names the service at fault, why, and cites evidence IDs like [E3].
+## Proposed fix
+the change that would fix it: the file and the edit, the KV key and value, the config, or the rig
+command (restart, scale, deploy), with how to check it worked. Say what you would still need to
+know when the evidence does not settle it.
 ## Next steps
 up to four concrete commands or checks (rig logs, rig restart, rig data, kubectl, ...).
-Use only the evidence above; say so when it is not enough.
+Use the evidence above; when you have rig's tools, use them to look further (logs, traces, metrics,
+the code) before you answer. Change nothing yet: the user answers "fix" to have you apply it.
 `)
 	return b.String()
 }
@@ -388,7 +523,7 @@ func (inc *Incident) writeEvidence(w io.Writer) {
 // NextSteps are rig's own suggestions for the top suspect, for when no AI answers.
 func (inc *Incident) NextSteps() []string {
 	if len(inc.Suspects) == 0 {
-		return []string{"rig logs -F " + inc.Service, "rig doctor"}
+		return []string{strings.TrimSpace("rig logs -F " + inc.Service), "rig doctor"}
 	}
 	top := inc.Suspects[0].Service
 	return []string{"rig status " + top, "rig logs " + top, "rig restart " + top + "   (if it is down or wedged)", "rig doctor   (tools, components, ports)"}
@@ -397,7 +532,7 @@ func (inc *Incident) NextSteps() []string {
 // Markdown writes the incident report: summary (the AI's analysis when there is one), timeline,
 // evidence and next steps.
 func (inc *Incident) Markdown(w io.Writer, analysis string) {
-	fmt.Fprintf(w, "# Incident: %s on %s\n\n%s · window %s · checked %s\n\n", inc.Service, inc.Env, inc.At.Format("2006-01-02 15:04:05"), inc.Window, strings.Join(inc.Checked, ", "))
+	fmt.Fprintf(w, "# Incident: %s on %s\n\n%s · window %s · checked %s\n\n", cmp.Or(inc.Symptom, inc.Service), inc.Env, inc.At.Format("2006-01-02 15:04:05"), inc.Window, strings.Join(inc.Checked, ", "))
 	if strings.TrimSpace(analysis) != "" {
 		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(analysis))
 	} else {

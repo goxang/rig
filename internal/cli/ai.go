@@ -202,9 +202,29 @@ RIG_AI_<KEY> (RIG_AI_MODEL, RIG_AI_FAST_URL, ...) overrides a setting for one ru
 
 // askOnce runs one turn in the terminal: answers stream to stdout, approvals are asked on it.
 func askOnce(ctx context.Context, a *engine.App, question, session string) error {
+	c, err := converse(a, session)
+	if err != nil {
+		return err
+	}
+	defer c.close()
+	_, err = c.turn(ctx, question)
+	c.hint()
+	return err
+}
+
+// conversation is a terminal conversation with the assistant over rig's tools: each change it
+// wants waits for a yes typed here.
+type conversation struct {
+	r     *ai.Runner
+	s     *ai.Session
+	in    *bufio.Reader
+	tty   bool
+	close func()
+}
+
+func converse(a *engine.App, session string) (*conversation, error) {
 	sock := ai.SocketPath()
-	tty := term.IsTerminal(int(os.Stdin.Fd()))
-	in := bufio.NewReader(os.Stdin)
+	c := &conversation{tty: term.IsTerminal(int(os.Stdin.Fd())), in: bufio.NewReader(os.Stdin)}
 	var mu sync.Mutex
 	always := map[string]bool{}
 	stop, err := ai.Serve(sock, func(r ai.Request) ai.Reply {
@@ -216,7 +236,7 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 		default:
 			return ai.Reply{Text: "no rig UI here: run `rig ai` without a question for the UI"}
 		}
-		if !tty {
+		if !c.tty {
 			return ai.Reply{NoOne: true, Text: "no terminal to ask on"}
 		}
 		mu.Lock()
@@ -225,7 +245,7 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 			return ai.Reply{OK: true, Text: "allowed for this session"}
 		}
 		fmt.Fprint(os.Stderr, "\n"+amber("? "+r.Text)+" [y/N/a=always this session] ")
-		line, _ := in.ReadString('\n')
+		line, _ := c.in.ReadString('\n')
 		switch strings.ToLower(strings.TrimSpace(line)) {
 		case "y", "yes":
 			return ai.Reply{OK: true, Text: "the user, on the terminal"}
@@ -236,31 +256,40 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 		return ai.Reply{}
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer stop()
-	r, err := a.AI(sock)
-	if err != nil {
-		return err
+	c.close = stop
+	if c.r, err = a.AI(sock); err != nil {
+		stop()
+		return nil, err
 	}
-	if !r.Setup.Enabled() {
-		return errors.New("AI is " + r.Setup.Describe())
+	if !c.r.Setup.Enabled() {
+		stop()
+		return nil, errors.New("AI is " + c.r.Setup.Describe())
 	}
-	var s *ai.Session
 	if session != "" {
-		if s, err = ai.LoadSession(a.AIDir(), session); err != nil {
-			return err
+		if c.s, err = ai.LoadSession(a.AIDir(), session); err != nil {
+			stop()
+			return nil, err
 		}
-		if s.Env != a.Env.Name {
-			return fmt.Errorf("session %s is bound to environment %s: rig -e %s ai -s %s", s.ID, s.Env, s.Env, s.ID)
+		if c.s.Env != a.Env.Name {
+			stop()
+			return nil, fmt.Errorf("session %s is bound to environment %s: rig -e %s ai -s %s", c.s.ID, c.s.Env, c.s.Env, c.s.ID)
 		}
 	} else {
-		s = ai.NewSession(a.AIDir(), r.Setup.Backend, a.Env.Name)
+		c.s = ai.NewSession(a.AIDir(), c.r.Setup.Backend, a.Env.Name)
 	}
-	fmt.Fprintln(os.Stderr, dim("◆ "+r.Setup.Describe()+" · env "+a.Env.Name))
-	err = r.Turn(ctx, s, question, "", func(e ai.Event) {
+	fmt.Fprintln(os.Stderr, dim("◆ "+c.r.Setup.Describe()+" · env "+a.Env.Name))
+	return c, nil
+}
+
+// turn sends text and prints the answer as it comes; it returns the answer's text.
+func (c *conversation) turn(ctx context.Context, text string) (string, error) {
+	var said []string
+	err := c.r.Turn(ctx, c.s, text, "", func(e ai.Event) {
 		switch e.Kind {
 		case "text":
+			said = append(said, strings.TrimSpace(e.Text))
 			fmt.Println(strings.TrimSpace(e.Text) + "\n")
 		case "tool":
 			fmt.Fprintln(os.Stderr, dim("  → "+e.Text))
@@ -268,8 +297,21 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 			fmt.Fprintln(os.Stderr, red("✖ "+e.Text))
 		}
 	})
-	fmt.Fprintln(os.Stderr, dim("continue: rig ai -s "+s.ID+" \"…\"  ·  rig resume "+s.ID))
-	return err
+	return strings.Join(said, "\n\n"), err
+}
+
+// ask reads one line typed on the terminal; ok is false when there is no terminal or input ended.
+func (c *conversation) ask(prompt string) (string, bool) {
+	if !c.tty {
+		return "", false
+	}
+	fmt.Fprint(os.Stderr, amber(prompt))
+	line, err := c.in.ReadString('\n')
+	return strings.TrimSpace(line), err == nil
+}
+
+func (c *conversation) hint() {
+	fmt.Fprintln(os.Stderr, dim("continue: rig ai -s "+c.s.ID+" \"…\"  ·  rig resume "+c.s.ID))
 }
 
 func aiLogCommand() *cobra.Command {

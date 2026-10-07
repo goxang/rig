@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/goxang/rig/spec"
 )
 
 // The shop with its database killed: the api only fails, postgres is down, unreachable and named in
@@ -54,5 +56,27 @@ func TestMentions(t *testing.T) {
 		if mentions(line, "postgres") != want {
 			t.Errorf("mentions(%q) != %v", line, want)
 		}
+	}
+}
+
+func TestSymptomNamesItsService(t *testing.T) {
+	a := &App{Spec: &spec.Project{Services: map[string]*spec.Service{
+		"parser": {Image: "registry.local/team/parsersvc:1.2"},
+		"api":    {Env: map[string]string{"SERVICE_NAME": "gateway"}},
+	}}}
+	for words, want := range map[string]string{"parsersvc is slow": "parser", "why does gateway 502?": "api", "API down": "api", "checkout is slow": ""} {
+		got := ""
+		for _, w := range strings.Fields(words) {
+			if got = a.serviceNamed(strings.Trim(w, ",.:;?!'\"")); got != "" {
+				break
+			}
+		}
+		if got != want {
+			t.Errorf("%q names %q, want %q", words, got, want)
+		}
+	}
+	inc := &Incident{Symptom: "checkout is slow", Env: "dev", Window: "15m", Checked: []string{"api"}}
+	if p := inc.Prompt(); !strings.Contains(p, "Something on environment dev") || !strings.Contains(p, `"checkout is slow"`) || !strings.Contains(p, "## Proposed fix") {
+		t.Fatalf("prompt:\n%s", p)
 	}
 }
