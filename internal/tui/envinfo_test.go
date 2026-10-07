@@ -63,3 +63,22 @@ func TestMaskValueHidesURLPasswords(t *testing.T) {
 		t.Fatalf("a URL without credentials changed: %q", got)
 	}
 }
+
+func TestEnvBoxSearch(t *testing.T) {
+	b := &envBox{lines: []envLine{{text: "  MAIN_DB  Switch", key: "MAIN_DB"}, {}, {text: "  TAG  v1", key: "TAG"}}}
+	for _, k := range []string{"/", "t", "a", "g"} {
+		b.key(keyOf(k))
+	}
+	if s := b.shown(); len(s) != 1 || b.sel != 2 {
+		t.Fatalf("shown %v sel %d", s, b.sel)
+	}
+	if edit, _ := b.key(keyOf("enter")); edit || b.typing {
+		t.Fatal("enter should end the search, not edit")
+	}
+	if edit, _ := b.key(keyOf("enter")); !edit {
+		t.Fatal("enter should edit")
+	}
+	if _, done := b.key(keyOf("esc")); done || b.filter != "" {
+		t.Fatal("esc should clear the search first")
+	}
+}

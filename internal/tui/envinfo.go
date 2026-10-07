@@ -1,14 +1,17 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/goxang/rig/engine"
 )
@@ -43,6 +46,76 @@ type envBox struct {
 	env         string
 	lines       []envLine
 	sel, offset int
+	// filter keeps the rows that contain it; typing says / was pressed and keys go to it
+	filter string
+	typing bool
+}
+
+// shown are the indexes of the rows the filter keeps (all without one; blank rows drop).
+func (b *envBox) shown() []int {
+	var out []int
+	f := strings.ToLower(b.filter)
+	for i, l := range b.lines {
+		if f == "" || l.text != "" && strings.Contains(strings.ToLower(ansi.Strip(l.text)), f) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// key handles a key of the open box; done says it closes.
+func (b *envBox) key(k tea.KeyMsg) (edit, done bool) {
+	shown := b.shown()
+	pos := max(0, slices.Index(shown, b.sel))
+	move := func(d int) {
+		if len(shown) > 0 {
+			b.sel = shown[max(0, min(len(shown)-1, pos+d))]
+		}
+	}
+	if b.typing {
+		switch k.Type {
+		case tea.KeyEnter, tea.KeyDown, tea.KeyUp:
+			b.typing = false
+			if k.Type != tea.KeyEnter {
+				return b.key(k)
+			}
+		case tea.KeyEsc:
+			b.typing, b.filter = false, ""
+		case tea.KeyBackspace:
+			if r := []rune(b.filter); len(r) > 0 {
+				b.filter = string(r[:len(r)-1])
+			}
+		case tea.KeyRunes, tea.KeySpace:
+			b.filter += string(k.Runes)
+		}
+		if s := b.shown(); len(s) > 0 && !slices.Contains(s, b.sel) {
+			b.sel = s[0]
+		}
+		return false, false
+	}
+	switch k.String() {
+	case "up", "k":
+		move(-1)
+	case "down", "j":
+		move(1)
+	case "pgup":
+		move(-10)
+	case "pgdown":
+		move(10)
+	case "/":
+		b.typing = true
+	case "e", "enter":
+		return true, false
+	case "esc":
+		if b.filter != "" {
+			b.filter = ""
+			return false, false
+		}
+		return false, true
+	default:
+		return false, k.String() != "y"
+	}
+	return false, false
 }
 
 func (b *envBox) plainText() string {
@@ -57,33 +130,41 @@ func (b *envBox) plainText() string {
 func (b *envBox) view(h int) string {
 	const frame = 7 // border(2) + padding(2) + title(1) + blank before footer(1) + footer(1)
 	inner := max(1, h-frame)
-	b.sel = max(0, min(b.sel, len(b.lines)-1))
-	b.offset = scroll(b.sel, b.offset, inner, len(b.lines))
+	shown := b.shown()
+	pos := max(0, slices.Index(shown, b.sel))
+	b.offset = scroll(pos, b.offset, inner, len(shown))
 	var body strings.Builder
-	w := 0
+	w := 40
 	for _, l := range b.lines {
 		w = max(w, lipgloss.Width(l.text))
 	}
-	for i := b.offset; i < b.offset+min(inner, len(b.lines)); i++ {
-		if i >= len(b.lines) {
+	for i := b.offset; i < b.offset+min(inner, len(shown)); i++ {
+		if i >= len(shown) {
 			body.WriteString(" \n")
 			continue
 		}
-		l := b.lines[i]
-		text := l.text
-		if i == b.sel && text != "" {
+		text := b.lines[shown[i]].text
+		if shown[i] == b.sel && text != "" {
 			text = highlight(sSelected, text, lipgloss.Width(text))
 		}
 		body.WriteString(text + "\n")
 	}
-	footer := "y copies · any other key closes"
+	if len(shown) == 0 {
+		body.WriteString(sDim.Render("  nothing matches") + "\n")
+	}
+	footer := "↑↓ select · / search · y copies · esc closes"
 	if len(b.lines) > 0 && b.lines[b.sel].key != "" {
-		footer = "↑↓ select · e/enter edits · y copies · any other key closes"
-	} else {
-		footer = "↑↓ select · y copies · any other key closes"
+		footer = "↑↓ select · e/enter edits · / search · y copies · esc closes"
+	}
+	title := sTitle.Render("rig — " + b.env)
+	switch {
+	case b.typing:
+		title += sDim.Render("  search ") + sAmber.Render(b.filter+"▏")
+	case b.filter != "":
+		title += sDim.Render("  search ") + sAmber.Render(b.filter) + sDim.Render(" (esc clears)")
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Width(w + 6).
-		Render(sTitle.Render("rig — "+b.env) + "\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + sDim.Render(footer))
+		Render(title + "\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + sDim.Render(footer))
 }
 
 // fetchEnvInfo builds the ctrl+e box: the environment, the variables tasks and manifests get (with
@@ -147,7 +228,9 @@ func envInfoBox(ctx context.Context, a *engine.App) *envBox {
 			if _, ok := env.Vars[k]; ok {
 				from = "environments." + env.Name + ".vars"
 			}
-			row(k, maskValue(k, project[k]), from, "")
+			if _, ok := vars[k]; !ok {
+				row(k, maskValue(k, project[k]), from, k)
+			}
 		}
 	}
 	if len(a.Spec.Components) > 0 {
@@ -189,9 +272,12 @@ func (m *model) editEnvVar(box *envBox) tea.Cmd {
 		return nil
 	}
 	vars, _ := m.app.Vars(m.ctx)
-	cur := ""
-	if v, ok := vars[key]; ok && !secretName.MatchString(key) {
-		cur = v.Value
+	cur := vars[key].Value
+	if _, ok := vars[key]; !ok {
+		cur = cmp.Or(m.app.Env.Vars[key], m.app.Spec.Vars[key])
+	}
+	if secretName.MatchString(key) {
+		cur = ""
 	}
 	m.envInfo = nil
 	m.ask("value of "+key, cur, func(v string) tea.Cmd {
