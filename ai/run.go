@@ -501,28 +501,45 @@ func (r *Runner) Describe(ctx context.Context, hint, before, want string) (strin
 	return out, nil
 }
 
+// Ask puts one question to the chat model, without tools, and returns its whole answer.
+func (r *Runner) Ask(ctx context.Context, prompt string) (string, error) {
+	out, err := r.once(ctx, prompt, false, 2000)
+	return strings.TrimSpace(out), err
+}
+
 // quick asks the fast model once, without tools: an API-key provider directly, else the backend.
 func (r *Runner) quick(ctx context.Context, prompt string) (string, error) {
+	return r.once(ctx, prompt, true, 120)
+}
+
+func (r *Runner) once(ctx context.Context, prompt string, fast bool, maxTokens int) (string, error) {
 	if !r.Setup.Enabled() {
 		return "", errors.New("AI is " + r.Setup.Describe())
 	}
 	prompt = r.Redactor.Redact(prompt)
-	model := r.Setup.FastModel
+	model := r.Setup.Model
+	if fast {
+		model = r.Setup.FastModel
+	}
 	var out string
 	var err error
 	switch {
-	case r.Setup.FastURL != "":
-		out, err = r.chatCompletion(ctx, r.Setup.FastURL, r.Setup.FastAPIKey, model, prompt)
+	case fast && r.Setup.FastURL != "":
+		out, err = r.chatCompletion(ctx, r.Setup.FastURL, r.Setup.FastAPIKey, model, prompt, maxTokens)
 	case compatible(r.Setup.Provider) && r.Setup.URL != "":
 		if model == "" {
 			model = r.Setup.Model
 		}
-		out, err = r.chatCompletion(ctx, r.Setup.URL, r.Setup.APIKey, model, prompt)
+		out, err = r.chatCompletion(ctx, r.Setup.URL, r.Setup.APIKey, model, prompt, maxTokens)
 	case r.Setup.Backend == BackendClaude:
-		if model == "" {
+		if model == "" && fast {
 			model = "haiku"
 		}
-		cmd := exec.CommandContext(ctx, r.Setup.Bin, "-p", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--model", model, "--output-format", "text", "--", prompt)
+		args := []string{"-p", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--output-format", "text"}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		cmd := exec.CommandContext(ctx, r.Setup.Bin, append(args, "--", prompt)...)
 		cmd.Dir, cmd.Env = r.Scope.Dir, r.env()
 		var b []byte
 		b, err = cmd.Output()
@@ -581,8 +598,8 @@ func cleanCompletion(typed, out string) string {
 	return out
 }
 
-func (r *Runner) chatCompletion(ctx context.Context, endpoint, apiKey, model, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]any{"model": model, "max_tokens": 120, "temperature": 0, "stream": false,
+func (r *Runner) chatCompletion(ctx context.Context, endpoint, apiKey, model, prompt string, maxTokens int) (string, error) {
+	body, _ := json.Marshal(map[string]any{"model": model, "max_tokens": maxTokens, "temperature": 0, "stream": false,
 		"messages": []map[string]string{{"role": "user", "content": prompt}}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {

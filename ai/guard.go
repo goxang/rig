@@ -38,7 +38,7 @@ func Classify(argv []string) Risk {
 			return Change
 		}
 		return Read
-	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "source", "docs":
+	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "source", "docs", "why":
 		return Read
 	case "init":
 		for _, a := range argv[1:] {

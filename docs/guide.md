@@ -19,6 +19,7 @@ rig query db-top-cpu n=5
 rig load rate fleet 200 && rig load scale fleet +2
 rig task bootstrap            # a named list of steps from rig.yaml (rig task <tab> completes)
 rig watch api                 # rebuild and restart as the sources change (ctrl+w in the UI)
+rig why api --report          # incident: evidence on api and its dependencies, ranked suspects, the AI's root cause
 rig doctor                    # what this environment lacks: tools, cluster, ${VARS}, ports, components (--json)
 rig vars set MAIN_DB=x        # manifest variables per environment; rig setenv api K=V for env
 rig data db Switch tables     # walk databases and caches
@@ -146,6 +147,14 @@ query, a task, ...) first shows its command and waits for your yes: enter runs i
 allows that same command for the rest of the session. With no terminal or UI to ask on, only a change
 your message asked for in so many words runs. A read-only environment refuses changes whoever confirms.
 Secrets and `rig mcp`/`debug` are out of reach.
+
+`rig why <service>` (or `@why <service>` in the chat) is incident mode. rig gathers the evidence itself,
+the same way every time: the state, restarts and health of the service and everything it depends on,
+whether the components they host answer, error lines in their logs and which services those lines name,
+failed and slow traces, firing alerts, recent restarts and changes (deploys, the assistant's own). It ranks
+the suspects by that evidence (down beats unreachable beats named in errors), then asks the model for a
+summary and hypotheses citing the evidence IDs. `--no-ai` stops at the ranking, `--report` or `-o file`
+saves a Markdown report (summary, timeline, evidence, next steps), `--json` hands it to tools.
 
 Every action the assistant ran or tried is appended to `.rig/<env>/ai-audit.jsonl` (time, environment,
 command, risk, result, who confirmed); `rig ai log` lists the changes and refusals (`--all` adds reads,

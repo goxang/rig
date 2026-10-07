@@ -15,6 +15,7 @@ import (
 
 	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/spec"
 )
 
@@ -180,6 +181,9 @@ func (m *model) chatKey(k tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		c.input.SetValue("")
+		if f := strings.Fields(v); f[0] == "@why" || f[0] == "/why" {
+			return m.chatWhy(f[1:])
+		}
 		if strings.HasPrefix(v, "/") {
 			return m.chatCommand(v)
 		}
@@ -240,7 +244,7 @@ func (m *model) chatCommand(v string) tea.Cmd {
 	case "/autocomplete":
 		m.toggleAutocomplete()
 	default:
-		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off · @why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
 	}
 	return nil
 }
@@ -351,6 +355,48 @@ func (m *model) pickChatSession() {
 			c.newSession(m)
 		}
 		return ai.CloseSession(m.app.AIDir(), id)
+	}
+}
+
+// chatWhy is rig why in the chat: rig gathers the evidence, then the assistant (with its tools, so
+// it can dig further) explains it.
+func (m *model) chatWhy(args []string) tea.Cmd {
+	c := m.chat
+	if len(args) == 0 {
+		m.pick("@why: which service misbehaves?", engine.SortedKeys(m.app.Spec.Services), nil, 0, false, func(l []string) tea.Cmd {
+			if len(l) == 0 {
+				return nil
+			}
+			m.chatOpen()
+			return m.chatWhy(l)
+		})
+		return nil
+	}
+	if !c.enabled() || c.busy {
+		return m.chatSend("@why " + args[0])
+	}
+	if c.sess == nil {
+		c.newSession(m)
+	}
+	svc := args[0]
+	c.msgs = append(c.msgs, ai.Message{Role: "user", Text: "@why " + svc, At: time.Now()})
+	c.busy, c.started, c.scroll = true, time.Now(), 0
+	ctx, cancel := context.WithCancel(m.ctx)
+	c.cancel = cancel
+	r, s, a := c.runner, c.sess, m.app
+	return func() tea.Msg {
+		defer cancel()
+		inc, err := a.Investigate(ctx, svc, 15*time.Minute)
+		if err != nil {
+			return chatDoneMsg{s: s, err: err}
+		}
+		var top []string
+		for _, x := range inc.Suspects {
+			top = append(top, fmt.Sprintf("%s (%d)", x.Service, x.Score))
+		}
+		program.Send(chatEventMsg{s: s, e: ai.Event{Kind: "tool", Text: fmt.Sprintf("rig why %s: %d pieces of evidence; suspects %s", svc, len(inc.Evidence), strings.Join(top, ", "))}})
+		err = r.Turn(ctx, s, inc.Prompt(), "", func(e ai.Event) { program.Send(chatEventMsg{s: s, e: e}) })
+		return chatDoneMsg{s: s, err: err}
 	}
 }
 
