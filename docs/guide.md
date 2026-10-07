@@ -45,7 +45,7 @@ even with it. In the TUI the confirmation is the `--yes`.
 ## Terminal UI
 
 Screens load nothing until opened, and only the one showing refreshes. Everything is a sortable grid
-(`<` `>` pick the column, `I` inverts, or click a header) and works with the mouse. On a Kubernetes
+(`ctrl+shift+←→` pick the column, `ctrl+shift+↑↓` order it, or click a header) and works with the mouse. On a Kubernetes
 cluster, dangerous changes (stop, deploy, delete, edits) ask first and `enter` confirms; local, docker
 and kind never ask. `?` shows the keys of the current screen.
 Drag over any text (results, queries, test output, the chat) to copy it; the selection stays inside the

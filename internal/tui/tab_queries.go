@@ -257,12 +257,12 @@ func (t *queriesTab) name() string { return "Queries" }
 func (t *queriesTab) typing() bool { return false }
 func (t *queriesTab) hints() [][2]string {
 	if t.focusRes {
-		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"< >", "sort"}, {"I", "invert"}}
+		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"ctrl+⇧←→ ↑↓", "sort, order"}}
 	}
 	if t.history {
 		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H ⇧←→", "back to queries"}}
 	}
-	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H ⇧←→", "history"}, {"→", "result"}, {"< >", "sort"}}
+	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H ⇧←→", "history"}, {"→", "result"}, {"ctrl+⇧←→ ↑↓", "sort"}}
 }
 
 func (t *queriesTab) interval() time.Duration { return time.Second }

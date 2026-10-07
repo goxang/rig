@@ -124,7 +124,7 @@ func (t *servicesTab) hints() [][2]string {
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"}, {"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"},
-		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"< >", "sort"}}
+		{"h", "autoscaler"}, {"R", "requests/limits"}, {"F", "manifests"}, {"d", "deploy"}, {"b", "build+deploy"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -716,7 +716,7 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	var logs string
 	switch {
 	case t.prof != nil && t.prof.svc == name:
-		title := fmt.Sprintf("%s profile · %s · ↑↓ < > I sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
+		title := fmt.Sprintf("%s profile · %s · ↑↓ ctrl+⇧←→↑↓ sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
 		logs = panel(title, t.prof.view(m, 1, headH+1+podsH+1, w-2, logH-2), w, logH, true)
 	case t.detail != "":
 		logs = panel("result · esc closes", t.detail, w, logH, true)

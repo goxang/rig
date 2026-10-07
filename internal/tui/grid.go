@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// grid is a sortable, scrollable, clickable table, htop style: < > pick the sort column, I inverts,
+// grid is a sortable, scrollable, clickable table, htop style: ctrl+shift+←→ pick the sort column, ctrl+shift+↑↓ order it,
 // clicking a header sorts by it, clicking a row selects it. Rows keep their selection by id across
 // refreshes.
 type grid struct {
@@ -145,20 +145,22 @@ func (g *grid) key(k tea.KeyMsg) bool {
 		return true
 	}
 	switch k.String() {
-	case ">", ".":
+	case "ctrl+shift+right", ">", ".":
 		g.sortBy = (g.sortBy + 1) % len(g.cols)
 		g.sortRows()
-	case "<", ",":
-		g.sortBy = (g.sortBy - 1 + len(g.cols)) % len(g.cols)
-		if g.sortBy < 0 {
-			g.sortBy = len(g.cols) - 1
-		}
+	case "ctrl+shift+left", "<", ",":
+		g.sortBy = (max(g.sortBy, 0) - 1 + len(g.cols)) % len(g.cols)
 		g.sortRows()
-	case "I":
-		if g.sortBy < 0 {
-			g.sortBy = 0
+	case "ctrl+shift+up", "ctrl+shift+down", "I":
+		g.sortBy = max(g.sortBy, 0)
+		switch k.String() {
+		case "ctrl+shift+up":
+			g.desc = false
+		case "ctrl+shift+down":
+			g.desc = true
+		default:
+			g.desc = !g.desc
 		}
-		g.desc = !g.desc
 		g.sortRows()
 	default:
 		return false
