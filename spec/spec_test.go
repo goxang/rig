@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -230,7 +231,8 @@ func TestSecretsResolve(t *testing.T) {
 	if env := p.Services["a"].Env; env["P"] != "dflt" || env["T"] != "s3cret" {
 		t.Fatalf("env %v", env)
 	}
-	if st, _ := os.Stat(func() string { s, _ := SecretsFile("p"); return s }()); st.Mode().Perm() != 0o600 {
+	// Windows has no mode bits: the user's AppData is what keeps the file private there
+	if st, _ := os.Stat(func() string { s, _ := SecretsFile("p"); return s }()); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", st.Mode())
 	}
 }

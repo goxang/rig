@@ -43,7 +43,7 @@ Build and test with `GOTOOLCHAIN=local` (Go 1.23, deps pinned to the last 1.23 r
 - Paths written into rig.yaml use `/` (`filepath.ToSlash`); paths read from it go through `filepath`.
 - Output that redraws (`\r`, spinners) only on a terminal (`term.IsTerminal`); plain lines on a pipe.
 - Terminals differ: VTE eats ctrl+shift+↑↓, some eat alt+arrows. Give a key a second binding.
-- CI builds five targets and tests on Linux, macOS and (not gating) Windows.
+- CI builds five targets and tests on Linux, macOS and Windows; a Windows failure blocks the release.
 
 ## Test
 

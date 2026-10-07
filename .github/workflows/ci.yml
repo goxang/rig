@@ -41,10 +41,8 @@ jobs:
           go-version-file: go.mod
       - run: go test -race -count=1 ./...
 
-  # not a gate yet: shows what breaks on Windows without holding releases back
   test-windows:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -55,7 +53,7 @@ jobs:
         run: |
           set +e
           go test -count=1 ./... 2>&1 | tee out.txt; rc=${PIPESTATUS[0]}
-          grep -aiE 'fail|panic|error|undefined|cannot' out.txt | grep -av '^ok' | head -40 | while IFS= read -r l; do echo "::error::${l//$'\r'/}"; done
+          grep -aiE 'fail|panic|error|undefined|cannot|_test\.go:[0-9]+' out.txt | grep -av '^ok' | head -40 | while IFS= read -r l; do echo "::error::${l//$'\r'/}"; done
           exit "$rc"
 
   version:
@@ -132,7 +130,7 @@ jobs:
           retention-days: 1
 
   release:
-    needs: [version, lint, test, build]
+    needs: [version, lint, test, test-windows, build]
     if: github.event_name == 'push' && needs.version.outputs.skip != '1'
     runs-on: ubuntu-latest
     permissions:
