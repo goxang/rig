@@ -276,6 +276,30 @@ func (s Setup) AutocompleteOn() bool {
 	return s.Enabled() && (s.Autocomplete == nil || *s.Autocomplete)
 }
 
+func providerDefaults(s *Setup) {
+	switch s.Provider {
+	case "opencode":
+		if s.Model == "" {
+			s.Model = DefaultFreeModel
+		}
+	case "9router":
+		if s.URL == "" {
+			s.URL = "http://localhost:20128/v1"
+		}
+	case "ollama", "lmstudio":
+		if s.URL == "" {
+			s.URL = LocalProviders[s.Provider]
+		}
+	case "deepseek":
+		if s.URL == "" {
+			s.URL = "https://api.deepseek.com/v1"
+		}
+		if s.Model == "" {
+			s.Model = "deepseek-chat"
+		}
+	}
+}
+
 // Resolve picks the backend (the configured one, else opencode, else Claude Code) and fills the
 // provider's defaults. A provider with its own key needs opencode, except anthropic, which is Claude Code's.
 func Resolve(c Config) Setup {
@@ -298,6 +322,8 @@ func Resolve(c Config) Setup {
 			s.Backend = BackendClaude
 		}
 	}
+	// an explicit provider's address and model hold even where its backend is not installed
+	providerDefaults(&s)
 	if s.Backend == "" {
 		for _, b := range []string{BackendOpencode, BackendClaude} {
 			if find(b) != "" {
@@ -320,27 +346,7 @@ func Resolve(c Config) Setup {
 			s.Provider = "opencode"
 		}
 	}
-	switch s.Provider {
-	case "opencode":
-		if s.Model == "" {
-			s.Model = DefaultFreeModel
-		}
-	case "9router":
-		if s.URL == "" {
-			s.URL = "http://localhost:20128/v1"
-		}
-	case "ollama", "lmstudio":
-		if s.URL == "" {
-			s.URL = LocalProviders[s.Provider]
-		}
-	case "deepseek":
-		if s.URL == "" {
-			s.URL = "https://api.deepseek.com/v1"
-		}
-		if s.Model == "" {
-			s.Model = "deepseek-chat"
-		}
-	}
+	providerDefaults(&s)
 	switch {
 	case (s.Provider == "openai" || s.Provider == "anthropic") && s.URL == "":
 		s.Bin, s.Why = "", "provider "+s.Provider+" needs url (rig ai config url=https://…)"
