@@ -53,6 +53,20 @@ pods, and forwards a port for local processes. A value used in several places (d
 goes in `vars:` once (`environments.<env>.vars` per environment) and is referenced as `${NAME}`.
 Secrets go in `${NAME}` with `secrets:`, never in the file.
 
+## Common asks, shortest path
+
+Read what rig already knows before searching the repository: `rig status <svc>`, `rig env`, `rig
+do runtime render <svc>` (what a Kubernetes deploy applies), `rig manifests <file>` (lint one).
+
+| ask | do |
+|---|---|
+| give a service a Kubernetes manifest | copy one sibling's manifest into the folder rig.yaml imports (`imports: kubernetes:`) or lists (`manifests:`), name the workload after the service, image `$REGISTRY/<image>:$TAG`; check with `rig do runtime render <svc>` |
+| a new service in compose or the manifests | nothing in rig.yaml when that file is imported: `rig status` lists it; add only `build`/`health`/`groups` under its name |
+| ship a change | `rig deploy -b <svc>` (build, push, roll out); the UI's `b` does the same with a tag and env to pick |
+| why does X fail | `rig why <svc>` (status, health, logs, dependencies, ranked), then the code behind the first error line |
+| change config a service reads | `rig kv` / the KV screen, then restart the service |
+| load | `rig load run <generator> --rate N --for 1m`; `rig report <name> --since 10m` |
+
 ## Run and check
 
 `rig status`, `rig logs -F <svc>`, `rig query <component> '<query>'`, `rig test <suite>`

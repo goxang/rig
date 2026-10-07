@@ -96,7 +96,7 @@ func projectCommands() []*cobra.Command {
 		Use:   "manifests [dir...]",
 		Short: "scan Kubernetes manifests (any layout): objects, how they relate, what is broken",
 		Long: `Reads every .yml/.yaml under the given folders (default: the project's manifests:, else the
-environment's runtime manifests, else .), renders kustomizations, links the objects (Service→workload,
+environment's runtime manifests, else the kubernetes imports, else .), renders kustomizations, links the objects (Service→workload,
 Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccount, ...) and lints them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if folders {
