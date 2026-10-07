@@ -397,6 +397,11 @@ type KV interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 }
 
+// KVReader reads every key under a prefix with its value in one call.
+type KVReader interface {
+	All(ctx context.Context, prefix string) (map[string][]byte, error)
+}
+
 // ---- load ----
 
 type Latency struct {

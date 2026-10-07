@@ -78,6 +78,29 @@ func (k *KV) List(ctx context.Context, prefix string) ([]string, error) {
 	return keys, err
 }
 
+func (k *KV) All(ctx context.Context, prefix string) (map[string][]byte, error) {
+	var r []struct {
+		Key   string `json:"Key"`
+		Value string `json:"Value"`
+	}
+	err := k.ep.Do(ctx, k.env, "GET", path(prefix)+"?recurse", nil, &r)
+	if err != nil && strings.Contains(err.Error(), "404") {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(r))
+	for _, e := range r {
+		v, err := base64.StdEncoding.DecodeString(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		out[e.Key] = v
+	}
+	return out, nil
+}
+
 func (k *KV) Ping(ctx context.Context) error {
 	return k.ep.Do(ctx, k.env, "GET", "/v1/status/leader", nil, nil)
 }

@@ -49,6 +49,9 @@ type kvTab struct {
 	// idx is the last full read of comp, kept across searches in this run; I forces a re-read
 	idx     []kvHit
 	idxComp string
+	// cache holds the values read so far, so walking the keys shows them without a request each
+	cache   map[string][]byte
+	moveSeq int
 }
 
 // kvHit is one search row: a key, the path of a field of its JSON value ($.a.b; empty for the key
@@ -56,16 +59,24 @@ type kvTab struct {
 type kvHit struct{ key, path, value string }
 
 type kvIndexMsg struct {
-	gen  int
-	hits []kvHit
-	err  error
+	gen    int
+	hits   []kvHit
+	values map[string][]byte
+	err    error
 }
 
 type kvKeysMsg struct {
 	gen    int
 	prefix string
 	keys   []string
+	values map[string][]byte
 	err    error
+}
+
+// kvShowMsg fetches the selected key once the cursor has rested on it
+type kvShowMsg struct {
+	seq int
+	key string
 }
 
 type kvValueMsg struct {
@@ -127,6 +138,15 @@ func (t *kvTab) load(m *model) tea.Cmd {
 		}
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
+		if r, ok := kv.(core.KVReader); ok {
+			values, err := r.All(c, prefix)
+			keys := make([]string, 0, len(values))
+			for k := range values {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			return kvKeysMsg{gen: gen, prefix: prefix, keys: keys, values: values, err: err}
+		}
 		keys, err := kv.List(c, prefix)
 		return kvKeysMsg{gen: gen, prefix: prefix, keys: keys, err: err}
 	}
@@ -230,6 +250,27 @@ func relatedServices(m *model, key string) []string {
 	return out
 }
 
+// show puts the key's cached value up at once; one not read yet is fetched once the cursor rests.
+func (t *kvTab) show(m *model, key string) tea.Cmd {
+	t.moveSeq++
+	if v, ok := t.cache[key]; ok {
+		t.value, t.valueFor = v, key
+		t.setTree()
+		return nil
+	}
+	seq := t.moveSeq
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return kvShowMsg{seq: seq, key: key} })
+}
+
+func (t *kvTab) remember(values map[string][]byte) {
+	if t.cache == nil {
+		t.cache = map[string][]byte{}
+	}
+	for k, v := range values {
+		t.cache[k] = v
+	}
+}
+
 func (t *kvTab) save(m *model, key string, value []byte) tea.Cmd {
 	return t.saveIn(m, t.comp, key, value)
 }
@@ -237,6 +278,9 @@ func (t *kvTab) save(m *model, key string, value []byte) tea.Cmd {
 func (t *kvTab) saveIn(m *model, comp, key string, value []byte) tea.Cmd {
 	t.related = relatedServices(m, key)
 	t.value, t.valueFor = value, key
+	if comp == t.comp {
+		t.remember(map[string][]byte{key: value})
+	}
 	if !t.inTree {
 		t.setTree()
 	}
@@ -368,6 +412,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.err = msg.err.Error()
 		}
 		t.keys = msg.keys
+		t.remember(msg.values)
 		t.list.set(t.entries())
 		if k := t.jumpKey; k != "" {
 			t.jumpKey = ""
@@ -386,6 +431,10 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if msg.err != nil {
 			m.setStatus(msg.key+": "+msg.err.Error(), true)
 			return nil
+		}
+		t.remember(map[string][]byte{msg.key: msg.value})
+		if r, ok := t.list.current(); !t.treeNext && (!ok || r.id != msg.key) {
+			return nil // the cursor moved on while it was read
 		}
 		t.value, t.valueFor = msg.value, msg.key
 		t.setTree()
@@ -406,7 +455,12 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		}
 		t.searchHits = msg.hits
 		t.idx, t.idxComp = msg.hits, t.comp
+		t.remember(msg.values)
 		t.pickHit(m, msg.hits)
+	case kvShowMsg:
+		if r, ok := t.list.current(); ok && msg.seq == t.moveSeq && r.id == msg.key {
+			return t.fetch(m, msg.key)
+		}
 	case kvEditedMsg:
 		defer os.Remove(msg.file)
 		if msg.err != nil {
@@ -434,7 +488,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		if t.list.key(msg) {
 			if r, ok := t.list.current(); ok && !strings.HasSuffix(r.id, "/") {
 				t.scroll, t.viaSearch = 0, false
-				return t.fetch(m, r.id)
+				return t.show(m, r.id)
 			}
 			return nil
 		}
@@ -492,6 +546,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "D":
 			if ok && !strings.HasSuffix(r.id, "/") {
 				key, comp, a := r.id, t.comp, m.app
+				delete(t.cache, key)
 				return m.act("delete "+key, true, func(ctx context.Context) error {
 					kv, _, err := engine.Get[core.KV](a, core.KindKV, comp)
 					if err != nil {
@@ -525,6 +580,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 			m.setStatus("reading every key of "+t.comp+"…", false)
 			return t.index(m)
 		case "r":
+			t.cache = nil
 			return t.load(m)
 		case "c":
 			cs := t.comps(m)
@@ -532,7 +588,7 @@ func (t *kvTab) update(m *model, msg tea.Msg) tea.Cmd {
 				if len(c) == 0 {
 					return nil
 				}
-				t.comp, t.prefix, t.viaSearch = c[0], "", false
+				t.comp, t.prefix, t.viaSearch, t.cache = c[0], "", false, nil
 				return t.load(m)
 			})
 		case "t":
@@ -757,35 +813,55 @@ func (t *kvTab) index(m *model) tea.Cmd {
 		}
 		c, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		keys, err := kv.List(c, "")
+		values, err := readAll(c, kv)
 		if err != nil {
 			return kvIndexMsg{gen: gen, err: err}
 		}
-		values := make([][]byte, len(keys))
-		sem := make(chan struct{}, 16)
-		var wg sync.WaitGroup
-		for i, k := range keys {
-			if strings.HasSuffix(k, "/") {
-				continue
+		keys := make([]string, 0, len(values))
+		for k := range values {
+			if !strings.HasSuffix(k, "/") {
+				keys = append(keys, k)
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				values[i], _, _ = kv.Get(c, k)
-			}()
 		}
-		wg.Wait()
+		sort.Strings(keys)
 		var hits []kvHit
-		for i, k := range keys {
-			if strings.HasSuffix(k, "/") {
-				continue
-			}
-			hits = append(hits, kvHits(k, values[i])...)
+		for _, k := range keys {
+			hits = append(hits, kvHits(k, values[k])...)
 		}
-		return kvIndexMsg{gen: gen, hits: hits}
+		return kvIndexMsg{gen: gen, hits: hits, values: values}
 	}
+}
+
+// readAll reads every key with its value: one call where the store can, else a Get per key.
+func readAll(ctx context.Context, kv core.KV) (map[string][]byte, error) {
+	if r, ok := kv.(core.KVReader); ok {
+		return r.All(ctx, "")
+	}
+	keys, err := kv.List(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	values := make(map[string][]byte, len(keys))
+	var mu sync.Mutex
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for _, k := range keys {
+		if strings.HasSuffix(k, "/") {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			v, _, _ := kv.Get(ctx, k)
+			mu.Lock()
+			values[k] = v
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return values, nil
 }
 
 // kvHits are the key's own row and, for a JSON value, a row per scalar field.
