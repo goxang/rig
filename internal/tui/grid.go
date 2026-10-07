@@ -180,22 +180,20 @@ func (g *grid) key(k tea.KeyMsg) bool {
 		return true
 	}
 	switch k.String() {
-	case "alt+ctrl+right", "ctrl+shift+right", ">", ".":
+	case "alt+ctrl+right", "ctrl+shift+right", ">":
 		g.sortBy = (g.sortBy + 1) % len(g.cols)
 		g.sortRows()
-	case "alt+ctrl+left", "ctrl+shift+left", "<", ",":
+	case "alt+ctrl+left", "ctrl+shift+left", "<":
 		g.sortBy = (max(g.sortBy, 0) - 1 + len(g.cols)) % len(g.cols)
 		g.sortRows()
-	// VTE (GNOME's terminal) keeps ctrl+shift+↑↓ and GNOME ctrl+alt+arrows: alt+↑↓ and < > I always work
-	case "alt+ctrl+up", "alt+ctrl+down", "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down", "I":
+	// VTE (GNOME's terminal) keeps ctrl+shift+↑↓ and GNOME ctrl+alt+arrows: alt+↑↓ and < > always work
+	case "alt+ctrl+up", "alt+ctrl+down", "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down":
 		g.sortBy = max(g.sortBy, 0)
 		switch k.String() {
 		case "alt+ctrl+up", "ctrl+shift+up", "alt+up":
 			g.desc = false
 		case "alt+ctrl+down", "ctrl+shift+down", "alt+down":
 			g.desc = true
-		default:
-			g.desc = !g.desc
 		}
 		g.sortRows()
 	default:

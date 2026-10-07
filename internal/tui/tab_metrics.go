@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"net"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -100,7 +103,7 @@ func (t *metricsTab) interval() time.Duration { return refreshes[t.every] }
 
 func (t *metricsTab) hints() [][2]string {
 	if t.zoom {
-		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+alt+←→↑↓", "sort"}, {"y", "copy query"},
+		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"p", "open its pod in Services"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+alt+←→↑↓", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
 	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"ctrl+←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
@@ -830,6 +833,10 @@ func (t *metricsTab) click(m *model, h hit) tea.Cmd {
 		st.hidden, st.filter = map[string]bool{}, nil
 	case id == "mcopy":
 		t.copyQuery(m)
+	case id == "mfilter":
+		return t.viewKey(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	case id == "mpod":
+		return t.openPod(m)
 	case strings.HasPrefix(id, "mvar:"):
 		t.pickValues(m, strings.TrimPrefix(id, "mvar:"))
 	case strings.HasPrefix(id, "mrow:"):
@@ -996,6 +1003,8 @@ func (t *metricsTab) viewKey(m *model, k tea.KeyMsg) tea.Cmd {
 		if n, ok := sel(); ok {
 			st.hidden[n] = !st.hidden[n]
 		}
+	case "p":
+		return t.openPod(m)
 	case "enter":
 		if n, ok := sel(); ok {
 			st.isolate(ls, n)
@@ -1513,6 +1522,84 @@ func tableBody(p spec.Panel, ls []viz.Line, hidden map[int]bool, at time.Time, h
 	return b.String()
 }
 
+// openPod opens, in Services, the pod (or service) the selected series' labels name.
+func (t *metricsTab) openPod(m *model) tea.Cmd {
+	r, ok := t.legend.current()
+	if !ok || t.focus >= len(t.data) {
+		return nil
+	}
+	d := t.data[t.focus]
+	_, ps := t.items(m)
+	for i, l := range seriesLines(ps[t.focus], d) {
+		if l.Name == r.id && i < len(d.series) {
+			if svc, inst := findInstance(m.services, serviceAliases(m.app.Spec), d.series[i].Labels); svc != "" {
+				return m.showInstance(svc, inst)
+			}
+		}
+	}
+	m.setStatus("no running pod or service matches the labels of "+r.id, true)
+	return nil
+}
+
+// findInstance is the service and instance a series' labels point at: an instance by name, by
+// address (Prometheus' instance label is ip:port), else a service by name.
+func findInstance(sts []core.Status, aliases map[string]string, labels map[string]string) (svc, inst string) {
+	keys := engine.SortedKeys(labels)
+	slices.SortStableFunc(keys, func(a, b string) int { return labelRank(a) - labelRank(b) })
+	for _, k := range keys {
+		v := labels[k]
+		host, _, err := net.SplitHostPort(v)
+		if err != nil {
+			host = v
+		}
+		for _, s := range sts {
+			for _, in := range s.Instances {
+				if in.ID == v || (in.IP != "" && in.IP == host) {
+					return s.Service, in.ID
+				}
+			}
+		}
+	}
+	for _, k := range keys {
+		name := cmp.Or(aliases[labels[k]], labels[k])
+		for _, s := range sts {
+			if s.Service == name {
+				return s.Service, ""
+			}
+		}
+	}
+	return "", ""
+}
+
+// serviceAliases maps what an app's metrics may call it (its image, SERVICE_NAME) to the rig.yaml name.
+func serviceAliases(p *spec.Project) map[string]string {
+	out := map[string]string{}
+	for n, s := range p.Services {
+		if s == nil {
+			continue
+		}
+		if img := path.Base(strings.SplitN(s.Image, ":", 2)[0]); img != "." && img != "" {
+			out[img] = n
+		}
+		if v := s.Env["SERVICE_NAME"]; v != "" {
+			out[v] = n
+		}
+	}
+	return out
+}
+
+func labelRank(k string) int {
+	switch k {
+	case "pod", "pod_name", "kubernetes_pod_name":
+		return 0
+	case "instance", "container_name", "container":
+		return 1
+	case "service", "app", "job", "deployment":
+		return 2
+	}
+	return 3
+}
+
 // viewPanel is one panel over the whole screen (Grafana's view): the chart, the expanded query,
 // and a table legend to sort, hide, isolate and highlight series.
 func (t *metricsTab) viewPanel(m *model, p spec.Panel, w, h int) string {
@@ -1524,23 +1611,22 @@ func (t *metricsTab) viewPanel(m *model, p spec.Panel, w, h int) string {
 	st := t.state(m, t.focus)
 	stacked := p.Stack != t.stack[t.key(m, t.focus)]
 
-	// the toolbar, on the body's third line
-	var tb strings.Builder
-	x := 0
-	button := func(id, text string, on bool) {
-		s := sTabOff.Render(text)
-		if on {
-			s = sTabOn.Render(text)
-		}
-		m.zone(id, x, 2, lipgloss.Width(s), 1)
-		x += lipgloss.Width(s)
-		tb.WriteString(s)
-	}
-	button("mback", "‹ back", false)
-	button("mstack", "stack", stacked)
-	button("mall", "all series", false)
-	button("mcopy", "copy query", false)
-	info := "  " + sTitle.Render(title)
+	// the toolbar, on the body's third line, in sections like the Tests screen's
+	tb := &toolbar{m: m, y: 2}
+	tb.button("mback", "‹ back", false)
+	tb.section("series")
+	tb.button("mall", "all", false)
+	tb.button("mstack", "stack", stacked)
+	tb.button("mfilter", "/ filter", st.filter != nil)
+	tb.button("mpod", "p open pod", false)
+	tb.section("time")
+	tb.button("mshift:-1", "‹ ,", false)
+	tb.button("mzoomout", "Z zoom out", false)
+	tb.button("mshift:1", ". ›", false)
+	tb.button("mrange", "t "+t.win.label()+" ▾", false)
+	tb.section("query")
+	tb.button("mcopy", "y copy", false)
+	info := " " + sTitle.Render(title)
 	if st.filter != nil {
 		info += sAmber.Render("  /" + st.filter.String() + "/")
 	}
@@ -1548,8 +1634,8 @@ func (t *metricsTab) viewPanel(m *model, p spec.Panel, w, h int) string {
 		info += sDim.Render("  " + p.Help)
 	}
 	query := strings.ReplaceAll(firstNonEmpty(d.query, p.Query), "\n", "  ·  ")
-	head := truncate(tb.String()+info, w) + "\n" + sDim.Render(truncate(" "+query, w)) + "\n"
-	h -= 2
+	head := truncate(tb.String(), w) + "\n" + truncate(info, w) + "\n" + sDim.Render(truncate(" "+query, w)) + "\n"
+	h -= 3
 
 	if d.err != nil {
 		return head + panel(title, sRed.Render(wrap(d.err.Error(), w-4)), w, h, true)

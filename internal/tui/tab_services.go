@@ -22,9 +22,11 @@ import (
 // servicesTab lists services; enter opens one: its instances and its live log, which is only
 // streamed while the service is open.
 type servicesTab struct {
-	list   *grid
-	marked map[string]bool
-	filter string
+	// podWant is an instance to select once the pods list shows it (a jump from a metrics series)
+	podWant string
+	list    *grid
+	marked  map[string]bool
+	filter  string
 	// section narrows the list: "" every app and load generator, a rig.yaml section, "other" (apps in
 	// no section) or "infra"
 	section  string
@@ -376,7 +378,7 @@ func (t *servicesTab) openService(m *model, name, instance string) tea.Cmd {
 	t.open_, t.detail = name, ""
 	t.lt.services, t.lt.instances, t.lt.inspect = []string{name}, nil, nil
 	if instance != "" {
-		t.lt.instances = []string{instance}
+		t.lt.instances, t.podWant = []string{instance}, instance
 	}
 	return t.lt.start(m)
 }
@@ -735,6 +737,13 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 			keys: []any{stateRank(in.State), in.ID, in.Host, nil, float64(in.Restarts), float64(-in.Started.Unix()), in.CPU, float64(in.Memory)}})
 	}
 	t.pods.set(rows)
+	if t.podWant != "" {
+		for i, r := range t.pods.rows {
+			if r.id == t.podWant {
+				t.pods.sel, t.podWant = i, ""
+			}
+		}
+	}
 	podsH := min(len(rows)+3, max(5, (h-headH)/3))
 	podsTitle := fmt.Sprintf("instances · %d", len(rows)-1)
 	if t.onPods {

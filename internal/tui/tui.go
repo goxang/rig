@@ -1118,11 +1118,14 @@ func (m *model) showMetrics(service string) tea.Cmd {
 }
 
 // showService opens the Services screen on one service's page.
-func (m *model) showService(name string) tea.Cmd {
+func (m *model) showService(name string) tea.Cmd { return m.showInstance(name, "") }
+
+// showInstance opens the Services screen on one service's page, on instance when not "".
+func (m *model) showInstance(name, instance string) tea.Cmd {
 	for i, t := range m.tabs {
 		if st, ok := t.(*servicesTab); ok {
 			open := m.jump(i)
-			return batch(open, st.openService(m, name, ""))
+			return batch(open, st.openService(m, name, instance))
 		}
 	}
 	m.setStatus("the Services screen is not in ui.tabs", true)
@@ -2357,7 +2360,7 @@ var screenHelp = map[string]string{
 func (m *model) helpLines() []string {
 	rows := [][2]string{
 		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (ctrl+o there shows its steps)"},
-		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
+		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < >, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
 		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"ctrl+r", "reload rig.yaml after you or the assistant edited it (filters stay)"}, {"S", "save this session: rig opens on it from now on, as you leave it, filters included (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder

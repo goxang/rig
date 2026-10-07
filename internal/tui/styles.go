@@ -96,6 +96,32 @@ func applyTheme(t Theme) {
 	}
 }
 
+// toolbar is a row of buttons in named sections, as on the Tests and metric panel screens.
+type toolbar struct {
+	m    *model
+	b    strings.Builder
+	x, y int
+}
+
+func (tb *toolbar) add(s string) {
+	tb.b.WriteString(s)
+	tb.x += lipgloss.Width(s)
+}
+
+func (tb *toolbar) section(name string) { tb.add(sDim.Render("  │ " + name + " ")) }
+
+func (tb *toolbar) button(id, text string, on bool) {
+	st := lipgloss.NewStyle().Foreground(cText).Background(cPanel).Padding(0, 1)
+	if on {
+		st = sTabOn
+	}
+	s := st.Render(text)
+	tb.m.zone(id, tb.x, tb.y, lipgloss.Width(s), 1)
+	tb.add(s + " ")
+}
+
+func (tb *toolbar) String() string { return tb.b.String() }
+
 // badge is bold text on bg, in black or white, whichever reads better on it.
 func badge(bg lipgloss.TerminalColor) lipgloss.Style {
 	ink := func(c string) string {
