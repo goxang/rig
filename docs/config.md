@@ -253,11 +253,15 @@ tasks:
     - rig up --build
   reset-db:
     help: empty the app's tables (keeps the schema)
-    steps: [rig do db seed truncate.sql]
+    steps:
+      # empty every table but the migrations'
+      - rig do db seed truncate.sql
 ```
 
 A task is a list of steps, or `{help, steps}`: `help` is what `rig task` and the TUI's `T` show next to
-its name (without it they show the steps).
+its name (without it they show the steps). A `# comment` right above a step (or the first `#` lines of
+a multi-line step) says what the step does: a running task prints it instead of the command, and `T`
+shows it over the step's commands in the selected task's details.
 
 `rig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `rig down`
 with no targets leaves it running: `rig infra up|down|restart|status` changes it.

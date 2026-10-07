@@ -300,6 +300,8 @@ type Task struct {
 	// ReadOnly marks a task that changes nothing, so it runs in a read-only environment too.
 	ReadOnly bool     `yaml:"readonly"`
 	Steps    []string `yaml:"steps"`
+	// StepHelp says what each step does: the # comment above it in rig.yaml, or its own first # lines.
+	StepHelp []string `yaml:"-"`
 }
 
 // TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).
@@ -318,11 +320,44 @@ type TaskArg struct {
 func (a TaskArg) Env() bool { return a.Name != "" && strings.ToUpper(a.Name) == a.Name }
 
 func (t *Task) UnmarshalYAML(n *yaml.Node) error {
+	steps := n
 	if n.Kind == yaml.SequenceNode {
-		return n.Decode(&t.Steps)
+		if err := n.Decode(&t.Steps); err != nil {
+			return err
+		}
+	} else {
+		type plain Task
+		if err := n.Decode((*plain)(t)); err != nil {
+			return err
+		}
+		steps = mappingValue(n, "steps")
 	}
-	type plain Task
-	return n.Decode((*plain)(t))
+	if steps == nil || len(steps.Content) != len(t.Steps) {
+		return nil
+	}
+	t.StepHelp = make([]string, len(t.Steps))
+	for i, s := range steps.Content {
+		t.StepHelp[i] = stepHelp(s.HeadComment, t.Steps[i])
+	}
+	return nil
+}
+
+func stepHelp(comment, step string) string {
+	lines := strings.Split(comment, "\n")
+	if comment == "" {
+		lines = nil
+		for _, l := range strings.Split(strings.TrimSpace(step), "\n") {
+			if l = strings.TrimSpace(l); !strings.HasPrefix(l, "#") || strings.HasPrefix(l, "#!") {
+				break
+			}
+			lines = append(lines, l)
+		}
+	}
+	var words []string
+	for _, l := range lines {
+		words = append(words, strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "#")))
+	}
+	return strings.TrimSpace(strings.Join(words, " "))
 }
 
 type Dashboard struct {

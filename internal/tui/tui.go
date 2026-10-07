@@ -1507,6 +1507,53 @@ func (m *model) pickTask(prefix string) {
 	if groups := taskGroups(m.app.Tasks(), names); len(groups) > 2 {
 		m.picker.groups = groups
 	}
+	m.picker.preview = func(name string) string {
+		return taskDetail(m.app.Tasks()[name], m.app.TaskHelp(name), m.app.Spec.SecretValues())
+	}
+}
+
+// taskDetail is everything a task will do, for a look before running it: its args, whether it
+// asks first, and each step with what it is for and its commands.
+func taskDetail(t spec.Task, help string, secrets map[string]string) string {
+	var b strings.Builder
+	b.WriteString(help + "\n\n")
+	switch {
+	case t.Confirm:
+		b.WriteString(sAmber.Render("asks before the first step") + "\n")
+	case t.ReadOnly:
+		b.WriteString(sGreen.Render("read only: changes nothing") + "\n")
+	}
+	for _, a := range t.Args {
+		line := "  " + sKey.Render(a.Name) + "  " + a.Help
+		if a.Default != "" {
+			line += sDim.Render("  (default " + a.Default + ")")
+		}
+		b.WriteString(line + "\n")
+	}
+	for i, st := range t.Steps {
+		for n, v := range secrets {
+			if len(v) >= 6 { // shorter values (a user name like admin) hit ordinary words: db-admin
+				st = strings.ReplaceAll(st, v, "${"+n+"}")
+			}
+		}
+		what := ""
+		if i < len(t.StepHelp) {
+			what = t.StepHelp[i]
+		}
+		num := sAccent.Render(fmt.Sprintf("%2d ", i+1))
+		if what != "" {
+			b.WriteString(num + what + "\n")
+			num = "   "
+		}
+		for _, l := range strings.Split(strings.TrimSpace(st), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(l), "#") && what != "" {
+				continue
+			}
+			b.WriteString(num + sDim.Render(l) + "\n")
+			num = "   "
+		}
+	}
+	return b.String()
 }
 
 // taskGroups are the task picker's tabs: "all", then each task's group, else the first word of its

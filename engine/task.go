@@ -215,7 +215,12 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 			return fmt.Errorf("task %s, step %d: %w", name, i+1, resolveErr)
 		}
 		title := withArgs(stepTitle(step, secrets), args)
-		fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
+		if i < len(task.StepHelp) && task.StepHelp[i] != "" {
+			fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), task.StepHelp[i])
+			title = task.StepHelp[i] + " (" + title + ")"
+		} else {
+			fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
+		}
 		cmd := sh.New(sh.Shell(), append([]string{"-c", line, name}, args...)...)
 		cmd.Dir = a.Spec.Dir
 		cmd.Env = env
@@ -278,7 +283,7 @@ func stepTitle(step string, secrets map[string]string) string {
 		title += " …"
 	}
 	for n, v := range secrets {
-		if len(v) >= 3 {
+		if len(v) >= 6 { // shorter values (a user name like admin) hit ordinary words: db-admin
 			title = strings.ReplaceAll(title, v, "${"+n+"}")
 		}
 	}
