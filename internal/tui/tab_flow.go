@@ -747,7 +747,7 @@ func (t *flowTab) boxLines(m *model, b flowBox, n *spec.FlowNode, s *flowStat, s
 			}
 		}
 	} else if in := t.inflow(m, b.name); in > 0 {
-		one = append(one, seg{"≈" + viz.Human(in, "/s"), fsText}, seg{" sent in", fsDim})
+		one = append(one, seg{"≈" + viz.Human(in, "/s"), fsText}, seg{" in", fsDim})
 	} else if s != nil && s.err != "" {
 		one = append(one, seg{"✖ " + s.err, fsRed})
 	} else if s == nil {

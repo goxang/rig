@@ -122,12 +122,18 @@ func layoutFlow(f *spec.Flow, w, h int) flowLayout {
 	}
 	// links back run along lanes at the bottom, links over a column along lanes at the top
 	back, skip = min(back, h/4), min(skip, h/4)
-	bw := max(12, min(26, (w-(ncol-1)*12)/ncol))
-	gap := 0
-	if ncol > 1 {
-		gap = max(3, min(22, (w-ncol*bw)/(ncol-1)))
+	// gaps shrink from 12 to 5 before boxes shrink below 18; links back need a channel on the right
+	lw := w
+	if back > 0 {
+		lw = w - 3
 	}
-	left := max(0, (w-ncol*bw-(ncol-1)*gap)/2)
+	gap, bw := 0, max(12, min(26, lw))
+	if ncol > 1 {
+		gap = max(5, min(12, (lw-ncol*18)/(ncol-1)))
+		bw = max(12, min(26, (lw-(ncol-1)*gap)/ncol))
+		gap = max(3, min(22, (lw-ncol*bw)/(ncol-1)))
+	}
+	left := max(0, (lw-ncol*bw-(ncol-1)*gap)/2)
 	avail := max(3, h-back-skip)
 	most := 1
 	for _, c := range byCol {

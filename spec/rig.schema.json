@@ -1684,7 +1684,7 @@
           "$ref": "#/definitions/Flow"
         }
       ],
-      "description": "The Flow screen: requests travelling through the system as packets between nodes."
+      "description": "{help, source, nodes, links}: the Flow screen, requests moving through the system"
     },
     "help": {
       "description": "Shown by `rig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `rig -h` shows only its own generic help.",
