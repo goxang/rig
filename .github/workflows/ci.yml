@@ -53,6 +53,7 @@ jobs:
       # failures as annotations too: they read without a login, unlike the log
       - shell: bash
         run: |
+          set +e
           go test -count=1 ./... 2>&1 | tee out.txt; rc=${PIPESTATUS[0]}
           grep -aiE 'fail|panic|error|undefined|cannot' out.txt | grep -av '^ok' | head -40 | while IFS= read -r l; do echo "::error::${l//$'\r'/}"; done
           exit "$rc"
