@@ -13,7 +13,7 @@ func themeCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "theme [name]",
 		Short: "list the UI's colour themes, pick one, or --save a copy to edit (ctrl+p in the UI)",
-		Long: "Themes are built in (default, nord, dracula, gruvbox, catppuccin, mono) or files in ~/.config/rig/themes/<name>.yaml\n" +
+		Long: "Themes are built in (default, nord, dracula, gruvbox, catppuccin, clay, ember, mono) or files in ~/.config/rig/themes/<name>.yaml\n" +
 			"that set base: and only the colours they change. $RIG_THEME overrides the choice for one run.\n" +
 			"Fonts and their size belong to the terminal; rig sets colours only.",
 		Args: cobra.MaximumNArgs(1),

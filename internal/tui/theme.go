@@ -58,6 +58,16 @@ var themes = map[string]Theme{
 		themeShades: themeShades{Text: "#CDD6F4", Dim: "#7F849C", Placeholder: "#BAC2DE", Panel: "#45475A", Bar: "#181825", Cursor: "#585B70", Selected: "#313244", Hover: "#2A2B3C"},
 		Light:       themeShades{Text: "#4C4F69", Dim: "#8C8FA1", Placeholder: "#5C5F77", Panel: "#BCC0CC", Bar: "#E6E9EF", Cursor: "#ACB0BE", Selected: "#CCD0DA", Hover: "#DCE0E8"},
 		Series:      []string{"#A6E3A1", "#F9E2AF", "#89B4FA", "#FAB387", "#F38BA8", "#CBA6F7", "#94E2D5", "#F5C2E7", "#74C7EC", "#EBA0AC"}},
+	// a warm terracotta accent on near-black, as some coding assistants look
+	"clay": {Base: "default", Accent: "#D77757", OnAccent: "#141413", Green: "#4EBA65", Amber: "#FFC107", Red: "#FF6B80", Purple: "#B1B9F9",
+		themeShades: themeShades{Text: "#FFFFFF", Dim: "#999999", Placeholder: "#B8B8B8", Panel: "#505050", Bar: "#1A1A19", Cursor: "#5A3A2E", Selected: "#3A2A24", Hover: "#2A2220"},
+		Light:       themeShades{Text: "#141413", Dim: "#666666", Placeholder: "#555555", Panel: "#C8C2B8", Bar: "#F0EEE6", Cursor: "#F2C9B8", Selected: "#F7DED3", Hover: "#F5EDE8"},
+		Series:      []string{"#4EBA65", "#FFC107", "#D77757", "#B1B9F9", "#FF6B80", "#56B6C2", "#E5A57E", "#8FD4A0", "#9CA7F7", "#F5D06F"}},
+	// peach on black with blue and violet, as some terminal coding agents look
+	"ember": {Base: "default", Accent: "#FAB283", OnAccent: "#0A0A0A", Green: "#7FD88F", Amber: "#F5A742", Red: "#E06C75", Purple: "#9D7CD8",
+		themeShades: themeShades{Text: "#EEEEEE", Dim: "#808080", Placeholder: "#A0A0A0", Panel: "#3C3C3C", Bar: "#0A0A0A", Cursor: "#4A3A30", Selected: "#2A2420", Hover: "#1E1E1E"},
+		Light:       themeShades{Text: "#1A1A1A", Dim: "#8A8A8A", Placeholder: "#5A5A5A", Panel: "#D4D4D4", Bar: "#F8F8F8", Cursor: "#F8D9C4", Selected: "#FBE8DA", Hover: "#F4F4F4"},
+		Series:      []string{"#7FD88F", "#E5C07B", "#5C9CF5", "#FAB283", "#E06C75", "#9D7CD8", "#56B6C2", "#F5A742", "#A3E0AE", "#C4A7F0"}},
 	"mono": {Base: "default", Accent: "#E0E0E0", OnAccent: "#000000", Green: "#A8A8A8", Amber: "#D8D8D8", Red: "#FFFFFF", Purple: "#C0C0C0",
 		themeShades: themeShades{Text: "#E0E0E0", Dim: "#808080", Placeholder: "#B0B0B0", Panel: "#4A4A4A", Bar: "#1A1A1A", Cursor: "#5A5A5A", Selected: "#3A3A3A", Hover: "#2A2A2A"},
 		Light:       themeShades{Text: "#111111", Dim: "#777777", Placeholder: "#444444", Panel: "#BBBBBB", Bar: "#EEEEEE", Cursor: "#BBBBBB", Selected: "#DDDDDD", Hover: "#EEEEEE"},
