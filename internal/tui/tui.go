@@ -1212,6 +1212,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 	if m.picker != nil {
 		switch k.String() {
 		case "tab", "shift+tab":
+			if len(m.picker.groups) > 0 {
+				return m.picker.key(m, k)
+			}
 			m.picker = nil
 		default:
 			return m.picker.key(m, k)

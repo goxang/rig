@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -26,6 +27,14 @@ type picker struct {
 	zx, zy int
 	// at, when set, opens it as a dropdown under that body cell over the screen, not a centered box
 	at *[2]int
+	// groups, when set, are tabs over the list (tab, shift+tab, ←→, click); the first holds everything
+	groups []pickGroup
+	group  int
+}
+
+type pickGroup struct {
+	name  string
+	items map[string]bool
 }
 
 func (m *model) pick(title string, items, desc []string, sel int, multi bool, done func([]string) tea.Cmd) {
@@ -44,6 +53,9 @@ func (p *picker) visible() []int {
 	var out []int
 	f := strings.ToLower(p.filter)
 	for i, it := range p.items {
+		if p.group > 0 && !p.groups[p.group].items[it] {
+			continue
+		}
 		d := ""
 		if i < len(p.desc) {
 			d = p.desc[i]
@@ -80,6 +92,11 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "enter":
 		return p.finish(m)
+	case "tab", "right", "shift+tab", "left":
+		if n := len(p.groups); n > 0 {
+			d := map[bool]int{true: 1, false: n - 1}[k.String() == "tab" || k.String() == "right"]
+			p.group, p.sel = (p.group+d)%n, 0
+		}
 	case "up":
 		p.sel = max(0, p.sel-1)
 	case "down":
@@ -144,6 +161,10 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 }
 
 func (p *picker) click(m *model, h hit) tea.Cmd {
+	if g, ok := stripHit(h, "pickgroup"); ok && g < len(p.groups) {
+		p.group, p.sel = g, 0
+		return nil
+	}
 	if h.id != "picker" {
 		if p.at != nil {
 			m.picker = nil // a click beside a dropdown closes it
@@ -172,12 +193,15 @@ func (p *picker) hints() string {
 	if p.del != nil {
 		h = append(h, sKey.Render("ctrl+d")+sDim.Render(" close"))
 	}
+	if len(p.groups) > 0 {
+		h = append(h, sKey.Render("tab ←→")+sDim.Render(" group"))
+	}
 	return strings.Join(append(h, sKey.Render("enter")+sDim.Render(" ok"), sKey.Render("esc")+sDim.Render(" cancel")), "  ")
 }
 
 func (p *picker) view(m *model, h int) string {
 	vis := p.visible()
-	rows := min(len(vis), max(3, h-8))
+	rows := min(len(vis), max(3, h-8-min(len(p.groups), 1)))
 	off := scroll(p.sel, 0, rows, len(vis))
 	if p.sel >= rows {
 		off = p.sel - rows + 1
@@ -191,13 +215,53 @@ func (p *picker) view(m *model, h int) string {
 		}
 		w = max(w, lipgloss.Width(p.items[i])+lipgloss.Width(d)+8)
 	}
-	w = min(w, m.w-8)
+	strip := 0
+	for _, g := range p.groups {
+		strip += lipgloss.Width(g.name) + 6 // padding, a count and the bar
+	}
+	w = min(max(w, strip), m.w-8)
+	top := 4 // rows start below the border, padding, the title line and a blank one
+	if len(p.groups) > 0 {
+		top++
+	}
+	// the box is drawn twice when it has groups: once to measure it, then with the strip's zones in place
+	z0 := len(m.zones)
+	box := p.box(m, w, rows, off, vis, 0, 0)
+	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
+	x, y := max(0, (m.w-bw)/2), max(0, (h-bh)/2)
+	if len(p.groups) > 0 {
+		m.zones = m.zones[:z0]
+		box = p.box(m, w, rows, off, vis, x+3, y+3)
+	}
+	m.zone("picker", x+3, y+top, w, rows)
+	p.zx, p.zy = x+3, y+top
+	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 	var b strings.Builder
 	title := sTitle.Render(p.title)
 	if p.filter != "" {
 		title += sDim.Render("  filter ") + sAmber.Render(p.filter)
 	}
-	b.WriteString(title + "\n\n")
+	b.WriteString(title + "\n")
+	if len(p.groups) > 0 {
+		labels := make([]string, len(p.groups))
+		for i, g := range p.groups {
+			n := 0
+			for it := range p.marked {
+				if p.marked[it] && (i == 0 || g.items[it]) {
+					n++
+				}
+			}
+			labels[i] = g.name
+			if n > 0 {
+				labels[i] += fmt.Sprintf(" %d", n)
+			}
+		}
+		b.WriteString(m.stripFit("pickgroup", sx, sy, labels, p.group, w) + "\n")
+	}
+	b.WriteString("\n")
 	for r := 0; r < rows && off+r < len(vis); r++ {
 		i := vis[off+r]
 		mark := "  "
@@ -222,13 +286,7 @@ func (p *picker) view(m *model, h int) string {
 	if len(vis) == 0 {
 		b.WriteString(sDim.Render("nothing matches") + "\n")
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Render(strings.TrimRight(b.String(), "\n"))
-	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
-	x, y := max(0, (m.w-bw)/2), max(0, (h-bh)/2)
-	// rows start below the border, padding and the title line
-	m.zone("picker", x+3, y+4, w, rows)
-	p.zx, p.zy = x+3, y+4
-	return lipgloss.Place(m.w, h, lipgloss.Center, lipgloss.Center, box)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Render(strings.TrimRight(b.String(), "\n"))
 }
 
 // dropdown draws the picker as a list hanging under p.at over the screen's own view.

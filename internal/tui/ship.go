@@ -10,7 +10,56 @@ import (
 
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
+
+// pickShipServices lets the services to ship be changed first, names marked, one tab per section.
+func pickShipServices(m *model, names []string) tea.Cmd {
+	sp := m.app.Spec
+	all := sp.ServiceNames()
+	sections := sp.SectionMap()
+	groups := []pickGroup{{name: "all"}}
+	for _, n := range append(slices.Clone(sp.SectionOrder), "other", "infra") {
+		g := pickGroup{name: n, items: map[string]bool{}}
+		for _, svc := range all {
+			s := sp.Services[svc]
+			sec, ok := sections[svc]
+			switch {
+			case s.Role == spec.RoleInfra:
+				sec = "infra"
+			case !ok:
+				sec = "other"
+			}
+			if sec == n {
+				g.items[svc] = true
+			}
+		}
+		if len(g.items) > 0 {
+			groups = append(groups, g)
+		}
+	}
+	desc := make([]string, len(all))
+	for i, n := range all {
+		desc[i] = strings.Join(sp.Services[n].Groups, ",")
+	}
+	m.pickMany("ship: space marks a service, enter goes on", all, desc, names, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		return ship(m, chosen)
+	})
+	if len(groups) > 2 {
+		m.picker.groups = groups
+		if len(names) > 0 {
+			for i, g := range groups[1:] {
+				if g.items[names[0]] {
+					m.picker.group = i + 1
+				}
+			}
+		}
+	}
+	return nil
+}
 
 // ship asks which of build, push and deploy to run for names, the image tag, and (when deploying)
 // the environment's variables, such as the database names; then runs the chosen steps in order.

@@ -314,7 +314,7 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 			})
 		})
 	case "b":
-		return ship(m, names)
+		return pickShipServices(m, names)
 	case "l":
 		for i, tb := range m.tabs {
 			if lt, ok := tb.(*logsTab); ok {
