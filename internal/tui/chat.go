@@ -283,8 +283,10 @@ func (m *model) chatCommand(v string) tea.Cmd {
 		})
 	case "/autocomplete":
 		m.toggleAutocomplete()
+	case "/redact":
+		m.toggleRedact()
 	default:
-		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off · @why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
+		c.msgs = append(c.msgs, ai.Message{Role: "assistant", Text: "/new starts over · /sessions picks a conversation (ctrl+d closes one there) · /close forgets this one · /stop or ctrl+x stops a turn · /model and /effort set the chat's model and reasoning level, /fast the completions' model, /autocomplete turns suggestions while typing on or off, /redact the masking of secrets in what the model sees · @why <service> gathers the evidence of an incident and asks for its root cause · esc hides the chat, @ brings it back. Anything else goes to the assistant with what this screen shows."})
 	}
 	return nil
 }
@@ -976,6 +978,31 @@ func (m *model) asPopup() {
 }
 
 // toggleAutocomplete switches AI suggestions while typing, for good (ai.json autocomplete).
+// toggleRedact turns the masking of secrets (goxang/scrub) in what reaches the model on or off.
+func (m *model) toggleRedact() {
+	c, err := ai.LoadConfig()
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	on := !c.RedactOn()
+	if err := ai.ChangeConfig("redact", fmt.Sprint(on)); err != nil {
+		m.setStatus(err.Error(), true)
+		return
+	}
+	if r := m.aiRunner(); r != nil {
+		r.Redactor = nil
+		if on {
+			r.Redactor = m.app.Redactor()
+		}
+	}
+	if on {
+		m.setStatus("secrets are masked before they reach the model", false)
+	} else {
+		m.setStatus("secrets are NOT masked: the model sees them as they are (/redact masks them again)", true)
+	}
+}
+
 func (m *model) toggleAutocomplete() {
 	r := m.aiRunner()
 	if r == nil || !r.Setup.Enabled() {

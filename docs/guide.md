@@ -136,8 +136,9 @@ models are. Providers: `own`, `opencode`, `openai` (any compatible endpoint), `9
 Secrets never reach the model: every prompt, completion and tool result goes through one redactor that
 puts `<secret:NAME>` in place of `secrets:` values, `${NAME}`s with a secret's name taken from your
 environment, env vars and component fields named like a password, token or key, passwords inside URLs
-and DSNs, and JWTs, AWS keys, GitHub tokens, bearer headers and private keys in logs.
-`rig ai config redact=false` turns it off.
+and DSNs, and whatever [goxang/scrub](https://github.com/goxang/scrub)'s packs catch in logs: JWTs, cloud
+tokens, bearer headers, private keys, card numbers, PINs. `/redact` in the chat, or
+`rig ai config redact=false|true`, turns it off and on.
 
 Guard rails, enforced by rig's MCP server rather than the prompt: a conversation is bound to the
 environment it started on (other `env`s are refused); the project directory is the only workspace, with

@@ -3,12 +3,17 @@ package ai
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/goxang/scrub"
+	"github.com/goxang/scrub/packs"
 )
 
 // Redactor puts <secret:NAME> in place of secrets in text bound for a model: the values rig knows
-// to be secret (Known), then whatever looks like a credential (URL passwords, key=value pairs,
-// JWTs, cloud and GitHub tokens, bearer headers, private keys). A nil Redactor redacts nothing.
+// to be secret (Known), then whatever goxang/scrub's packs take for a credential (URL passwords,
+// key=value pairs, JWTs, cloud tokens, bearer headers, private keys, card numbers, PINs).
+// A nil Redactor redacts nothing.
 type Redactor struct {
 	known []knownSecret
 }
@@ -41,38 +46,72 @@ func NewRedactor(known map[string]string) *Redactor {
 	return r
 }
 
-var secretPatterns = []struct {
-	re   *regexp.Regexp
-	repl string
-}{
-	{regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`), "<secret:private-key>"},
-	// scheme://user:password@host
-	{regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+):([^\s@/<][^\s@/]*)@`), "$1:<secret:url-password>@"},
-	{regexp.MustCompile(`(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}`), "$1 <secret:bearer>"},
-	{regexp.MustCompile(`(?i)\b(authorization:\s*basic)\s+[A-Za-z0-9+/=]{8,}`), "$1 <secret:basic-auth>"},
-	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), "<secret:jwt>"},
-	{regexp.MustCompile(`\b(AKIA|ASIA)[0-9A-Z]{16}\b`), "<secret:aws-access-key>"},
-	{regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b`), "<secret:github-token>"},
-	{regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}`), "<secret:slack-token>"},
-	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}`), "<secret:api-key>"},
-	// "password": "x" in JSON, password=x / password: x in logs, DSNs and env dumps
-	{regexp.MustCompile(`(?i)("(?:[a-z0-9_-]*?)(?:password|passwd|secret|token|api_?key|access_?key|private_?key)"\s*:\s*")([^"<]+)(")`), "$1<secret:value>$3"},
-	// not after "<": a placeholder already put in (<secret:x>) has the word secret in it
-	{regexp.MustCompile(`(?i)(^|[^<a-z0-9_.-])([a-z0-9_.-]*(?:password|passwd|secret|token|api_?key|access_?key|private_?key))(\s*[=:]\s*)([^\s;,"'&<]+)`), "$1$2$3<secret:$2>"},
-}
+// patterns find what looks like a credential: goxang/scrub's payment, secret and cloud packs, plus
+// key=value pairs whose key only ends in a secret's name (DB_PASSWORD=x) and basic auth.
+var patterns = func() *scrub.Scrubber {
+	rules := append(packs.All(),
+		scrub.Rule{
+			ID:      "secret.suffixed",
+			Pattern: `(?i)[a-z0-9][_.-](?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)["']?\s{0,8}[:=]\s{0,8}["']?(?P<secret>[^\s"',;&<]{1,256})`,
+			Anchors: []string{"password", "passwd", "pwd", "secret", "token", "key"},
+			Group:   "secret",
+		},
+		scrub.Rule{
+			ID:      "secret.basic_auth",
+			Pattern: `(?i)\bbasic\s+(?P<secret>[A-Za-z0-9+/=]{8,})`,
+			Anchors: []string{"basic"},
+			Group:   "secret",
+		})
+	for i := range rules {
+		name := placeholder[rules[i].ID]
+		if name == "" {
+			_, name, _ = strings.Cut(rules[i].ID, ".")
+			name = strings.ReplaceAll(name, "_", "-")
+		}
+		rules[i].Mask = func(match string) string {
+			if strings.ContainsRune(match, sentinel) || strings.EqualFold(match, "bearer") || strings.EqualFold(match, "basic") {
+				return match // named already, or the scheme of an Authorization header whose token has its own rule
+			}
+			return "<secret:" + name + ">"
+		}
+	}
+	return scrub.New().Add(rules...).MustBuild()
+}()
+
+var placeholder = map[string]string{"secret.keyed": "value", "secret.suffixed": "value", "cloud.aws_access_key_id": "aws-access-key", "cloud.openai_key": "api-key"}
+
+// sentinel marks the spans the patterns leave alone: known values and placeholders already there.
+const sentinel = '\uE000'
+
+var (
+	placeholderRe = regexp.MustCompile(`<secret:[A-Za-z0-9_.-]+>`)
+	heldRe        = regexp.MustCompile("\uE000[0-9]+\uE000")
+)
 
 // Redact is the one function every text bound for a model goes through.
 func (r *Redactor) Redact(s string) string {
 	if r == nil || s == "" {
 		return s
 	}
+	var held []string
+	hold := func(text string) string {
+		held = append(held, text)
+		return string(sentinel) + strconv.Itoa(len(held)-1) + string(sentinel)
+	}
+	s = placeholderRe.ReplaceAllStringFunc(s, hold)
 	for _, k := range r.known {
-		s = strings.ReplaceAll(s, k.value, "<secret:"+k.name+">")
+		if strings.Contains(s, k.value) {
+			s = strings.ReplaceAll(s, k.value, hold("<secret:"+k.name+">"))
+		}
 	}
-	for _, p := range secretPatterns {
-		s = p.re.ReplaceAllString(s, p.repl)
+	s = patterns.Redact(s)
+	if len(held) == 0 {
+		return s
 	}
-	return s
+	return heldRe.ReplaceAllStringFunc(s, func(m string) string {
+		i, _ := strconv.Atoi(strings.Trim(m, string(sentinel)))
+		return held[i]
+	})
 }
 
 var secretName = regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api_?key|access_?key|private_?key|credential)`)
