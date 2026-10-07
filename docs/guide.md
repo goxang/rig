@@ -46,7 +46,7 @@ even with it. In the TUI the confirmation is the `--yes`.
 ## Terminal UI
 
 Screens load nothing until opened, and only the one showing refreshes. Everything is a sortable grid
-(`ctrl+shift+←→` pick the column, `ctrl+shift+↑↓` order it, or click a header) and works with the mouse. On a Kubernetes
+(`ctrl+shift+←→` pick the column, `ctrl+shift+↑↓` or `alt+↑↓` order it, or click a header) and works with the mouse. On a Kubernetes
 cluster, dangerous changes (stop, deploy, delete, edits) ask first and `enter` confirms; local, docker
 and kind never ask. `?` shows the keys of the current screen.
 Drag over any text (results, queries, test output, the chat) to copy it; the selection stays inside the
@@ -160,7 +160,7 @@ allows that same command for the rest of the session. With no terminal or UI to 
 your message asked for in so many words runs. A read-only environment refuses changes whoever confirms.
 Secrets and `rig mcp`/`debug` are out of reach.
 
-`rig why <service>` (or `@why <service>` in the chat) is incident mode. rig gathers the evidence itself,
+`rig why <service>` (or `/why <service>` in the chat) is incident mode. rig gathers the evidence itself,
 the same way every time: the state, restarts and health of the service and everything it depends on,
 whether the components they host answer, error lines in their logs and which services those lines name,
 failed and slow traces, firing alerts, recent restarts and changes (deploys, the assistant's own). It ranks

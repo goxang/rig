@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 )
@@ -39,5 +40,17 @@ func TestHighlightKeepsCellColours(t *testing.T) {
 	}
 	if stripANSI(got) != "ok x" {
 		t.Fatalf("text changed: %q", stripANSI(got))
+	}
+}
+
+func TestGridAltArrowsOrder(t *testing.T) {
+	g := newGrid("t", gcol{title: "n"})
+	g.key(tea.KeyMsg{Type: tea.KeyDown, Alt: true})
+	if !g.desc {
+		t.Error("alt+down did not sort descending")
+	}
+	g.key(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	if g.desc {
+		t.Error("alt+up did not sort ascending")
 	}
 }

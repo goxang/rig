@@ -118,13 +118,13 @@ func (t *servicesTab) hints() [][2]string {
 	}
 	if t.open_ != "" {
 		return [][2]string{{"esc", "back"}, {"↑↓ click", "pick a log line"}, {"enter v", "inspect the line"}, {"/", "filter: text, regex, a.b=value"}, {"i", "pick instances"},
-			{"w", "wrap"}, {"s", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
-			{"r", "restart"}, {"u/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests: edit, sync, apply"},
+			{"w", "wrap"}, {"S", "structured/raw"}, {"h", "fields shown"}, {"G", "follow again"}, {"y/Y", "copy shown/all"}, {"c", "clear the log"},
+			{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"a", "autoscaler"}, {"R", "requests/limits"}, {"$", "env vars"}, {"F", "manifests: edit, sync, apply"},
 			{"d", "deploy a tag/image"}, {"b", "build, push, deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"d", "image"}, {"$", "env"}, {"F", "live manifests"}, {"b", "build/push/deploy"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"},
-		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ ↑↓", "sort"}}
+		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -421,11 +421,14 @@ func (t *servicesTab) detailKey(m *model, k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "D":
 		return t.toggleDebug(m, name)
-	case "u":
+	case "s":
 		return t.ops(m, "s", []string{name})
 	case "a":
 		return t.ops(m, "h", []string{name})
-	case "s", "h":
+	case "S":
+		k = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+		t.detail = ""
+	case "h":
 		t.detail = ""
 	}
 	if cmd, ok := t.lt.keyHandled(m, k); ok {

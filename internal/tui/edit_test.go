@@ -3,6 +3,8 @@ package tui
 import (
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -33,5 +35,17 @@ func TestEditKeySelection(t *testing.T) {
 	press(tea.KeyMsg{Type: tea.KeyBackspace})
 	if in.Value() != "" {
 		t.Fatalf("ctrl+a then backspace: %q", in.Value())
+	}
+}
+
+func TestChatInputWalksWords(t *testing.T) {
+	in := textarea.New()
+	editorTextarea(&in)
+	in.Focus()
+	in.SetValue("one two three")
+	in, _ = in.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	in.InsertString("X")
+	if got := in.Value(); got != "one two Xthree" {
+		t.Errorf("ctrl+left then typing = %q", got)
 	}
 }

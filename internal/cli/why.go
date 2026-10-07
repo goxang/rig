@@ -25,7 +25,7 @@ func whyCommand() *cobra.Command {
 depends on, whether the components they host answer, error lines in their logs (and which services
 those lines name), failed and slow traces, firing alerts, and recent restarts and changes. It ranks
 the suspects by that evidence, then asks the assistant (secrets redacted) for a root-cause summary
-with hypotheses citing the evidence. @why <service> in the UI's chat does the same.`,
+with hypotheses citing the evidence. /why <service> in the UI's chat does the same.`,
 		Example: `  rig why api
   rig why api --since 1h --report         # also save a Markdown incident report
   rig why api -o incident.md              # ... to this file

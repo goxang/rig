@@ -123,15 +123,15 @@ func (t *dataTab) hints() [][2]string {
 	case t.focus == 2:
 		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
 	case c.kind == string(core.KindMessaging) && t.qview > 0:
-		return [][2]string{{"⇧←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"ctrl+⇧←→ ↑↓", "sort"}, {"esc ←", "components"}}
+		return [][2]string{{"⇧←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"esc ←", "components"}}
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"enter", "queue details"}, {"m", "peek messages"}, {"space a", "mark, mark all"}, {"P", "purge marked/selected"}, {"X", "purge every queue shown"},
-			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"⇧←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ ↑↓", "sort"}, {"esc ←", "components"}}
+			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"⇧←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"esc ←", "components"}}
 	}
 	if t.query != "" {
-		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ ↑↓", "sort"}}
+		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
 	}
-	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"ctrl+⇧←→ ↑↓", "sort"}}
+	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
 	if t.editable(c) {
 		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
 	}

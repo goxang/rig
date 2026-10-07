@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"path"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -45,12 +48,32 @@ func upgradeCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("upgrade needs sh: %w", err)
 			}
+			if os.Getenv("RIG_VERSION") == "" && os.Getenv("RIG_DOWNLOAD_URL") == "" {
+				if latest := latestRelease(); latest != "" && latest == Version {
+					fmt.Printf("rig %s is already the latest version\n", Version)
+					return nil
+				}
+			}
 			cmd := exec.Command(sh, "-c", "curl -fsSL https://raw.githubusercontent.com/goxang/rig/main/install.sh | sh")
 			cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 			cmd.Env = os.Environ()
 			return cmd.Run()
 		},
 	}
+}
+
+// latestRelease reads the tag GitHub's releases/latest redirects to; "" when it cannot tell.
+func latestRelease() string {
+	c := http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Head("https://github.com/goxang/rig/releases/latest")
+	if err != nil {
+		return ""
+	}
+	resp.Body.Close()
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return path.Base(loc)
+	}
+	return ""
 }
 
 func uninstallCommand() *cobra.Command {

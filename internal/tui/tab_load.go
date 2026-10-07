@@ -79,7 +79,7 @@ func (t *loadTab) hints() [][2]string {
 	if t.full != nil {
 		return t.full.hints()
 	}
-	return [][2]string{{"space", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"},
+	return [][2]string{{"s/x", "start/stop"}, {"+/-", "rate step"}, {"r", "set rate"}, {"[ ]", "fewer/more instances"}, {"R", "set instances"},
 		{"i", "instance shown"}, {"c", "edit config (KV)"}, {"v", "env vars"}, {"b", "restart"}, {"W", "save a metrics report"}, {"z click", "chart full size"}}
 }
 
@@ -176,8 +176,10 @@ func (t *loadTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 			t.inst[n] = ids[(slices.Index(ids, t.inst[n])+d)%len(ids)]
 			return nil
-		case " ", "enter":
-			if t.stats[n].Running {
+		case "x":
+			return m.act("stop "+n, false, g.Stop)
+		case "s", "enter":
+			if msg.String() == "enter" && t.stats[n].Running {
 				return m.act("stop "+n, false, g.Stop)
 			}
 			if t.started == nil {
