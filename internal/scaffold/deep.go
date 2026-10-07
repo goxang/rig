@@ -132,7 +132,7 @@ func Deep(ctx context.Context, root string) ([]Candidate, error) {
 		}
 	}
 	out = append(out, goland(root)...)
-	out = append(out, containers(ctx)...)
+	out = append(out, containers(ctx, root)...)
 	return unique(out), nil
 }
 
@@ -201,9 +201,7 @@ func deepFile(root, path string, add func(Candidate), mu *sync.Mutex, goDir map[
 		file := filepath.Join(rel, name)
 		for n, c := range doc.Services {
 			s := fromCompose(cleanName(n), c, file)
-			if s.Context != "" && rel != "." {
-				s.Context = filepath.Join(rel, s.Context)
-			}
+			rebase(s, rel)
 			add(Candidate{Kind: "compose", Name: s.Name, Where: file, Service: s})
 		}
 	case name == "Chart.yaml":
@@ -329,51 +327,170 @@ func goland(root string) []Candidate {
 }
 
 // containers are the ones running on this machine; picking one adopts it, rig starts and stops it.
-func containers(ctx context.Context) []Candidate {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+// Each carries what recreates it: its compose service when compose made it, else its image,
+// command, environment and binds as docker inspect reports them.
+func containers(ctx context.Context, root string) []Candidate {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	raw, err := exec.CommandContext(ctx, "docker", "ps", "--format", "{{json .}}").Output()
+	raw, err := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}").Output()
 	if err != nil {
 		return nil
 	}
+	names := strings.Fields(string(raw))
+	if len(names) == 0 {
+		return nil
+	}
+	raw, err = exec.CommandContext(ctx, "docker", append([]string{"inspect"}, names...)...).Output()
+	if err != nil {
+		return nil
+	}
+	var ins []inspected
+	if json.Unmarshal(raw, &ins) != nil {
+		return nil
+	}
+	images := map[string]*imageConfig{}
 	var out []Candidate
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var c struct{ Names, Image, Ports, Labels string }
-		if json.Unmarshal([]byte(line), &c) != nil || c.Names == "" {
+	for _, c := range ins {
+		name := strings.TrimPrefix(c.Name, "/")
+		if c.Config.Labels["rig.project"] != "" {
+			continue // a rig project's own; its rig.yaml has it
+		}
+		if s := fromComposeLabels(root, name, c.Config.Labels); s != nil {
+			out = append(out, Candidate{Kind: "container", Name: s.Name, Where: name + " (" + s.From + ")", Service: s})
 			continue
 		}
-		name := c.Names
-		if m := composeLabelRe.FindStringSubmatch(c.Labels); m != nil {
-			name = m[1]
+		if images[c.Config.Image] == nil {
+			images[c.Config.Image] = inspectImage(ctx, c.Config.Image)
 		}
-		s := &Service{Name: cleanName(name), Role: "infra", Image: c.Image, Adopt: c.Names, From: "running container " + c.Names}
-		if kindOf(c.Image) == "" {
-			s.Role = "app"
-		}
-		for i, p := range publishedPorts(c.Ports) {
-			s.Ports = append(s.Ports, Port{portName(p, i), p})
-		}
-		out = append(out, Candidate{Kind: "container", Name: s.Name, Where: c.Names + " (" + c.Image + ")", Service: s})
+		s := fromInspect(name, c, images[c.Config.Image])
+		out = append(out, Candidate{Kind: "container", Name: s.Name, Where: name + " (" + c.Config.Image + ")", Service: s})
 	}
 	return out
 }
 
-var (
-	publishedRe    = regexp.MustCompile(`->(\d+)/tcp`)
-	composeLabelRe = regexp.MustCompile(`(?:^|,)com\.docker\.compose\.service=([^,]+)`)
-)
+type inspected struct {
+	Name   string
+	Config struct {
+		Image                string
+		Cmd, Entrypoint, Env []string
+		Labels               map[string]string
+	}
+	HostConfig struct {
+		Binds        []string
+		PortBindings map[string][]struct{ HostPort string }
+	}
+}
 
-func publishedPorts(s string) []int {
-	var out []int
-	seen := map[string]bool{}
-	for _, m := range publishedRe.FindAllStringSubmatch(s, -1) {
-		if !seen[m[1]] {
-			seen[m[1]] = true
-			n, _ := strconv.Atoi(m[1])
-			out = append(out, n)
+type imageConfig struct{ Cmd, Entrypoint, Env []string }
+
+func inspectImage(ctx context.Context, image string) *imageConfig {
+	ic := &imageConfig{}
+	raw, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{json .Config}}", image).Output()
+	if err == nil {
+		_ = json.Unmarshal(raw, ic)
+	}
+	return ic
+}
+
+// fromInspect keeps only what differs from the image, so the rig.yaml entry reads like a compose one.
+func fromInspect(name string, c inspected, img *imageConfig) *Service {
+	s := &Service{Name: cleanName(name), Role: "infra", Image: c.Config.Image, Adopt: name, From: "running container " + name}
+	if kindOf(c.Config.Image) == "" {
+		s.Role = "app"
+	}
+	if !equal(c.Config.Entrypoint, img.Entrypoint) {
+		s.DockerCommand = c.Config.Entrypoint
+	}
+	if !equal(c.Config.Cmd, img.Cmd) || len(s.DockerCommand) > 0 {
+		s.DockerArgs = c.Config.Cmd
+	}
+	base := map[string]bool{}
+	for _, e := range img.Env {
+		base[e] = true
+	}
+	for _, e := range c.Config.Env {
+		if !base[e] {
+			k, v, _ := strings.Cut(e, "=")
+			s.Env = append(s.Env, [2]string{k, v})
 		}
 	}
-	return out
+	s.Volumes = c.HostConfig.Binds
+	var ports []int
+	for p := range c.HostConfig.PortBindings {
+		if n, err := strconv.Atoi(strings.Split(p, "/")[0]); err == nil {
+			ports = append(ports, n)
+		}
+	}
+	sort.Ints(ports)
+	for i, p := range ports {
+		s.Ports = append(s.Ports, Port{portName(p, i), p})
+	}
+	if k := kindOf(c.Config.Image); len(s.Ports) == 0 && k != "" {
+		s.Ports = presets[k].ports
+	}
+	return s
+}
+
+// fromComposeLabels reads the compose service that made a container, from the labels compose puts on it.
+func fromComposeLabels(root, container string, labels map[string]string) *Service {
+	svc, files := labels["com.docker.compose.service"], labels["com.docker.compose.project.config_files"]
+	if svc == "" || files == "" {
+		return nil
+	}
+	for _, f := range strings.Split(files, ",") {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var doc struct {
+			Services map[string]composeService `yaml:"services"`
+		}
+		c, ok := composeService{}, false
+		if yaml.Unmarshal(raw, &doc) == nil {
+			c, ok = doc.Services[svc]
+		}
+		if !ok {
+			continue
+		}
+		file, rel := f, filepath.Dir(f)
+		if r, err := filepath.Rel(root, f); err == nil && !strings.HasPrefix(r, "..") {
+			file, rel = r, filepath.Dir(r)
+		}
+		s := fromCompose(cleanName(svc), c, file)
+		rebase(s, rel)
+		s.Adopt = container
+		return s
+	}
+	return nil
+}
+
+// rebase makes a compose service's relative paths relative to the project root.
+func rebase(s *Service, rel string) {
+	if rel == "." {
+		return
+	}
+	if s.Context != "" {
+		s.Context = filepath.Join(rel, s.Context)
+		if s.Dockerfile != "" {
+			s.Dockerfile = filepath.Join(rel, s.Dockerfile)
+		}
+	}
+	for i, v := range s.Volumes {
+		src, dst, _ := strings.Cut(v, ":")
+		s.Volumes[i] = "./" + filepath.ToSlash(filepath.Join(rel, src)) + ":" + dst
+	}
+}
+
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // unique keeps the first candidate of each kind of thing per name: a service name, a suite name.
@@ -406,6 +523,10 @@ func unique(cs []Candidate) []Candidate {
 	return out
 }
 
+// sectionOf names the Services screen section a candidate lands in; the user renames them in rig.yaml.
+var sectionOf = map[string]string{"go": "go", "goland": "go", "python": "python", "node": "node", "rust": "rust", "java": "java",
+	"dotnet": "dotnet", "ruby": "ruby", "dockerfile": "docker", "compose": "compose", "manifest": "kubernetes", "container": "containers"}
+
 // PlanOf turns picked candidates into a plan: their services, suites and manifest folders.
 func PlanOf(root string, picked []Candidate) *Plan {
 	abs, _ := filepath.Abs(root)
@@ -413,6 +534,7 @@ func PlanOf(root string, picked []Candidate) *Plan {
 	for _, c := range picked {
 		switch {
 		case c.Service != nil:
+			c.Service.Section = sectionOf[c.Kind]
 			p.Services = append(p.Services, c.Service)
 			if c.Manifests != "" && !contains(p.Manifests, c.Manifests) {
 				p.Manifests = append(p.Manifests, c.Manifests)

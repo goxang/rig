@@ -33,6 +33,8 @@ type Service struct {
 	From                               string
 	// Adopt is a running container rig takes over (docker: {container: ...}) instead of making one.
 	Adopt string
+	// Section groups it on the Services screen (sections:), by what rig init --deep found it as.
+	Section string
 }
 
 type Port struct {
@@ -422,6 +424,22 @@ func (s *Service) node() *yaml.Node {
 	return n
 }
 
+func (p *Plan) sections() *yaml.Node {
+	out := mapping()
+	at := map[string]*yaml.Node{}
+	for _, s := range p.Services {
+		if s.Section == "" {
+			continue
+		}
+		if at[s.Section] == nil {
+			at[s.Section] = seq(nil)
+			out.Content = append(out.Content, scalar(s.Section), flow(mapping("services", at[s.Section])))
+		}
+		at[s.Section].Content = append(at[s.Section].Content, scalar(s.Name))
+	}
+	return out
+}
+
 // YAML is the rig.yaml of the plan.
 func (p *Plan) YAML() ([]byte, error) {
 	hasInfra, runnable, built := false, false, false
@@ -488,6 +506,9 @@ func (p *Plan) YAML() ([]byte, error) {
 			cs.Content = append(cs.Content, scalar(c.Name), m)
 		}
 		add("components", cs)
+	}
+	if secs := p.sections(); len(secs.Content) > 0 {
+		add("sections", secs)
 	}
 	if len(p.Suites) > 0 {
 		ts := mapping()

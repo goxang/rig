@@ -101,13 +101,22 @@ func haveNames(raw []byte) map[string]bool {
 // mergeInto adds the plan's services, suites and manifest folders to rig.yaml as text, at the end
 // of each block, so the file's comments, anchors and layout stay as they are.
 func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
+	var doc struct {
+		Sections map[string]yaml.Node `yaml:"sections"`
+	}
+	_ = yaml.Unmarshal(raw, &doc)
+	for _, s := range p.Services {
+		if _, taken := doc.Sections[s.Section]; taken {
+			s.Section = "" // rig.yaml's own section of that name stays as written
+		}
+	}
 	gen, err := p.YAML()
 	if err != nil {
 		return nil, err
 	}
 	blocks := topBlocks(gen)
 	text := string(raw)
-	for _, key := range []string{"services", "tests"} {
+	for _, key := range []string{"services", "sections", "tests"} {
 		body := blocks[key]
 		if strings.TrimSpace(body) == "" || strings.HasPrefix(strings.TrimSpace(body), "{") {
 			continue

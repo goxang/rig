@@ -41,8 +41,10 @@ func (k *keysOrList) UnmarshalYAML(n *yaml.Node) error {
 		}
 		for _, item := range l {
 			key, v, _ := strings.Cut(item, "=")
-			k.keys = append(k.keys, key)
-			k.values[key] = v
+			if _, dup := k.values[key]; !dup {
+				k.keys = append(k.keys, key)
+			}
+			k.values[key] = v // compose lets a later entry win
 		}
 		return nil
 	}

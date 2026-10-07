@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/goxang/rig/spec"
 )
 
@@ -71,5 +73,16 @@ func TestInitFromComposeSourcesAndManifests(t *testing.T) {
 	}
 	if proj.Environments["local"].Infra != "docker" || len(proj.Manifests) != 1 {
 		t.Errorf("local env or manifests wrong\n%s", raw)
+	}
+}
+
+func TestComposeDuplicateEnvLastWins(t *testing.T) {
+	var c composeService
+	if err := yaml.Unmarshal([]byte("environment: [A=1, B=2, A=3]\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	s := fromCompose("x", c, "compose.yml")
+	if len(s.Env) != 2 || s.Env[0] != [2]string{"A", "3"} {
+		t.Fatalf("env = %v", s.Env)
 	}
 }
