@@ -12,11 +12,15 @@ func TestFileAction(t *testing.T) {
 	outside := t.TempDir()
 	os.WriteFile(filepath.Join(root, "a.txt"), []byte("one two two"), 0o644)
 	os.WriteFile(filepath.Join(root, ".env"), []byte("SECRET=1"), 0o600)
-	os.Symlink(outside, filepath.Join(root, "escape"))
+	escapes := []string{"../x", "/etc/passwd", ".env", ".ENV", "configs/app.json", ".git/config"}
+	// Windows needs a privilege for symlinks; without one there is no escape to test
+	if os.Symlink(outside, filepath.Join(root, "escape")) == nil {
+		escapes = append(escapes, "escape/new.txt")
+	}
 	t.Setenv("RIG_AI_ENV", "")
 	run := func(args map[string]any) (string, error) { return fileAction(root, []string{"configs/**"}, args) }
 
-	for _, p := range []string{"../x", "/etc/passwd", ".env", "configs/app.json", ".git/config", "escape/new.txt"} {
+	for _, p := range escapes {
 		if _, err := run(map[string]any{"action": "write", "path": p, "content": "x"}); err == nil || !strings.Contains(err.Error(), "refused") {
 			t.Errorf("write %s: %v, want refused", p, err)
 		}

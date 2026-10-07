@@ -146,7 +146,14 @@ func inProject(root string, deny []string, p string) (string, string, error) {
 	if p == "" {
 		p = "."
 	}
-	if !filepath.IsAbs(p) {
+	switch {
+	case filepath.IsAbs(p):
+	case strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) || filepath.VolumeName(p) != "":
+		// rooted without being absolute (Windows' \etc, C:x): where it leads is decided by the drive, never the project
+		if a, err := filepath.Abs(p); err == nil {
+			p = a
+		}
+	default:
 		p = filepath.Join(root, p)
 	}
 	p = filepath.Clean(p)
@@ -168,7 +175,7 @@ func inProject(root string, deny []string, p string) (string, string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("refused: %s is outside the project (%s)", p, root)
 	}
-	if rel != "." && (ai.DeniedPath(rel, deny) || rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator))) {
+	if rel != "." && (ai.DeniedPath(rel, deny) || strings.EqualFold(rel, ".git") || strings.HasPrefix(strings.ToLower(rel), ".git"+string(filepath.Separator))) {
 		return "", "", fmt.Errorf("refused: %s is kept from assistants (credentials, rig.yaml ai.deny, .git)", rel)
 	}
 	return real, rel, nil

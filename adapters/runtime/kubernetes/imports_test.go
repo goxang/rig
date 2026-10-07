@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/goxang/rig/core"
@@ -22,7 +23,7 @@ func TestInitDeploysFromKubernetesImports(t *testing.T) {
 	if err := r.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Opt.Manifests) != 1 || r.Opt.Manifests[0] != "/p/deploy" {
+	if len(r.Opt.Manifests) != 1 || r.Opt.Manifests[0] != filepath.Join("/p", "deploy") {
 		t.Fatalf("manifests = %v", r.Opt.Manifests)
 	}
 	own := &Runtime{Opt: Options{Context: "kind-x", Manifests: []string{"k8s"}}}

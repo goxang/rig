@@ -33,9 +33,9 @@ func importCompose(path, dir string) (map[string]*spec.Service, error) {
 			p = filepath.Join(base, p)
 		}
 		if r, err := filepath.Rel(dir, p); err == nil {
-			return r
+			return filepath.ToSlash(r)
 		}
-		return p
+		return filepath.ToSlash(p)
 	}
 	dotenv, _ := spec.ReadEnvFile(filepath.Join(base, ".env"))
 	lookup := func(k string) (string, bool) {

@@ -248,7 +248,8 @@ func DeniedPath(rel string, extra []string) bool {
 
 func globRe(p string) *regexp.Regexp {
 	var b strings.Builder
-	b.WriteString("^")
+	// (?i): .ENV is .env on Windows' and macOS's filesystems
+	b.WriteString("(?i)^")
 	for i := 0; i < len(p); i++ {
 		switch {
 		case strings.HasPrefix(p[i:], "**/"):
