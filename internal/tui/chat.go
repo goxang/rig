@@ -631,6 +631,8 @@ func (m *model) chatUpdate(msg tea.Msg) (tea.Cmd, bool) {
 			if msg.err != nil && !errors.Is(msg.err, ai.ErrTurnFailed) {
 				c.msgs = append(c.msgs, ai.Message{Role: "error", Text: msg.err.Error()})
 			}
+			took := time.Since(c.started).Round(100 * time.Millisecond)
+			c.msgs = append(c.msgs, ai.Message{Role: "took", Text: "took " + took.String(), At: time.Now()})
 		}
 		// the assistant may have changed what the screens show
 		m.svcAt = time.Time{}
@@ -817,6 +819,8 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sRed.Render(wordWrap("✖ "+msg.Text, iw)))
 		case "audit":
 			add(sAmber.Render(wordWrap("  "+msg.Text, iw)))
+		case "took":
+			add(sDim.Render("  ⏱ " + msg.Text))
 		}
 		for _, t := range msg.Tools {
 			add(sDim.Render(wordWrap("  → "+t, iw)))
