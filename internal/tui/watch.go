@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/goxang/rig/engine"
 )
@@ -103,14 +102,13 @@ func (m *model) watchBadge() string {
 	}
 	sort.Strings(busy)
 	sort.Strings(failed)
-	st := lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Bold(true)
 	switch {
 	case len(busy) > 0:
-		return st.Background(cAmber).Render(" ⟳ " + strings.Join(busy, " ") + " ")
+		return badge(cAmber).Render(" ⟳ " + strings.Join(busy, " ") + " ")
 	case len(failed) > 0:
-		return st.Background(cRed).Render(" ✖ build " + strings.Join(failed, " ") + " (A) ")
+		return badge(cRed).Render(" ✖ build " + strings.Join(failed, " ") + " (A) ")
 	}
-	return st.Background(cGreen).Render(" ◉ watch ")
+	return badge(cGreen).Render(" ◉ watch ")
 }
 
 // watchFailures are the failed builds' output, for the alerts box.

@@ -27,30 +27,56 @@ func init() { applyTheme(themes["default"]) }
 // theme is the one in use, for code that needs a plain colour (charts).
 var theme Theme
 
+// fitted is a theme's colours for one terminal background, each made readable where it is drawn.
+type fitted struct {
+	sh                                       themeShades
+	term                                     string
+	text, dim, ph, accent, green, amber, red string
+	purple, onAccent                         string
+}
+
+// fitTheme keeps each colour readable on the terminal and on the bars and cursor lines it sits on;
+// a theme with no light shades takes the default's on light terminals.
+func fitTheme(t Theme) (dark, light fitted) {
+	fit := func(sh themeShades, term string) fitted {
+		bgs := []string{term, sh.Bar, sh.Cursor, sh.Selected, sh.Panel}
+		hue := func(c string) string { return readable(c, 3, bgs...) }
+		f := fitted{sh: sh, term: term, text: readable(sh.Text, 4.5, bgs...), dim: readable(sh.Dim, 2.5, bgs...), ph: readable(sh.Placeholder, 3, bgs...),
+			accent: hue(t.Accent), green: hue(t.Green), amber: hue(t.Amber), red: hue(t.Red), purple: hue(t.Purple)}
+		f.onAccent = readable(t.OnAccent, 4.5, f.accent)
+		return f
+	}
+	ls := t.Light
+	if ls == (themeShades{}) {
+		ls = themes["default"].Light
+	}
+	return fit(t.themeShades, darkTerm), fit(ls, lightTerm)
+}
+
 func applyTheme(t Theme) {
 	theme = t
+	d, l := fitTheme(t)
+	dark, light := d.sh, l.sh
 	c := func(dark, light string) lipgloss.TerminalColor {
-		if light == "" {
-			return lipgloss.Color(dark)
-		}
 		return lipgloss.AdaptiveColor{Light: light, Dark: dark}
 	}
-	cAccent, cGreen, cAmber, cRed, cPurple = c(t.Accent, ""), c(t.Green, ""), c(t.Amber, ""), c(t.Red, ""), c(t.Purple, "")
-	cText, cDim, cPlaceholder = c(t.Text, t.Light.Text), c(t.Dim, t.Light.Dim), c(t.Placeholder, t.Light.Placeholder)
-	cPanel, cBar = c(t.Panel, t.Light.Panel), c(t.Bar, t.Light.Bar)
+	cAccent, cGreen, cAmber, cRed, cPurple = c(d.accent, l.accent), c(d.green, l.green), c(d.amber, l.amber), c(d.red, l.red), c(d.purple, l.purple)
+	cText, cDim, cPlaceholder = c(d.text, l.text), c(d.dim, l.dim), c(d.ph, l.ph)
+	cPanel, cBar = c(dark.Panel, light.Panel), c(dark.Bar, light.Bar)
+	cOnAccent := c(d.onAccent, l.onAccent)
 
 	sTitle = lipgloss.NewStyle().Bold(true).Foreground(cText)
 	sDim = lipgloss.NewStyle().Foreground(cDim)
 	sAccent = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
 	sGreen = lipgloss.NewStyle().Foreground(cGreen)
 	sAmber = lipgloss.NewStyle().Foreground(cAmber)
-	sRed = lipgloss.NewStyle().Foreground(cRed)
-	sCursor = lipgloss.NewStyle().Background(c(t.Cursor, t.Light.Cursor)).Bold(true)
-	sSelected = lipgloss.NewStyle().Background(c(t.Selected, t.Light.Selected)).Bold(true)
-	sHover = lipgloss.NewStyle().Background(c(t.Hover, t.Light.Hover))
+	sRed = lipgloss.NewStyle().Foreground(cRed).Bold(true)
+	sCursor = lipgloss.NewStyle().Background(c(dark.Cursor, light.Cursor)).Bold(true)
+	sSelected = lipgloss.NewStyle().Background(c(dark.Selected, light.Selected)).Bold(true)
+	sHover = lipgloss.NewStyle().Background(c(dark.Hover, light.Hover))
 	sUnderline = lipgloss.NewStyle().Underline(true)
 	sTabHover = lipgloss.NewStyle().Foreground(cText).Underline(true).Padding(0, 1)
-	sTabOn = lipgloss.NewStyle().Foreground(c(t.OnAccent, "")).Background(cAccent).Bold(true).Padding(0, 1)
+	sTabOn = lipgloss.NewStyle().Foreground(cOnAccent).Background(cAccent).Bold(true).Padding(0, 1)
 	sTabOff = lipgloss.NewStyle().Foreground(cDim).Padding(0, 1)
 	sHeader = lipgloss.NewStyle().Background(cBar).Foreground(cText)
 	sBand = lipgloss.NewStyle().Background(cBar)
@@ -59,11 +85,33 @@ func applyTheme(t Theme) {
 	sSubSep = lipgloss.NewStyle().Foreground(cPanel).Render("│")
 	sKey = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
 	if len(t.Series) > 0 {
+		term := l
+		if lipgloss.HasDarkBackground() {
+			term = d
+		}
 		viz.Palette = make([]lipgloss.Color, len(t.Series))
 		for i, s := range t.Series {
-			viz.Palette[i] = lipgloss.Color(s)
+			viz.Palette[i] = lipgloss.Color(readable(s, 2.5, term.term))
 		}
 	}
+}
+
+// badge is bold text on bg, in black or white, whichever reads better on it.
+func badge(bg lipgloss.TerminalColor) lipgloss.Style {
+	ink := func(c string) string {
+		if contrast("#000000", c) >= contrast("#FFFFFF", c) {
+			return "#000000"
+		}
+		return "#FFFFFF"
+	}
+	st := lipgloss.NewStyle().Background(bg).Bold(true)
+	switch c := bg.(type) {
+	case lipgloss.AdaptiveColor:
+		return st.Foreground(lipgloss.AdaptiveColor{Light: ink(c.Light), Dark: ink(c.Dark)})
+	case lipgloss.Color:
+		return st.Foreground(lipgloss.Color(ink(string(c))))
+	}
+	return st
 }
 
 // panel draws a titled, rounded box exactly w×h.

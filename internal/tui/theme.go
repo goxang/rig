@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,7 +12,7 @@ import (
 )
 
 // Theme is the UI's colours. Text, Dim, Placeholder, Panel, Bar and the three backgrounds are for a
-// dark terminal; Light holds their light-terminal values (empty: the dark ones on both).
+// dark terminal; Light holds their light-terminal values (empty: the default theme's).
 type Theme struct {
 	// Base is the theme this one starts from; a theme file sets only what it changes.
 	Base string `yaml:"base,omitempty"`
@@ -57,7 +58,7 @@ var themes = map[string]Theme{
 		themeShades: themeShades{Text: "#CDD6F4", Dim: "#7F849C", Placeholder: "#BAC2DE", Panel: "#45475A", Bar: "#181825", Cursor: "#585B70", Selected: "#313244", Hover: "#2A2B3C"},
 		Light:       themeShades{Text: "#4C4F69", Dim: "#8C8FA1", Placeholder: "#5C5F77", Panel: "#BCC0CC", Bar: "#E6E9EF", Cursor: "#ACB0BE", Selected: "#CCD0DA", Hover: "#DCE0E8"},
 		Series:      []string{"#A6E3A1", "#F9E2AF", "#89B4FA", "#FAB387", "#F38BA8", "#CBA6F7", "#94E2D5", "#F5C2E7", "#74C7EC", "#EBA0AC"}},
-	"mono": {Base: "default", Accent: "#E0E0E0", OnAccent: "#000000", Green: "#C8C8C8", Amber: "#FFFFFF", Red: "#FFFFFF", Purple: "#B0B0B0",
+	"mono": {Base: "default", Accent: "#E0E0E0", OnAccent: "#000000", Green: "#A8A8A8", Amber: "#D8D8D8", Red: "#FFFFFF", Purple: "#C0C0C0",
 		themeShades: themeShades{Text: "#E0E0E0", Dim: "#808080", Placeholder: "#B0B0B0", Panel: "#4A4A4A", Bar: "#1A1A1A", Cursor: "#5A5A5A", Selected: "#3A3A3A", Hover: "#2A2A2A"},
 		Light:       themeShades{Text: "#111111", Dim: "#777777", Placeholder: "#444444", Panel: "#BBBBBB", Bar: "#EEEEEE", Cursor: "#BBBBBB", Selected: "#DDDDDD", Hover: "#EEEEEE"},
 		Series:      []string{"#FFFFFF", "#C0C0C0", "#909090", "#E0E0E0", "#A8A8A8", "#787878", "#D0D0D0", "#B8B8B8", "#989898", "#F0F0F0"}},
@@ -161,7 +162,7 @@ func overlay(base, t Theme) Theme {
 	set(&out.Purple, t.Purple)
 	shades(&out.themeShades, t.themeShades)
 	if t.Light != (themeShades{}) || t.themeShades != (themeShades{}) {
-		// a theme that sets its dark shades but not light ones means them on both
+		// a theme that sets its dark shades but not light ones takes the default light ones (fitTheme)
 		out.Light = t.Light
 	}
 	if len(t.Series) > 0 {
@@ -214,4 +215,64 @@ func SaveThemeFile(name, from string) (string, error) {
 	f := filepath.Join(themeDir(), name+".yaml")
 	head := "# rig theme: colours as #RRGGBB. Keep only what you change and set base: to start from another theme.\n# Text, dim, panel, bar and the backgrounds are for dark terminals; light: holds light-terminal values.\n"
 	return f, os.WriteFile(f, append([]byte(head), raw...), 0o644)
+}
+
+// The lightest dark and the darkest light terminal background a theme must read on.
+const darkTerm, lightTerm = "#262626", "#F2F2F2"
+
+func rgb(hex string) (r, g, b float64, ok bool) {
+	var x uint32
+	if _, err := fmt.Sscanf(strings.TrimPrefix(hex, "#"), "%06x", &x); err != nil || len(strings.TrimPrefix(hex, "#")) != 6 {
+		return 0, 0, 0, false
+	}
+	return float64(x>>16) / 255, float64(x>>8&0xff) / 255, float64(x&0xff) / 255, true
+}
+
+func luminance(hex string) float64 {
+	r, g, b, _ := rgb(hex)
+	lin := func(c float64) float64 {
+		if c <= 0.03928 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
+
+// contrast is the WCAG contrast ratio of two colours, 1 to 21.
+func contrast(a, b string) float64 {
+	la, lb := luminance(a), luminance(b)
+	return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+}
+
+// readable is fg, mixed toward white (dark backgrounds) or black (light ones) just enough to reach
+// ratio against every background; colours that are not #RRGGBB pass through.
+func readable(fg string, ratio float64, bgs ...string) string {
+	r, g, b, ok := rgb(fg)
+	if !ok || len(bgs) == 0 {
+		return fg
+	}
+	worst := func(c string) float64 {
+		w := 21.0
+		for _, bg := range bgs {
+			if _, _, _, ok := rgb(bg); ok {
+				w = min(w, contrast(c, bg))
+			}
+		}
+		return w
+	}
+	target := 1.0
+	if luminance(bgs[0]) > 0.4 {
+		target = 0
+	}
+	best, bestW := fg, worst(fg)
+	for i := 1; i <= 20 && bestW < ratio; i++ {
+		f := float64(i) / 20
+		mix := func(c float64) int { return int(math.Round((c + (target-c)*f) * 255)) }
+		c := fmt.Sprintf("#%02X%02X%02X", mix(r), mix(g), mix(b))
+		if w := worst(c); w > bestW {
+			best, bestW = c, w
+		}
+	}
+	return best
 }

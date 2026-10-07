@@ -40,3 +40,29 @@ func TestLoadThemeFileOverBase(t *testing.T) {
 		t.Fatalf("UseTheme: %v, current %s", err, CurrentTheme())
 	}
 }
+
+func TestThemesReadable(t *testing.T) {
+	for _, n := range []string{"default", "nord", "dracula", "gruvbox", "catppuccin", "mono"} {
+		th, err := LoadTheme(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, l := fitTheme(th)
+		for _, f := range []fitted{d, l} {
+			bgs := []string{f.term, f.sh.Bar, f.sh.Cursor, f.sh.Selected}
+			for _, c := range []struct {
+				name, fg string
+				min      float64
+			}{{"text", f.text, 4.5}, {"dim", f.dim, 2.5}, {"placeholder", f.ph, 3}, {"accent", f.accent, 3}, {"green", f.green, 3}, {"amber", f.amber, 3}, {"red", f.red, 3}, {"purple", f.purple, 3}} {
+				for _, bg := range bgs {
+					if r := contrast(c.fg, bg); r < c.min {
+						t.Errorf("%s on %s: %s %s over %s is %.1f:1, want %.1f", n, f.term, c.name, c.fg, bg, r, c.min)
+					}
+				}
+			}
+			if r := contrast(f.onAccent, f.accent); r < 3 {
+				t.Errorf("%s on %s: active tab %.1f:1", n, f.term, r)
+			}
+		}
+	}
+}

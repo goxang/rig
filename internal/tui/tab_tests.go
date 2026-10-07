@@ -724,7 +724,7 @@ func (t *testsTab) toolbar(m *model, w int) string {
 		b.WriteString(s + "  ")
 	}
 	button := func(id, text string, bg lipgloss.TerminalColor) {
-		add("tbtn:"+id, lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Background(bg).Bold(true).Padding(0, 1).Render(text))
+		add("tbtn:"+id, badge(bg).Padding(0, 1).Render(text))
 	}
 	plain := func(id, text string) {
 		add("tbtn:"+id, lipgloss.NewStyle().Foreground(cText).Background(cPanel).Padding(0, 1).Render(text))

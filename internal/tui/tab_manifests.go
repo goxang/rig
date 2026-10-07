@@ -939,7 +939,7 @@ func kindColor(k string) string {
 
 // colorYAML tints keys so a manifest reads at a glance.
 func colorYAML(s string) string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color("#8AB8FF"))
+	key := lipgloss.NewStyle().Foreground(cAccent)
 	var b strings.Builder
 	for _, l := range strings.Split(s, "\n") {
 		trimmed := strings.TrimLeft(l, " -")

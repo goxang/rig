@@ -718,7 +718,7 @@ func (m *model) alertBadge() string {
 	if top.Level == engine.LevelCrit {
 		bg = cRed
 	}
-	return lipgloss.NewStyle().Background(bg).Foreground(lipgloss.Color("#000000")).Bold(true).Render(text)
+	return badge(bg).Render(text)
 }
 
 func (m *model) alertsView() string {
@@ -2071,9 +2071,9 @@ func (m *model) header() string {
 		left += sDim.Render("  ns ") + sTitle.Render(ns)
 	}
 	if a.Env.ReadOnly {
-		left += " " + lipgloss.NewStyle().Background(cAmber).Foreground(lipgloss.Color("#000000")).Bold(true).Render(" READ-ONLY ")
+		left += " " + badge(cAmber).Render(" READ-ONLY ")
 	} else if a.Env.Protected {
-		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
+		left += " " + badge(cRed).Render(" PROTECTED ")
 	}
 	if m.simple {
 		left += sDim.Render("  simple view")
