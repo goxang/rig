@@ -137,21 +137,21 @@ func stateDot(s core.State) string {
 	return sDim.Render("?")
 }
 
-// stateRank sorts the active states first.
+// stateRank is how active a state is: descending puts running services on top.
 func stateRank(s core.State) float64 {
 	switch s {
 	case core.StateRunning:
-		return 0
+		return 5
 	case core.StateStarting, core.StateDegraded:
-		return 1
-	case core.StateFailed:
-		return 2
-	case core.StateStopped:
-		return 3
-	case core.StateAbsent:
 		return 4
+	case core.StateFailed:
+		return 3
+	case core.StateStopped:
+		return 2
+	case core.StateAbsent:
+		return 1
 	}
-	return 5
+	return 0
 }
 
 func stateText(s core.State) string {
