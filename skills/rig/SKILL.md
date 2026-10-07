@@ -57,7 +57,7 @@ protected environment need the user's go-ahead.
 
 Fix rig instead of working around it in rig.yaml, when you can push to github.com/goxang/rig. Ship
 every change you make there yourself: commit (Conventional Commits: `feat:` bumps the minor version,
-anything else the patch), push to `main`, wait until the `ci` workflow is green and the `release`
-workflow has published the new tag (`gh run watch`, `gh release view`). The user's only step is
+anything else the patch), push to `main`, wait until the `ci` workflow is green; its
+last job, `release`, publishes the new tag (`gh run watch`, `gh release view`). The user's only step is
 `rig upgrade`; tell them the version to expect. Never leave a rig change uncommitted, unpushed or
 unreleased.

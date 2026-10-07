@@ -1,5 +1,7 @@
 name: ci
 
+# Every push to main that passes gets the next version: feat commits bump the minor version,
+# anything else the patch. The release carries the binaries the build jobs made, checksums and install.sh.
 on:
   push:
     branches: [main]
@@ -8,7 +10,24 @@ on:
 permissions:
   contents: read
 
+# runs on main queue behind each other, so each one tags after the last; a newer pending run replaces an older one
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+      - run: shellcheck install.sh
+
   test:
     strategy:
       fail-fast: false
@@ -20,12 +39,39 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-      - run: go vet ./...
-      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
       - run: go test -race -count=1 ./...
 
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      skip: ${{ steps.version.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != push ]; then echo "tag=dev" >> "$GITHUB_OUTPUT"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -n "$last" ] && [ -z "$(git log --format=%H "$last..HEAD")" ]; then
+            echo "nothing new since $last"; echo "tag=$last" >> "$GITHUB_OUTPUT"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          IFS=. read -r major minor patch <<<"${last#v}"
+          major=${major:-0} minor=${minor:-0} patch=${patch:-0}
+          range=${last:+$last..}HEAD
+          if git log --format=%s "$range" | grep -qE '^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE'; then
+            if [ "$major" = 0 ]; then minor=$((minor + 1)); else major=$((major + 1)); minor=0; fi; patch=0
+          elif git log --format=%s "$range" | grep -qE '^feat(\([^)]*\))?:'; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          [ -n "$last" ] || { major=0; minor=1; patch=0; }
+          echo "tag=v$major.$minor.$patch" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -35,14 +81,58 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
+      # one cache per target: setup-go's single key keeps only whichever target saved first
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gobuild-${{ matrix.target }}-${{ hashFiles('go.sum') }}
+          restore-keys: gobuild-${{ matrix.target }}-
       - name: build ${{ matrix.target }}
-        run: |
-          GOOS=${TARGET%/*} GOARCH=${TARGET#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/rig
         env:
           TARGET: ${{ matrix.target }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          os=${TARGET%/*} arch=${TARGET#*/} bin=rig
+          [ "$os" = windows ] && bin=rig.exe
+          dir=$(mktemp -d)
+          GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$dir/$bin" ./cmd/rig
+          cp README.md "$dir/"
+          mkdir -p dist
+          if [ "$os" = windows ]; then
+            (cd "$dir" && zip -q "$OLDPWD/dist/rig_${os}_${arch}.zip" "$bin" README.md)
+          else
+            tar -C "$dir" -czf "dist/rig_${os}_${arch}.tar.gz" "$bin" README.md
+          fi
+          echo "ASSET=rig_${os}_${arch}" >> "$GITHUB_ENV"
+      - if: needs.version.outputs.skip != '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: dist/*
+          retention-days: 1
 
-  install-script:
+  release:
+    needs: [version, lint, test, build]
+    if: github.event_name == 'push' && needs.version.outputs.skip != '1'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
-      - run: shellcheck install.sh
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          cp install.sh dist/
+          (cd dist && sha256sum * > checksums.txt)
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          gh release create "$TAG" dist/* --title "rig $TAG" --generate-notes
