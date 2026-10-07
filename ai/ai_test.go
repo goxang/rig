@@ -95,3 +95,10 @@ func TestDeniedPath(t *testing.T) {
 		}
 	}
 }
+
+func TestFlattenKeepsAMultiLineQueryWhole(t *testing.T) {
+	got := flatten("```sql\nSELECT *\n  FROM t\nWHERE a = 1\n```")
+	if got != "SELECT * FROM t WHERE a = 1" {
+		t.Fatalf("flatten = %q", got)
+	}
+}

@@ -478,7 +478,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 	case "y":
 		t.copyQuery(m)
 	case "a":
-		m.askAI("query", "", t.promHint(m), func(q string) tea.Cmd {
+		m.askChecked("query", "", t.promHint(m), t.promCheck(m, ""), func(q string) tea.Cmd {
 			if q == "" {
 				return nil
 			}
@@ -492,7 +492,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 		if t.focus < len(ps) {
 			p := ps[t.focus]
 			idx := t.focus - (len(ps) - len(t.adhoc))
-			m.askAI("query", p.Query, t.promHint(m), func(q string) tea.Cmd {
+			m.askChecked("query", p.Query, t.promHint(m), t.promCheck(m, p.Source), func(q string) tea.Cmd {
 				np := p
 				np.Query, np.Title, np.Row = q, q, ""
 				if idx >= 0 {
@@ -1016,7 +1016,11 @@ func (t *metricsTab) viewKey(m *model, k tea.KeyMsg) tea.Cmd {
 		if st.filter != nil {
 			cur = st.filter.String()
 		}
-		m.ask("show series matching (regex, empty: all)", cur, func(v string) tea.Cmd {
+		var names []string
+		for _, l := range ls {
+			names = append(names, l.Name)
+		}
+		m.askChecked("show series matching (regex, empty: all)", cur, "a Go RE2 regexp matching series names"+within("series", names), regexCheck, func(v string) tea.Cmd {
 			if v == "" {
 				st.filter = nil
 				return nil
@@ -1520,6 +1524,23 @@ func tableBody(p spec.Panel, ls []viz.Line, hidden map[int]bool, at time.Time, h
 		b.WriteString("\n" + padRight(r.name, nw) + val + padLeft(viz.Human(r.s.Min, p.Unit), 10) + padLeft(viz.Human(r.s.Max, p.Unit), 10) + padLeft(viz.Human(r.s.Mean, p.Unit), 10))
 	}
 	return b.String()
+}
+
+// promCheck runs a query the AI wrote once, as an instant query with the dashboard's variables filled
+// in: one the source rejects goes back to the AI with the error.
+func (t *metricsTab) promCheck(m *model, from string) func(context.Context, string) error {
+	a, vars := m.app, t.vars[t.dashName(m)]
+	from = cmp.Or(from, t.source)
+	return func(ctx context.Context, q string) error {
+		src, _, err := engine.Get[core.Metrics](a, core.KindMetrics, from)
+		if err != nil {
+			return nil
+		}
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_, err = src.Instant(c, engine.ExpandQuery(q, vars, 5*time.Minute, 15*time.Second))
+		return err
+	}
 }
 
 // openPod opens, in Services, the pod (or service) the selected series' labels name.

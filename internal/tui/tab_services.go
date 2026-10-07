@@ -267,7 +267,13 @@ func (t *servicesTab) listKey(m *model, k tea.KeyMsg) tea.Cmd {
 			return t.toggleDebug(m, r.id)
 		}
 	case "/":
-		m.ask("filter services (name or group)", t.filter, func(v string) tea.Cmd {
+		var items []string
+		for _, st := range m.services {
+			if s := m.app.Spec.Services[st.Service]; s != nil {
+				items = append(items, st.Service+" "+strings.Join(s.Groups, ",")+" "+s.Role)
+			}
+		}
+		m.askChecked("filter services (name or group)", t.filter, "a filter of services: "+fuzzyHint+within("services with their groups and role", items), matchesSome(items, fuzzy), func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)
 			return nil
 		})

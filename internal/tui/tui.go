@@ -207,6 +207,8 @@ type prompt struct {
 	took     time.Duration
 	// described is what the AI wrote for the "@?description" in describedFor, the input it saw
 	described, describedFor string
+	// check tries what @? wrote before it is offered; a failure goes back to the AI to fix
+	check func(context.Context, string) error
 	// popup draws the input as a box over the screen, wrapped (queries)
 	popup bool
 	sel   textSel

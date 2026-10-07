@@ -669,7 +669,7 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	case "/":
-		m.ask("filter (text, or a glob like *word*)", t.filter, func(v string) tea.Cmd {
+		m.askAI("filter (text, or a glob like *word*)", t.filter, "a filter of names (queues, tables, keys): either "+fuzzyHint+", or one glob with * matching the whole name", func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)
 			t.fill()
 			return nil
@@ -973,7 +973,7 @@ func (t *dataTab) askQuery(m *model, c dataComp, at []string, value, template st
 		m.askAI(label, value, hint, run)
 		return
 	}
-	m.askTemplate(label, template, hint, run)
+	m.askTemplate(label, template, hint, nil, run)
 }
 
 func (t *dataTab) click(m *model, h hit) tea.Cmd {

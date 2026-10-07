@@ -246,7 +246,11 @@ func (t *testsTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		if t.search != nil {
 			cur = strings.TrimPrefix(t.search.String(), "(?i)")
 		}
-		m.ask("tests matching (regex, any case; empty: all)", cur, func(v string) tea.Cmd {
+		var names []string
+		for _, r := range t.list.rows {
+			names = append(names, r.id)
+		}
+		m.askChecked("tests matching (regex, any case; empty: all)", cur, "a Go RE2 regexp, matched in any case, against Go test names and packages"+within("rows", names), regexCheck, func(v string) tea.Cmd {
 			t.search = nil
 			if v != "" {
 				re, err := regexp.Compile("(?i)" + v)

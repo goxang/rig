@@ -110,7 +110,7 @@ func (t *hostsTab) update(m *model, msg tea.Msg) tea.Cmd {
 			t.podsOf = host
 			t.setPods()
 		case "c":
-			m.askTemplate("command on "+host, "uptime", "a Linux shell command to run on host "+host, func(v string) tea.Cmd {
+			m.askTemplate("command on "+host, "uptime", "a Linux shell command to run on host "+host, nil, func(v string) tea.Cmd {
 				return t.shell(m, host, []string{"sh", "-c", v + "; echo; printf 'press enter '; read _"})
 			})
 		}

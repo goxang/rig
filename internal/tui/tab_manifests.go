@@ -438,7 +438,13 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		case "/":
 			return t.search(m)
 		case "f":
-			m.ask("filter", t.filter, func(v string) tea.Cmd {
+			var items []string
+			if t.set != nil {
+				for _, o := range t.set.Objects {
+					items = append(items, o.ID()+" "+o.File)
+				}
+			}
+			m.askChecked("filter", t.filter, "a filter of Kubernetes objects (Kind/name and file): "+fuzzyHint+within("objects", items), matchesSome(items, fuzzy), func(v string) tea.Cmd {
 				t.filter, t.sel, t.offset = v, 0, 0
 				return nil
 			})

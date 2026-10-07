@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -215,7 +216,13 @@ func (t *tracesTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return t.requery(m)
 			})
 		case "o":
-			m.ask("operation (span name, empty for any)", t.op, func(v string) tea.Cmd {
+			var ops []string
+			for _, s := range t.found {
+				if !slices.Contains(ops, s.Root) {
+					ops = append(ops, s.Root)
+				}
+			}
+			m.askAI("operation (span name, empty for any)", t.op, "one exact span (operation) name to search traces by"+within("root spans seen", ops), func(v string) tea.Cmd {
 				t.op = strings.TrimSpace(v)
 				return t.requery(m)
 			})
@@ -236,7 +243,11 @@ func (t *tracesTab) update(m *model, msg tea.Msg) tea.Cmd {
 				return t.requery(m)
 			})
 		case "/":
-			m.ask("text in root, services or id", t.text, func(v string) tea.Cmd {
+			var items []string
+			for _, s := range t.found {
+				items = append(items, s.Root+" "+strings.Join(s.Services, ",")+" "+s.ID)
+			}
+			m.askChecked("text in root, services or id", t.text, "a filter of traces (root span, services, id): "+fuzzyHint+within("traces", items), matchesSome(items, fuzzy), func(v string) tea.Cmd {
 				t.text = strings.TrimSpace(v)
 				t.list.set(t.rows())
 				return nil

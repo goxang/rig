@@ -496,16 +496,51 @@ func (r *Runner) Complete(ctx context.Context, hint, text string) (string, error
 
 // Describe writes the input asked for in words: before is what is typed ahead of the description
 // (a query's start, or nothing), want the description; it returns the whole input, before included.
-func (r *Runner) Describe(ctx context.Context, hint, before, want string) (string, error) {
-	out, err := r.quick(ctx, DescribePrompt(hint, before, want))
-	if err != nil {
-		return "", err
+//
+// check, when not nil, tries the answer (compiles it, runs it where that is safe); an answer that
+// fails goes back to the model with the error, up to three tries. After the last, the answer is
+// returned with the error.
+func (r *Runner) Describe(ctx context.Context, hint, before, want string, check func(context.Context, string) error) (string, error) {
+	ask := want
+	var out string
+	var failed error
+	for try := 0; try < 3; try++ {
+		raw, err := r.once(ctx, DescribePrompt(hint, before, ask), true, 800)
+		if err != nil {
+			return "", err
+		}
+		out = flatten(raw)
+		if b := strings.TrimSpace(before); b != "" && !strings.HasPrefix(out, b) {
+			out = strings.TrimRight(before, " ") + " " + strings.TrimLeft(out, " ")
+		}
+		if check == nil {
+			return out, nil
+		}
+		if failed = check(ctx, out); failed == nil {
+			return out, nil
+		}
+		ask = want + "\nYour last answer was: " + out + "\nIt failed with: " + failed.Error() + "\nWrite a corrected one."
 	}
-	out = oneLine(out)
-	if b := strings.TrimSpace(before); b != "" && !strings.HasPrefix(out, b) {
-		out = strings.TrimRight(before, " ") + " " + strings.TrimLeft(out, " ")
+	return out, fmt.Errorf("still fails after 3 tries: %w", failed)
+}
+
+// flatten is an answer without code fences, its lines joined into one (a multi-line query stays whole).
+func flatten(out string) string {
+	out = strings.TrimSpace(out)
+	if strings.HasPrefix(out, "```") {
+		out = strings.TrimPrefix(out, "```")
+		if i := strings.IndexByte(out, '\n'); i >= 0 && !strings.Contains(out[:i], " ") {
+			out = out[i+1:]
+		}
 	}
-	return out, nil
+	out = strings.TrimSuffix(strings.TrimSpace(out), "```")
+	var parts []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			parts = append(parts, l)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // Ask puts one question to the chat model, without tools, and returns its whole answer.

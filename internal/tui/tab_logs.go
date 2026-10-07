@@ -328,7 +328,14 @@ func (t *logsTab) keyHandled(m *model, msg tea.KeyMsg) (tea.Cmd, bool) {
 			t.pickInstance(m)
 		case "/":
 			hint := "text or an RE2 regex ((?i) ignores case), or a field query (path=value, path!=value, path~text, ANDed by spaces, e.g. output.Transaction.ID=202604), that keeps the log lines of " + strings.Join(t.services, ", ") + " that matter; recent lines:\n" + logSample(t.log.lines, 8)
-			m.askAI("filter: text, regex, or fields like output.Transaction.ID=202604 level!=debug", t.grep, hint, func(v string) tea.Cmd {
+			check := func(_ context.Context, v string) error {
+				if _, ok := parseLogQuery(v); ok {
+					return nil
+				}
+				_, err := regexp.Compile(v)
+				return err
+			}
+			m.askChecked("filter: text, regex, or fields like output.Transaction.ID=202604 level!=debug", t.grep, hint, check, func(v string) tea.Cmd {
 				t.grep = v
 				return t.start(m)
 			})

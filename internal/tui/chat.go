@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -1193,13 +1194,48 @@ func (m *model) askAI(label, value, hint string, submit func(string) tea.Cmd) {
 	if r := m.aiRunner(); r != nil && r.Setup.Enabled() {
 		m.prompt.hint = hint
 		m.prompt.input.ShowSuggestions = r.Setup.AutocompleteOn()
+		m.prompt.label += sDim.Render("  · " + aiTrigger + " then words: the AI writes it")
 	}
+}
+
+// askChecked is askAI whose @? answers must pass check (compile, or run where safe) to be offered.
+func (m *model) askChecked(label, value, hint string, check func(context.Context, string) error, submit func(string) tea.Cmd) {
+	m.askAI(label, value, hint, submit)
+	m.prompt.check = check
+}
+
+// regexCheck accepts what compiles as a Go (RE2) regexp, any case.
+func regexCheck(_ context.Context, v string) error {
+	_, err := regexp.Compile("(?i)" + v)
+	return err
+}
+
+const fuzzyHint = "space-separated words, each matching when its letters appear in order (gaps allowed, any case); every word must match"
+
+// matchesSome accepts a filter that keeps at least one of items.
+func matchesSome(items []string, match func(item, filter string) bool) func(context.Context, string) error {
+	return func(_ context.Context, v string) error {
+		for _, it := range items {
+			if match(it, v) {
+				return nil
+			}
+		}
+		return errors.New("it keeps none of the rows")
+	}
+}
+
+// within names up to 60 of the names a filter runs over, for the AI to match against.
+func within(what string, names []string) string {
+	if len(names) > 60 {
+		names = append(names[:60:60], "…")
+	}
+	return "; the " + what + ": " + strings.Join(names, ", ")
 }
 
 // askTemplate is askAI on an empty input with template behind it: typing starts fresh with the AI
 // completing, tab takes the template to edit, enter runs it as is.
-func (m *model) askTemplate(label, template, hint string, submit func(string) tea.Cmd) {
-	m.askAI(label, "", hint, submit)
+func (m *model) askTemplate(label, template, hint string, check func(context.Context, string) error, submit func(string) tea.Cmd) {
+	m.askChecked(label, "", hint, check, submit)
 	m.prompt.template = template
 	m.prompt.input.Placeholder = template
 }
@@ -1314,7 +1350,7 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 	ctx, cancel := context.WithTimeout(m.ctx, 90*time.Second)
 	m.completeCancel = cancel
 	p.waiting = true
-	r, hint, seq := m.aiRunner(), p.hint, p.seq
+	r, hint, seq, check := m.aiRunner(), p.hint, p.seq, p.check
 	if p.template != "" {
 		hint += "; the screen offered this as a starting point: " + p.template
 	}
@@ -1323,7 +1359,7 @@ func (m *model) completeDue(msg completeTickMsg) tea.Cmd {
 		return func() tea.Msg {
 			defer cancel()
 			start := time.Now()
-			text, err := r.Describe(ctx, hint, before, want)
+			text, err := r.Describe(ctx, hint, before, want, check)
 			return describeMsg{seq: seq, value: v, text: text, err: err, took: time.Since(start)}
 		}
 	}
@@ -1347,7 +1383,9 @@ func (m *model) describedMsg(msg describeMsg) {
 		if !errors.Is(msg.err, context.Canceled) && p.seq == msg.seq {
 			m.setStatus("AI: "+msg.err.Error(), true)
 		}
-		return
+		if msg.text == "" {
+			return
+		}
 	}
 	p.took = msg.took
 	if msg.value == p.input.Value() && msg.text != "" {

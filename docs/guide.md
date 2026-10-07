@@ -140,6 +140,10 @@ input: type your own and the AI completes it, `tab` takes the suggestion to edit
 `@?` then words asks for the rest in plain language: `@?logs slower than 1s`, or
 `SELECT * FROM transactions WHERE @?amount above 100k`; the AI's version shows in its own
 bordered "✦ ai suggests" box above the input, `tab` takes it, `enter` runs it.
+`@?` works in every filter and query prompt (each label says so). Before offering an answer rig tries
+it: a regex or filter must compile and keep some rows, PromQL must run, a reading SQL, LogQL, TraceQL
+or KV query runs once. A failure goes back to the AI with the error, up to three tries; writes,
+kubectl, HTTP and broker queries are never run to check.
 Data `Q` on a procedure or function writes its call with every parameter as `NULL /* type */` to fill in,
 AI or not.
 

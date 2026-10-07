@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/goxang/rig/ai"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
 	"github.com/goxang/rig/internal/viz"
@@ -334,7 +335,7 @@ func (t *queriesTab) runSelected(m *model, name string, q *spec.Query) tea.Cmd {
 func (t *queriesTab) newQuery(m *model, comp string) {
 	lang := t.langs[comp]
 	defer m.asPopup()
-	m.askTemplate(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, func(v string) tea.Cmd {
+	m.askTemplate(comp+" ("+lang+") query", examples[lang], "a "+lang+" query on component "+comp, queryCheck(m, comp, lang), func(v string) tea.Cmd {
 		if strings.TrimSpace(v) == "" {
 			return nil
 		}
@@ -408,7 +409,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 			}
 		case "e":
 			if q != nil {
-				m.askAI("edit "+name+" ("+q.Source+")", q.Query, "a "+t.langs[q.Source]+" query on component "+q.Source, func(v string) tea.Cmd {
+				m.askChecked("edit "+name+" ("+q.Source+")", q.Query, "a "+t.langs[q.Source]+" query on component "+q.Source, queryCheck(m, q.Source, t.langs[q.Source]), func(v string) tea.Cmd {
 					nq := *q
 					nq.Query = v
 					t.adhocSeq++
@@ -722,3 +723,24 @@ func colWidths(t core.Table, _ int) []int {
 }
 
 func (t *queriesTab) atRoot() bool { return !t.focusRes }
+
+// queryCheck runs an AI-written query once to prove it works, only in languages where running it
+// only reads; a write, or a query on a broker, cluster or HTTP endpoint, goes back unchecked.
+func queryCheck(m *model, comp, lang string) func(context.Context, string) error {
+	a := m.app
+	return func(ctx context.Context, q string) error {
+		switch lang {
+		case "sql":
+			if ai.ClassifyQuery(q) != ai.Read {
+				return nil
+			}
+		case "logql", "traceql", "traces", "promql", "kv":
+		default:
+			return nil
+		}
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		_, err := a.RunQuery(c, comp, q)
+		return err
+	}
+}

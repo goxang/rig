@@ -164,7 +164,11 @@ func (c *chartView) key(m *model, k tea.KeyMsg) bool {
 		if c.filter != nil {
 			cur = c.filter.String()
 		}
-		m.ask("show series matching (regex, empty: all)", cur, func(v string) tea.Cmd {
+		var names []string
+		for _, l := range c.lines {
+			names = append(names, l.Name)
+		}
+		m.askChecked("show series matching (regex, empty: all)", cur, "a Go RE2 regexp matching series names"+within("series", names), regexCheck, func(v string) tea.Cmd {
 			re, err := regexp.Compile(v)
 			switch {
 			case v == "":
