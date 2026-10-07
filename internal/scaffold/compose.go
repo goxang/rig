@@ -82,6 +82,31 @@ type composeService struct {
 	Command     stringOrList  `yaml:"command"`
 	Entrypoint  stringOrList  `yaml:"entrypoint"`
 	Volumes     []yaml.Node   `yaml:"volumes"`
+	EnvFile     envFiles      `yaml:"env_file"`
+}
+
+// envFiles is env_file: a path, a list of paths, or a list of {path, required}.
+type envFiles []string
+
+func (e *envFiles) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*e = []string{n.Value}
+		return nil
+	}
+	for _, item := range n.Content {
+		if item.Kind == yaml.MappingNode {
+			var m struct {
+				Path string `yaml:"path"`
+			}
+			if err := item.Decode(&m); err != nil {
+				return err
+			}
+			*e = append(*e, m.Path)
+		} else {
+			*e = append(*e, item.Value)
+		}
+	}
+	return nil
 }
 
 // compose turns the first compose file found into services.

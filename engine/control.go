@@ -371,17 +371,26 @@ func (a *App) overrides() map[string]map[string]string {
 	return a.envOverrides
 }
 
+func hasSvcRef(env map[string]string) bool {
+	for _, v := range env {
+		if strings.Contains(v, "svc://") {
+			return true
+		}
+	}
+	return false
+}
+
 // withEnv is s with the OTEL_* variables under its env and its env overrides on top, as a copy; s itself is the project's and stays as written.
 func (a *App) withEnv(s *spec.Service) *spec.Service {
 	o, otel := a.overrides()[s.Name], a.otelEnv(s)
-	if len(o) == 0 && len(otel) == 0 {
+	if len(o) == 0 && len(otel) == 0 && !hasSvcRef(s.Env) {
 		return s
 	}
 	c := *s
 	c.Env = map[string]string{}
 	for _, m := range []map[string]string{otel, s.Env, o} {
 		for k, v := range m {
-			c.Env[k] = v
+			c.Env[k] = svcRef.ReplaceAllStringFunc(v, a.hostPort)
 		}
 	}
 	return &c

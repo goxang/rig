@@ -9,8 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Importer turns another tool's service file into rig services.
-type Importer func(path string) (map[string]*Service, error)
+// Importer turns another tool's service file into rig services; paths in them are relative to dir,
+// the project's directory.
+type Importer func(path, dir string) (map[string]*Service, error)
 
 var importers = map[string]Importer{"godev": importGodev}
 
@@ -29,7 +30,7 @@ func (p *Project) applyImports() error {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(p.Dir, path)
 			}
-			svcs, err := f(path)
+			svcs, err := f(path, p.Dir)
 			if err != nil {
 				return fmt.Errorf("import %s %s: %w", kind, path, err)
 			}
@@ -46,7 +47,7 @@ func (p *Project) applyImports() error {
 	return nil
 }
 
-func importGodev(path string) (map[string]*Service, error) {
+func importGodev(path, _ string) (map[string]*Service, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

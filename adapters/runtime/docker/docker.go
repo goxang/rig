@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -33,6 +35,20 @@ type Options struct {
 	// Publish exposes the first replica's ports on 127.0.0.1 (random host ports unless docker.publish sets them);
 	// off, rig reaches services by container IP.
 	Publish *bool `yaml:"publish"`
+	// Host is the daemon (ssh://user@server, tcp://server:2376) and Context a docker context; rig's
+	// docker calls use them, health checks and forwards reach an ssh daemon's containers through ssh -L.
+	Host    string `yaml:"host"`
+	Context string `yaml:"context"`
+	// Compose hands the services to a docker compose project: rig finds its containers by compose's
+	// labels and starts, stops, scales and deploys through docker compose, so the compose file stays
+	// the one definition.
+	Compose *Compose `yaml:"compose"`
+}
+
+type Compose struct {
+	Project string `yaml:"project"`
+	// Files are the compose files (from the project directory), base first.
+	Files []string `yaml:"files"`
 }
 
 type Section struct {
@@ -60,6 +76,11 @@ type Runtime struct {
 
 	fwdMu sync.Mutex
 	fwd   map[string]cachedAddr
+
+	epOnce   sync.Once
+	endpoint string
+	tunMu    sync.Mutex
+	tunnels  map[string]*tunnel
 }
 
 type cachedAddr struct {
@@ -78,13 +99,72 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	if r.opt.Network == "" {
 		r.opt.Network = r.project
 	}
+	if r.opt.Compose != nil && r.opt.Compose.Project == "" {
+		return nil, fmt.Errorf("%s: compose.project is required (the name docker compose ls shows)", c.Name)
+	}
 	return r, nil
+}
+
+func (r *Runtime) docker(args ...string) *sh.Cmd {
+	switch {
+	case r.opt.Context != "":
+		args = append([]string{"--context", r.opt.Context}, args...)
+	case r.opt.Host != "":
+		args = append([]string{"--host", r.opt.Host}, args...)
+	}
+	return sh.New("docker", args...)
+}
+
+func (r *Runtime) compose(args ...string) *sh.Cmd {
+	pre := []string{"compose", "-p", r.opt.Compose.Project}
+	for _, f := range r.opt.Compose.Files {
+		if !filepath.IsAbs(f) {
+			f = filepath.Join(r.env.Project().Dir, f)
+		}
+		pre = append(pre, "-f", f)
+	}
+	return r.docker(append(pre, args...)...)
+}
+
+// daemon is the daemon's address: Host, the context's endpoint, or empty for the local one.
+func (r *Runtime) daemon(ctx context.Context) string {
+	r.epOnce.Do(func() {
+		r.endpoint = r.opt.Host
+		if r.opt.Context != "" {
+			out, err := sh.New("docker", "context", "inspect", "-f", "{{.Endpoints.docker.Host}}", r.opt.Context).Output(ctx)
+			if err == nil {
+				r.endpoint = strings.TrimSpace(string(out))
+			}
+		}
+	})
+	return r.endpoint
+}
+
+func (r *Runtime) remote(ctx context.Context) bool {
+	ep := r.daemon(ctx)
+	return strings.HasPrefix(ep, "ssh://") || strings.HasPrefix(ep, "tcp://")
 }
 
 func (r *Runtime) Registry() string { return r.opt.Registry }
 
-// LoadImage has nothing to do: the daemon that built the image runs it.
-func (r *Runtime) LoadImage(context.Context, string) error { return nil }
+// LoadImage copies a locally built image to a remote daemon; the local daemon already has it.
+func (r *Runtime) LoadImage(ctx context.Context, image string) error {
+	if !r.remote(ctx) {
+		return nil
+	}
+	pr, pw := io.Pipe()
+	save := sh.New("docker", "save", image).Exec(ctx)
+	save.Stdout = pw
+	if err := save.Start(); err != nil {
+		return err
+	}
+	go func() { pw.CloseWithError(save.Wait()) }()
+	load := r.docker("load", "-q")
+	load.Stdin = pr
+	err := load.Run(ctx)
+	pr.Close()
+	return err
+}
 
 func (r *Runtime) name(s string, i int) string {
 	if i <= 1 {
@@ -110,7 +190,24 @@ type container struct {
 }
 
 func (r *Runtime) containers(ctx context.Context, filter ...string) ([]container, error) {
+	if r.opt.Compose != nil {
+		return r.list(ctx, append([]string{"label=com.docker.compose.project=" + r.opt.Compose.Project}, filter...)...)
+	}
 	return r.list(ctx, append([]string{"label=rig.project=" + r.project}, filter...)...)
+}
+
+// serviceOf is the rig service a container belongs to, by rig's or compose's labels.
+func (r *Runtime) serviceOf(c container) string {
+	if r.opt.Compose != nil {
+		if c.Labels["com.docker.compose.project"] != r.opt.Compose.Project {
+			return ""
+		}
+		return c.Labels["com.docker.compose.service"]
+	}
+	if c.Labels["rig.project"] != r.project {
+		return ""
+	}
+	return c.Labels["rig.service"]
 }
 
 func (r *Runtime) list(ctx context.Context, filter ...string) ([]container, error) {
@@ -118,7 +215,7 @@ func (r *Runtime) list(ctx context.Context, filter ...string) ([]container, erro
 	for _, f := range filter {
 		args = append(args, "--filter", f)
 	}
-	out, err := sh.New("docker", args...).Output(ctx)
+	out, err := r.docker(args...).Output(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +244,9 @@ func (r *Runtime) of(ctx context.Context, s *spec.Service) ([]container, error) 
 	if name := r.section(s).Container; name != "" {
 		return r.list(ctx, "name=^/"+name+"$")
 	}
+	if r.opt.Compose != nil {
+		return r.containers(ctx, "label=com.docker.compose.service="+s.Name)
+	}
 	return r.containers(ctx, "label=rig.service="+s.Name)
 }
 
@@ -162,7 +262,7 @@ func (r *Runtime) StatusAll(ctx context.Context, svcs []*spec.Service) ([]core.S
 		adopt := r.section(s).Container
 		var mine []container
 		for _, c := range cs {
-			if adopt != "" && c.Name == adopt || adopt == "" && c.Labels["rig.project"] == r.project && c.Labels["rig.service"] == s.Name {
+			if adopt != "" && c.Name == adopt || adopt == "" && r.serviceOf(c) == s.Name {
 				mine = append(mine, c)
 			}
 		}
@@ -188,11 +288,11 @@ func (r *Runtime) adopted(ctx context.Context, s *spec.Service, cs []container) 
 	}
 	for _, c := range cs {
 		if c.State != "running" {
-			if err := sh.New("docker", "start", c.ID).Run(ctx); err != nil {
+			if err := r.docker("start", c.ID).Run(ctx); err != nil {
 				return err
 			}
 		}
-		err := sh.New("docker", "network", "connect", "--alias", s.Name, r.opt.Network, c.ID).Run(ctx)
+		err := r.docker("network", "connect", "--alias", s.Name, r.opt.Network, c.ID).Run(ctx)
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
@@ -207,12 +307,12 @@ func (r *Runtime) Discover(ctx context.Context) ([]core.Workload, error) {
 	}
 	by := map[string][]container{}
 	for _, c := range cs {
-		by[c.Labels["rig.service"]] = append(by[c.Labels["rig.service"]], c)
+		by[r.serviceOf(c)] = append(by[r.serviceOf(c)], c)
 	}
 	var out []core.Workload
 	for svc, list := range by {
 		st := status(svc, list)
-		out = append(out, core.Workload{Name: r.name(svc, 1), Kind: "container", Service: svc, Status: st})
+		out = append(out, core.Workload{Name: list[0].Name, Kind: "container", Service: svc, Status: st})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
@@ -292,6 +392,17 @@ func (r *Runtime) image(ctx context.Context, s *spec.Service, rel core.Release) 
 }
 
 func (r *Runtime) Deploy(ctx context.Context, s *spec.Service, rel core.Release) error {
+	if r.opt.Compose != nil {
+		args := []string{"up", "-d", "--no-deps"}
+		if rel.Replicas > 0 {
+			args = append(args, "--scale", fmt.Sprintf("%s=%d", s.Name, rel.Replicas))
+		}
+		c := r.compose(append(args, s.Name)...)
+		if rel.Image != "" {
+			c.Env = []string{"RIG_IMAGE=" + rel.Image} // image: ${RIG_IMAGE:-...} in the compose file takes it
+		}
+		return c.Run(ctx)
+	}
 	img := r.image(ctx, s, rel)
 	if img == "" {
 		return fmt.Errorf("%s: no image (set image or docker.image, or build it)", s.Name)
@@ -314,7 +425,7 @@ func (r *Runtime) Deploy(ctx context.Context, s *spec.Service, rel core.Release)
 		return nil
 	}
 	for _, c := range cs {
-		if err := sh.New("docker", "rm", "-f", c.ID).Run(ctx); err != nil {
+		if err := r.docker("rm", "-f", c.ID).Run(ctx); err != nil {
 			return err
 		}
 	}
@@ -342,10 +453,10 @@ func (r *Runtime) current(cs []container, img string, n int) bool {
 func (r *Runtime) network(ctx context.Context) error {
 	r.netMu.Lock()
 	defer r.netMu.Unlock()
-	if sh.New("docker", "network", "inspect", r.opt.Network).Run(ctx) == nil {
+	if r.docker("network", "inspect", r.opt.Network).Run(ctx) == nil {
 		return nil
 	}
-	err := sh.New("docker", "network", "create", "--label", "rig.project="+r.project, r.opt.Network).Run(ctx)
+	err := r.docker("network", "create", "--label", "rig.project="+r.project, r.opt.Network).Run(ctx)
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
 	}
@@ -405,10 +516,13 @@ func (r *Runtime) run(ctx context.Context, s *spec.Service, img string, i int, e
 		args = append(args, sec.Command[1:]...)
 	}
 	args = append(args, sec.Args...)
-	return sh.New("docker", args...).Run(ctx)
+	return r.docker(args...).Run(ctx)
 }
 
 func (r *Runtime) Start(ctx context.Context, s *spec.Service) error {
+	if r.opt.Compose != nil {
+		return r.compose("up", "-d", "--no-deps", s.Name).Run(ctx)
+	}
 	cs, err := r.of(ctx, s)
 	if err != nil {
 		return err
@@ -421,7 +535,7 @@ func (r *Runtime) Start(ctx context.Context, s *spec.Service) error {
 	}
 	for _, c := range cs {
 		if c.State != "running" {
-			if err := sh.New("docker", "start", c.ID).Run(ctx); err != nil {
+			if err := r.docker("start", c.ID).Run(ctx); err != nil {
 				return err
 			}
 		}
@@ -435,19 +549,34 @@ func (r *Runtime) each(ctx context.Context, s *spec.Service, verb string) error 
 		return err
 	}
 	for _, c := range cs {
-		if err := sh.New("docker", verb, c.ID).Run(ctx); err != nil {
+		if err := r.docker(verb, c.ID).Run(ctx); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Runtime) Stop(ctx context.Context, s *spec.Service) error { return r.each(ctx, s, "stop") }
+func (r *Runtime) Stop(ctx context.Context, s *spec.Service) error {
+	if r.opt.Compose != nil {
+		return r.compose("stop", s.Name).Run(ctx)
+	}
+	return r.each(ctx, s, "stop")
+}
+
 func (r *Runtime) Restart(ctx context.Context, s *spec.Service) error {
+	if r.opt.Compose != nil {
+		return r.compose("restart", s.Name).Run(ctx)
+	}
 	return r.each(ctx, s, "restart")
 }
 
 func (r *Runtime) Scale(ctx context.Context, s *spec.Service, n int) error {
+	if r.opt.Compose != nil {
+		if n == 0 {
+			return r.Stop(ctx, s)
+		}
+		return r.Deploy(ctx, s, core.Release{Replicas: n})
+	}
 	cs, err := r.of(ctx, s)
 	if err != nil {
 		return err
@@ -471,7 +600,7 @@ func (r *Runtime) Scale(ctx context.Context, s *spec.Service, n int) error {
 		}
 	}
 	for i := len(cs) - 1; i >= n; i-- {
-		if err := sh.New("docker", "rm", "-f", cs[i].ID).Run(ctx); err != nil {
+		if err := r.docker("rm", "-f", cs[i].ID).Run(ctx); err != nil {
 			return err
 		}
 	}
@@ -500,7 +629,7 @@ func (r *Runtime) Logs(ctx context.Context, s *spec.Service, o core.LogOptions) 
 		if o.Since > 0 {
 			args = append(args, "--since", o.Since.String())
 		}
-		lines, err := sh.New("docker", append(args, c.ID)...).Lines(ctx)
+		lines, err := r.docker(append(args, c.ID)...).Lines(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -529,16 +658,13 @@ func (r *Runtime) Logs(ctx context.Context, s *spec.Service, o core.LogOptions) 
 func (r *Runtime) Exec(ctx context.Context, s *spec.Service, o core.ExecOptions) error {
 	name := o.Instance
 	if name == "" {
-		name = r.name(s.Name, 1)
-		if c := r.section(s).Container; c != "" {
-			name = c
-		}
+		name = r.first(ctx, s.Name)
 	}
 	args := []string{"exec", "-i"}
 	if o.TTY {
 		args = append(args, "-t")
 	}
-	return sh.New("docker", append(append(args, name), o.Command...)...).Attach(ctx, o.Stdin, o.Stdout, o.Stderr)
+	return r.docker(append(append(args, name), o.Command...)...).Attach(ctx, o.Stdin, o.Stdout, o.Stderr)
 }
 
 // Forward returns the published port, or else the container's address on its network; answers are
@@ -563,17 +689,50 @@ func (r *Runtime) Forward(ctx context.Context, t core.Target) (string, error) {
 	return addr, err
 }
 
+// first is the service's first container: adopted, compose's, rig's, or one named like the service.
+func (r *Runtime) first(ctx context.Context, svc string) string {
+	if s, ok := r.env.Project().Services[svc]; ok {
+		if c := r.section(s).Container; c != "" {
+			return c
+		}
+		if r.opt.Compose != nil {
+			if cs, err := r.of(ctx, s); err == nil && len(cs) > 0 {
+				return cs[0].Name
+			}
+		}
+	}
+	if name := r.name(svc, 1); r.docker("inspect", name).Run(ctx) == nil {
+		return name
+	}
+	return svc
+}
+
 func (r *Runtime) forward(ctx context.Context, t core.Target) (string, error) {
 	name := t.Instance
 	if name == "" {
-		name = r.name(t.Service, 1)
-		if s, ok := r.env.Project().Services[t.Service]; ok && r.section(s).Container != "" {
-			name = r.section(s).Container
-		} else if sh.New("docker", "inspect", name).Run(ctx) != nil {
-			name = t.Service
+		name = r.first(ctx, t.Service)
+	}
+	addr, err := r.daemonAddr(ctx, name, t.Port)
+	if err != nil {
+		return "", err
+	}
+	ep := r.daemon(ctx)
+	switch {
+	case strings.HasPrefix(ep, "ssh://"):
+		return r.tunnel(ctx, ep, addr)
+	case strings.HasPrefix(ep, "tcp://"):
+		// reachable when the port is published on 0.0.0.0 (docker.bind)
+		if u, err := url.Parse(ep); err == nil && strings.HasPrefix(addr, "127.0.0.1:") {
+			return net.JoinHostPort(u.Hostname(), strings.TrimPrefix(addr, "127.0.0.1:")), nil
 		}
 	}
-	out, err := sh.New("docker", "port", name, strconv.Itoa(t.Port)).Output(ctx)
+	return addr, nil
+}
+
+// daemonAddr is where the daemon's machine reaches the container's port: published, the container's
+// IP, or its own loopback for host networking.
+func (r *Runtime) daemonAddr(ctx context.Context, name string, port int) (string, error) {
+	out, err := r.docker("port", name, strconv.Itoa(port)).Output(ctx)
 	if err == nil {
 		for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if strings.HasPrefix(l, "127.0.0.1:") || strings.HasPrefix(l, "0.0.0.0:") {
@@ -581,15 +740,18 @@ func (r *Runtime) forward(ctx context.Context, t core.Target) (string, error) {
 			}
 		}
 	}
-	ip, err := sh.New("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", name).Output(ctx)
+	ip, err := r.docker("inspect", "-f", "{{.HostConfig.NetworkMode}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", name).Output(ctx)
 	if err != nil {
 		return "", err
 	}
 	f := strings.Fields(string(ip))
-	if len(f) == 0 {
-		return "", fmt.Errorf("%s has no address", name)
+	switch {
+	case len(f) > 1:
+		return fmt.Sprintf("%s:%d", f[1], port), nil
+	case len(f) == 1 && f[0] == "host":
+		return fmt.Sprintf("127.0.0.1:%d", port), nil
 	}
-	return fmt.Sprintf("%s:%d", f[0], t.Port), nil
+	return "", fmt.Errorf("%s has no address", name)
 }
 
 func (r *Runtime) Actions() []core.Action {
@@ -597,17 +759,20 @@ func (r *Runtime) Actions() []core.Action {
 		if !core.Confirmed(ctx) {
 			return fmt.Errorf("this removes every %s container; repeat with --yes", r.project)
 		}
+		if r.opt.Compose != nil {
+			return r.compose("down").Attach(ctx, nil, out, out)
+		}
 		cs, err := r.containers(ctx)
 		if err != nil {
 			return err
 		}
 		for _, c := range cs {
-			if err := sh.New("docker", "rm", "-f", c.ID).Run(ctx); err != nil {
+			if err := r.docker("rm", "-f", c.ID).Run(ctx); err != nil {
 				return err
 			}
 			fmt.Fprintln(out, "removed", c.Name)
 		}
-		_ = sh.New("docker", "network", "rm", r.opt.Network).Run(ctx)
+		_ = r.docker("network", "rm", r.opt.Network).Run(ctx)
 		return nil
 	}}}
 }

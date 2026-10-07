@@ -895,8 +895,19 @@
               "boolean"
             ]
           },
-          "description": "environment for every runtime",
+          "description": "environment for every runtime; svc://service[:port] inside a value (postgres://app@svc://db:pg/app) becomes the host:port the service reaches in that environment",
           "type": "object"
+        },
+        "env_file": {
+          "description": "dotenv files (from the project directory) read under env",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
         },
         "groups": {
           "description": "names to address several services at once: rig up core",
@@ -1399,7 +1410,7 @@
       ]
     },
     "imports": {
-      "description": "services from other tools' files: - godev: .godev.yaml",
+      "description": "services from other tools' files: - godev: .godev.yaml, - compose: deploy/compose.yml (image, build, command, ports, env, env_file, depends_on and project volumes, under the compose names; ${VARS} from the environment, then the compose file's .env). A service rig.yaml defines wins",
       "items": {
         "additionalProperties": {
           "type": [

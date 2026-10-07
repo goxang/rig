@@ -163,6 +163,9 @@ func LoadData(raw []byte, file, env string, overrides map[string]string) (*Proje
 		if s.Role == "" {
 			s.Role = RoleApp
 		}
+		if err := s.readEnvFiles(p.Dir); err != nil {
+			return nil, nil, fmt.Errorf("%s: service %s: %w", file, n, err)
+		}
 	}
 	for n, e := range p.Environments {
 		e.Name = n

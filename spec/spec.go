@@ -137,7 +137,9 @@ type Service struct {
 	DependsOn []string          `yaml:"depends_on"`
 	Ports     map[string]int    `yaml:"ports"`
 	Env       map[string]string `yaml:"env"`
-	Image     string            `yaml:"image"`
+	// EnvFile are KEY=VALUE files (from the project directory) read under env:, later files winning.
+	EnvFile []string `yaml:"env_file"`
+	Image   string   `yaml:"image"`
 	// Replicas left out keeps what the environment has (the manifest's count, or a running workload's);
 	// 0 keeps a service deployed but stopped.
 	Replicas *int   `yaml:"replicas"`

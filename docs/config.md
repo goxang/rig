@@ -18,7 +18,7 @@ is out of date.
 | `project` | name; also the docker network and container prefix |
 | `default` | environment used when neither `-e` nor `$RIG_ENV` is given |
 | `vars` | variables for `${...}` |
-| `imports` | services from other tools' files: `- godev: .godev.yaml` |
+| `imports` | services from other tools' files: `- godev: .godev.yaml`, `- compose: deploy/compose.yml` (image, build, command, ports, env, `env_file`, depends_on and project volumes, under the compose names; `${VARS}` from the environment, then the compose file's `.env`). A service rig.yaml defines wins |
 | `services` | below |
 | `environments` | below |
 | `components` | below; shared by every environment |
@@ -46,7 +46,8 @@ is out of date.
 | `build` | `go: ./cmd/api`, `dockerfile: path` (+ `context`, `args`), or `command: [...]` |
 | `run` | local runtime: `command`, `args`, `dir` (default: the binary built from `build.go`) |
 | `ports` | `name: number`; `svc://service:name` resolves names |
-| `env` | environment for every runtime |
+| `env` | environment for every runtime; `svc://service[:port]` inside a value (`postgres://app@svc://db:pg/app`) becomes the `host:port` the service reaches in that environment |
+| `env_file` | dotenv files (from the project directory) read under `env` |
 | `replicas` | left out: keep the running count (or the manifest's); set (0 included) it wins everywhere |
 | `shared` | infrastructure one environment runs for others: see `environments.<name>.infra` |
 | `delay` | wait this long (`10s`) after the dependencies are ready before starting the service |
@@ -81,7 +82,7 @@ is out of date.
 | type | options |
 |---|---|
 | `local` | `env`, `stop_timeout` |
-| `docker` | `network`, `registry`, `env`, `publish` (default true) |
+| `docker` | `network`, `registry`, `env`, `publish` (default true), `host` (a remote daemon: `ssh://user@server`, `tcp://server:2376`) or `context` (a `docker context`): rig's docker calls use it without touching your shell, builds are copied over (`docker save \| load`) when there is no registry, and health checks and forwards reach an ssh daemon's containers through `ssh -L`. `compose: {project, files}` hands the services to that compose project: rig finds its containers by compose's labels and starts, stops, restarts, scales and deploys with `docker compose ... up -d --no-deps <svc>` (a deploy's image comes in as `$RIG_IMAGE`: write `image: ${RIG_IMAGE:-app:latest}`), so with `imports: [{compose: ...}]` the compose file stays the only definition |
 | `kubernetes` | `context` (required), `namespace`, `registry`, `pull_registry` (the registry as nodes name it, when it differs from where builds push), `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image`, `debug` (adds SYS_PTRACE to service containers, for dlv) |
 | `kind` | the kubernetes options plus `cluster`, `node_image`, `workers`, `registry_port`, `preload` |
 

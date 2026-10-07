@@ -32,3 +32,19 @@ func TestOTelEnv(t *testing.T) {
 		t.Error("infrastructure got OTEL_* variables")
 	}
 }
+
+func TestSvcRefsInEnv(t *testing.T) {
+	a := &App{
+		Spec: &spec.Project{Name: "shop", Services: map[string]*spec.Service{"db": {Name: "db", Ports: map[string]int{"pg": 5432}}}},
+		Env:  &spec.Environment{Name: "docker", Runtime: &spec.Component{Type: "docker"}},
+	}
+	a.envOverrides = map[string]map[string]string{}
+	s := a.withEnv(&spec.Service{Name: "api", Env: map[string]string{
+		"DATABASE_URL": "postgres://app@svc://db:pg/shop", "DB_HOST": "svc://db", "PLAIN": "x"}})
+	want := map[string]string{"DATABASE_URL": "postgres://app@db:5432/shop", "DB_HOST": "db:5432", "PLAIN": "x"}
+	for k, v := range want {
+		if s.Env[k] != v {
+			t.Errorf("%s = %q, want %q", k, s.Env[k], v)
+		}
+	}
+}

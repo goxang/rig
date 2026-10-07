@@ -104,6 +104,8 @@ func (a *App) reachable(addr string) string {
 	if s, ok := a.Spec.Services[host]; ok {
 		if n := s.PortNumber(port); n > 0 {
 			port = strconv.Itoa(n)
+		} else if port == "" {
+			port = strconv.Itoa(s.FirstPort())
 		}
 	}
 	out := "http://" + host + ":" + port
@@ -112,3 +114,6 @@ func (a *App) reachable(addr string) string {
 	}
 	return out
 }
+
+// hostPort is svc://service[:port] in an env value (a DSN, a host variable) as host:port the service reaches.
+func (a *App) hostPort(ref string) string { return strings.TrimPrefix(a.reachable(ref), "http://") }
