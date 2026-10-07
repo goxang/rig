@@ -35,6 +35,8 @@ type Service struct {
 	Adopt string
 	// Section groups it on the Services screen (sections:), by what rig init --deep found it as.
 	Section string
+	// Imported comes from a compose file or manifests rig.yaml imports: only what they lack is written.
+	Imported bool
 }
 
 type Port struct {
@@ -59,7 +61,9 @@ type Plan struct {
 	Components []Component
 	Suites     []Suite
 	Manifests  []string
-	Godev      bool
+	// Imports are imports: entries ({kind: path}), the files that stay the services' definition.
+	Imports [][2]string
+	Godev   bool
 	// OTel is where services send traces, when a tracing backend that takes OTLP is there.
 	OTel string
 	// Notes say what was found where, for the summary.
@@ -352,6 +356,9 @@ func seq(vs []string) *yaml.Node {
 func (s *Service) node() *yaml.Node {
 	n := mapping()
 	add := func(k string, v *yaml.Node) { n.Content = append(n.Content, scalar(k), v) }
+	if s.Imported {
+		return s.extras(n, add)
+	}
 	if s.Role == "infra" {
 		add("role", scalar("infra"))
 	}
@@ -424,6 +431,27 @@ func (s *Service) node() *yaml.Node {
 	return n
 }
 
+// extras is what an imported service needs beyond its compose file or manifest: sharing, the Go
+// main a manifest's image is built from, how to run it as a local process.
+func (s *Service) extras(n *yaml.Node, add func(string, *yaml.Node)) *yaml.Node {
+	if s.Shared {
+		add("shared", scalar("true"))
+	}
+	if s.Go != "" {
+		add("build", flow(mapping("go", s.Go)))
+	} else if s.Dockerfile != "" && strings.HasPrefix(s.From, "manifest") {
+		add("build", flow(mapping("dockerfile", s.Dockerfile)))
+	}
+	if len(s.Run) > 0 {
+		r := mapping("command", seq(s.Run))
+		if s.RunDir != "" && s.RunDir != "." {
+			r.Content = append(r.Content, scalar("dir"), scalar(s.RunDir))
+		}
+		add("run", flow(r))
+	}
+	return flow(n)
+}
+
 func (p *Plan) sections() *yaml.Node {
 	out := mapping()
 	at := map[string]*yaml.Node{}
@@ -458,18 +486,24 @@ func (p *Plan) YAML() ([]byte, error) {
 		root.Content[5] = scalar("local")
 	}
 	add := func(k string, v *yaml.Node) { root.Content = append(root.Content, scalar(k), v) }
+	imports := &yaml.Node{Kind: yaml.SequenceNode}
 	if p.Godev {
-		add("imports", &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{flow(mapping("godev", ".godev.yaml"))}})
+		imports.Content = append(imports.Content, flow(mapping("godev", ".godev.yaml")))
 	}
-	if len(p.Manifests) > 0 {
-		add("manifests", seq(p.Manifests))
+	for _, imp := range p.Imports {
+		imports.Content = append(imports.Content, flow(mapping(imp[0], imp[1])))
+	}
+	if len(imports.Content) > 0 {
+		add("imports", imports)
 	}
 	if p.OTel != "" {
 		add("otel", flow(mapping("traces", p.OTel)))
 	}
 	svcs := mapping()
 	for _, s := range p.Services {
-		svcs.Content = append(svcs.Content, scalar(s.Name), s.node())
+		if n := s.node(); !s.Imported || len(n.Content) > 0 {
+			svcs.Content = append(svcs.Content, scalar(s.Name), n)
+		}
 	}
 	if len(p.Services) == 0 {
 		svcs.Style = yaml.FlowStyle
@@ -489,9 +523,6 @@ func (p *Plan) YAML() ([]byte, error) {
 	}
 	if built || len(p.Manifests) > 0 {
 		kind := mapping("type", "kind", "cluster", p.Project, "namespace", p.Project, "registry_port", "5001", "create_namespace", "true")
-		if len(p.Manifests) > 0 {
-			kind.Content = append(kind.Content, scalar("manifests"), seq(p.Manifests))
-		}
 		addEnv("kind", mapping("description", "a throwaway kind cluster: rig do runtime create, then rig up --build", "runtime", kind))
 	}
 	add("environments", envs)

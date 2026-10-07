@@ -18,14 +18,14 @@ is out of date.
 | `project` | name; also the docker network and container prefix |
 | `default` | environment used when neither `-e` nor `$RIG_ENV` is given |
 | `vars` | variables for `${...}` |
-| `imports` | services from other tools' files: `- godev: .godev.yaml`, `- compose: deploy/compose.yml` (image, build, command, ports, env, `env_file`, depends_on and project volumes, under the compose names; `${VARS}` from the environment, then the compose file's `.env`). A service rig.yaml defines wins |
+| `imports` | services from the files that already define them, read on every load so they stay the only definition: `- compose: deploy/compose.yml` (image, build, command, ports, env, `env_file`, depends_on and project volumes, under the compose names; `${VARS}` from the environment, then the compose file's `.env`), `- kubernetes: deploy/k8s` (a service per Deployment, StatefulSet and DaemonSet, named after it, with its image and container ports; a Kubernetes runtime without `manifests:` deploys from these folders), `- godev: .godev.yaml`. A service rig.yaml also defines is the imported one with rig.yaml's keys merged over it (`build: null` drops an imported key), so rig.yaml holds only what those files have no word for: a Go main to build, health, groups. A workload a rig.yaml service already claims through `k8s.workload` is not imported again under its own name |
 | `services` | below |
 | `environments` | below |
 | `components` | below; shared by every environment |
 | `dashboards` | `name: [panel, ...]` or `name: {help, vars, panels}` (see below) |
 | `tests` | test suites for `rig test` and the Tests screen (see below) |
 | `sections` | `name: {help, services: [names, groups or roles]}`: the Services screen's parts, in this order; services in none show under `other` |
-| `manifests` | folders `rig manifests` and the TUI scan by default |
+| `manifests` | folders `rig manifests` and the Manifests screen read (default: the runtime's `manifests`, else the `kubernetes` imports). The screen lists only the objects a service deploys; `u` shows the rest |
 | `tasks` | `name: [shell step, ...]` or `name: {help, steps}`, run in order by `rig task <name>` (see below) |
 | `queries` | saved queries (see below) |
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |

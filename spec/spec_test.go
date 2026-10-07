@@ -40,7 +40,7 @@ components:
 const godev = `
 services:
   worker: { path: ./cmd/worker, args: [--fast], group: [bg] }
-  api:    { path: ./cmd/should-not-win }
+  api:    { path: ./cmd/api, group: [imported] }
 `
 
 func write(t *testing.T) string {
@@ -101,7 +101,7 @@ func TestEnvironmentPatchesAndVars(t *testing.T) {
 	}
 }
 
-func TestImportDoesNotOverride(t *testing.T) {
+func TestRigYAMLMergesOverImport(t *testing.T) {
 	p, _, err := Load(write(t), "")
 	if err != nil {
 		t.Fatal(err)
@@ -110,8 +110,9 @@ func TestImportDoesNotOverride(t *testing.T) {
 	if w == nil || w.Build.Go != "./cmd/worker" || !reflect.DeepEqual(w.Run.Args, []string{"--fast"}) || !w.InGroup("bg") {
 		t.Fatalf("worker = %+v", w)
 	}
-	if p.Services["api"].Build != nil {
-		t.Fatal("imported service replaced one defined in rig.yaml")
+	api := p.Services["api"]
+	if api.Build == nil || api.Build.Go != "./cmd/api" || !reflect.DeepEqual(api.Groups, []string{"core"}) || api.Ports["http"] != 8080 || api.Env["MODE"] != "plain" {
+		t.Fatalf("api = %+v: rig.yaml's keys must win over the import's, the rest of the import kept", api)
 	}
 }
 

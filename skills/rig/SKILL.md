@@ -20,11 +20,17 @@ touch before editing.
 4. Write it (`rig init`, or `rig_init` with `write: true`), then `rig env` must load without errors.
 5. `rig up` (or `rig up --build` for kind) and `rig status`.
 
-A project that already runs on docker compose keeps compose as the one definition: `imports:
-[{compose: compose.yml}]` reads its services, and an environment whose runtime is
-`{type: docker, compose: {project: <name>, files: [...]}}` drives compose's own containers. A remote
-server is `host: ssh://user@server` (or `context: <docker context>`) on that runtime; nothing needs
-exporting in the shell. Do not copy compose's images, commands or env into rig.yaml.
+## One source of truth
+
+Services already defined elsewhere are imported, never copied: `imports: [{compose: compose.yml}]`,
+`[{kubernetes: deploy/k8s}]` (a service per Deployment/StatefulSet/DaemonSet; the Kubernetes runtime
+deploys from those folders). rig reads them on every load, so a new workload or compose service is a
+rig service at once. Under `services.<name>` write only what those files lack (a Go main to `build`,
+`health`, `groups`, `run` for local processes): rig.yaml's keys merge over the imported service. An
+environment `{type: docker, compose: {project: <name>, files: [...]}}` drives compose's own
+containers; a remote server is `host: ssh://user@server` (or `context:`). Do not copy images,
+commands, env or manifests into rig.yaml. `rig init --deep` on an existing project adds what is new
+(imports included) without touching the rest.
 
 ## Edit rig.yaml
 

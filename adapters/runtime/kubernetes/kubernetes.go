@@ -143,6 +143,9 @@ func New(env core.Env, c *spec.Component) (any, error) {
 	if err := c.Decode(&r.Opt); err != nil {
 		return nil, err
 	}
+	if len(r.Opt.Manifests) == 0 {
+		r.Opt.Manifests = env.Project().ImportPaths("kubernetes", "manifests")
+	}
 	if r.Opt.Context != "" || r.Opt.Server != "" {
 		ctx, err := kubectx.Resolve(r.Opt.Context, r.Opt.Server)
 		if err != nil {

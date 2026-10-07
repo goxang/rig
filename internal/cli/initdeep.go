@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/goxang/rig/internal/scaffold"
+	"github.com/goxang/rig/spec"
 )
 
 // initDeep scans every folder, lets the user pick what to keep, and writes it to rig.yaml: a new
@@ -74,14 +76,23 @@ func initDeep(ctx context.Context, dry, all bool) error {
 	if existing != nil {
 		verb = "added to"
 	}
-	fmt.Printf("%s %s rig.yaml: %d services, %d test suites, %d manifest folders\n", green("✓"), verb, len(p.Services), len(p.Suites), len(p.Manifests))
+	fmt.Printf("%s %s rig.yaml: %d services, %d test suites, %d imports, %d manifest folders\n", green("✓"), verb, len(p.Services), len(p.Suites), len(p.Imports), len(p.Manifests))
 	fmt.Println("  check ports, health checks and passwords; then: rig up, or rig for the control plane")
 	return nil
 }
 
-// haveNames are the service and suite names rig.yaml already has.
+// haveNames are the service and suite names rig.yaml already has, its imports' services included.
 func haveNames(raw []byte) map[string]bool {
 	out := map[string]bool{}
+	if raw != nil {
+		if abs, err := filepath.Abs("rig.yaml"); err == nil {
+			if p, _, err := spec.LoadData(raw, abs, "", nil); err == nil {
+				for n := range p.Services {
+					out[n] = true
+				}
+			}
+		}
+	}
 	var doc struct {
 		Services map[string]yaml.Node `yaml:"services"`
 		Tests    map[string]yaml.Node `yaml:"tests"`
@@ -116,6 +127,9 @@ func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
 	}
 	blocks := topBlocks(gen)
 	text := string(raw)
+	if body := newImports(blocks["imports"], raw); body != "" {
+		text = appendToBlock(text, "imports", body)
+	}
 	for _, key := range []string{"services", "sections", "tests"} {
 		body := blocks[key]
 		if strings.TrimSpace(body) == "" || strings.HasPrefix(strings.TrimSpace(body), "{") {
@@ -131,6 +145,31 @@ func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
 		return nil, fmt.Errorf("adding to rig.yaml would break it (%w); run rig init --deep --dry-run and paste by hand", err)
 	}
 	return []byte(text), nil
+}
+
+// newImports keeps the lines of the generated imports: block that rig.yaml does not have yet.
+func newImports(gen string, raw []byte) string {
+	var doc struct {
+		Imports []map[string]string `yaml:"imports"`
+	}
+	_ = yaml.Unmarshal(raw, &doc)
+	var out strings.Builder
+	for _, line := range strings.SplitAfter(gen, "\n") {
+		var item []map[string]string
+		if yaml.Unmarshal([]byte(strings.TrimSpace(line)), &item) != nil || len(item) != 1 {
+			continue
+		}
+		dup := false
+		for _, have := range doc.Imports {
+			for k, v := range item[0] {
+				dup = dup || filepath.Clean(have[k]) == filepath.Clean(v) && have[k] != ""
+			}
+		}
+		if !dup {
+			out.WriteString(line)
+		}
+	}
+	return out.String()
 }
 
 // topBlocks splits a YAML file into its top-level keys' bodies (the indented lines under each).

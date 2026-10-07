@@ -43,6 +43,10 @@ type manifestsTab struct {
 	file string // in the tree: the file whose objects are listed
 	// svcOf caches serviceOf per object, until the next scan
 	svcOf map[*manifest.Object]string
+	// owners maps an object (file#Kind/name) to the service whose deploy applies it; the list shows
+	// only those unless all is set (u), since folders often hold manifests nothing deploys
+	owners map[string]string
+	all    bool
 	// hits is the search index, built once per scan and reused across searches
 	hits    []manifestHit
 	hitsSet *manifest.Set
@@ -87,9 +91,52 @@ func (t *manifestsTab) pickFolders(m *model, msg manifestFoldersMsg) {
 }
 
 type manifestsMsg struct {
-	gen int
-	set *manifest.Set
-	err error
+	gen    int
+	set    *manifest.Set
+	owners map[string]string
+	err    error
+}
+
+func objKey(o *manifest.Object) string { return abs(o.File) + "#" + o.ID() }
+
+// manifestOwners finds, for each service, the objects its deploy applies: what the Kubernetes
+// runtime would render, else its workload's bundle in set.
+func manifestOwners(m *model, set *manifest.Set) map[string]string {
+	out := map[string]string{}
+	k, onK8s := m.k8s()
+	for _, n := range m.app.Spec.ServiceNames() {
+		s := m.app.Spec.Services[n]
+		var objs []*manifest.Object
+		if onK8s {
+			objs, _, _ = k.Objects(s)
+		} else {
+			var sec struct {
+				Workload string `yaml:"workload"`
+			}
+			_, _ = s.Section("k8s", &sec)
+			if sec.Workload == "" {
+				sec.Workload = n
+			}
+			if w := set.FindWorkload(sec.Workload); w != nil {
+				objs = set.Bundle(w)
+			}
+		}
+		for _, o := range objs {
+			if _, taken := out[objKey(o)]; !taken {
+				out[objKey(o)] = n
+			}
+		}
+	}
+	return out
+}
+
+// shown says whether the list includes o: every object with u, else those a service deploys.
+func (t *manifestsTab) shown(o *manifest.Object) bool {
+	if t.all || len(t.owners) == 0 {
+		return true
+	}
+	_, ok := t.owners[objKey(o)]
+	return ok
 }
 
 // applier is a runtime that can apply manifests (Kubernetes).
@@ -108,7 +155,7 @@ func (t *manifestsTab) hints() [][2]string {
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"esc", back}}
 	}
 	return [][2]string{{"t ⇧←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
-		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
+		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"u", "also what no service deploys"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
 func (t *manifestsTab) open(m *model) tea.Cmd {
@@ -123,7 +170,10 @@ func (t *manifestsTab) scan(m *model) tea.Cmd {
 	dirs, gen := t.dirs, m.gen
 	return func() tea.Msg {
 		set, err := manifest.Scan(dirs...)
-		return manifestsMsg{gen: gen, set: set, err: err}
+		if err != nil {
+			return manifestsMsg{gen: gen, err: err}
+		}
+		return manifestsMsg{gen: gen, set: set, owners: manifestOwners(m, set)}
 	}
 }
 
@@ -151,7 +201,7 @@ func (t *manifestsTab) objects() []*manifest.Object {
 	}
 	var out []*manifest.Object
 	for _, o := range t.set.Objects {
-		if t.tree && t.file != "" && o.File != t.file {
+		if t.tree && t.file != "" && o.File != t.file || !t.shown(o) {
 			continue
 		}
 		if t.filter == "" || strings.Contains(strings.ToLower(o.ID()+" "+o.File), strings.ToLower(t.filter)) {
@@ -190,6 +240,9 @@ func (t *manifestsTab) entries() []entry {
 	}
 	dirs, files := map[string]int{}, map[string]int{}
 	for _, o := range t.set.Objects {
+		if !t.shown(o) {
+			continue
+		}
 		f := abs(o.File)
 		rel, err := filepath.Rel(t.cwd, f)
 		if err != nil || strings.HasPrefix(rel, "..") {
@@ -292,7 +345,7 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 		t.pickFolders(m, msg)
 	case manifestsMsg:
 		if msg.gen == m.gen {
-			t.set, t.err, t.svcOf = msg.set, "", nil
+			t.set, t.err, t.svcOf, t.owners = msg.set, "", nil, msg.owners
 			if msg.err != nil {
 				t.err = msg.err.Error()
 			}
@@ -319,6 +372,8 @@ func (t *manifestsTab) update(m *model, msg tea.Msg) tea.Cmd {
 				t.filter, t.sel, t.offset = v, 0, 0
 				return nil
 			})
+		case "u":
+			t.all, t.sel, t.offset = !t.all, 0, 0
 		case "t", "shift+left", "shift+right":
 			t.tree, t.sel, t.offset, t.file, t.viaSearch = !t.tree, 0, 0, "", false
 		case "v":
@@ -553,7 +608,19 @@ func (t *manifestsTab) body(m *model, w, h int) string {
 	for _, i := range t.set.Issues {
 		counts[i.Level]++
 	}
-	summary := fmt.Sprintf("%d objects · %d files · ", len(t.set.Objects), len(t.set.Files())) +
+	objects := fmt.Sprintf("%d objects", len(t.set.Objects))
+	if !t.all && len(t.owners) > 0 {
+		used := 0
+		for _, o := range t.set.Objects {
+			if t.shown(o) {
+				used++
+			}
+		}
+		if used < len(t.set.Objects) {
+			objects = fmt.Sprintf("%d objects services deploy (u: all %d)", used, len(t.set.Objects))
+		}
+	}
+	summary := objects + fmt.Sprintf(" · %d files · ", len(t.set.Files())) +
 		sRed.Render(fmt.Sprintf("%d errors", counts["error"])) + " " + sAmber.Render(fmt.Sprintf("%d warnings", counts["warn"]))
 	switch t.issues {
 	case "all":
@@ -825,7 +892,9 @@ func (t *manifestsTab) cachedService(m *model, o *manifest.Object) string {
 	}
 	svc, ok := t.svcOf[o]
 	if !ok {
-		svc = t.serviceOf(m, o)
+		if svc = t.owners[objKey(o)]; svc == "" {
+			svc = t.serviceOf(m, o)
+		}
 		t.svcOf[o] = svc
 	}
 	return svc

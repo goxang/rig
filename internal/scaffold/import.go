@@ -7,6 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/goxang/rig/manifest"
 	"github.com/goxang/rig/spec"
 )
 
@@ -94,4 +95,51 @@ func importCompose(path, dir string) (map[string]*spec.Service, error) {
 func sliceOf(v any) []string {
 	l, _ := v.([]string)
 	return l
+}
+
+func init() {
+	spec.RegisterImporter("kubernetes", importManifests)
+	spec.RegisterImporter("manifests", importManifests)
+}
+
+// importManifests makes a service of every Deployment, StatefulSet and DaemonSet under path, named
+// after the workload, so the manifests stay the only definition: a Kubernetes runtime without
+// manifests: deploys from these folders.
+func importManifests(path, _ string) (map[string]*spec.Service, error) {
+	set, err := manifest.Scan(path)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]*spec.Service{}
+	for _, w := range set.Workloads() {
+		if w.Kind != "Deployment" && w.Kind != "StatefulSet" && w.Kind != "DaemonSet" {
+			continue
+		}
+		t, ok := manifest.Template(w)
+		name := cleanName(w.Name)
+		if !ok || name == "" || len(t.Spec.Containers) == 0 || out[name] != nil {
+			continue
+		}
+		c := t.Spec.Containers[0]
+		s := &spec.Service{Name: name, Role: spec.RoleApp, Image: imageName(c.Image), Ports: map[string]int{}}
+		if kindOf(c.Image) != "" {
+			s.Role = spec.RoleInfra
+		}
+		for i, pt := range c.Ports {
+			n := pt.Name
+			if n == "" {
+				n = portName(pt.ContainerPort, i)
+			}
+			s.Ports[n] = pt.ContainerPort
+		}
+		if w.Kind != "Deployment" || name != w.Name {
+			var node yaml.Node
+			if err := node.Encode(map[string]string{"workload": strings.ToLower(w.Kind) + "/" + w.Name}); err != nil {
+				return nil, err
+			}
+			s.Sections = map[string]yaml.Node{"k8s": node}
+		}
+		out[name] = s
+	}
+	return out, nil
 }

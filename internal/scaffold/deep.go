@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,12 +31,16 @@ type Candidate struct {
 	Service   *Service
 	Suite     *Suite
 	Manifests string
+	// Import is the imports: entry ({kind, path}) that brings Service from its own file instead of a copy.
+	Import [2]string
 }
 
 // deepSkip are folders no service lives in: dependencies, build output, caches, VCS.
 var deepSkip = map[string]bool{"node_modules": true, "vendor": true, "venv": true, ".venv": true, "__pycache__": true,
 	"dist": true, "target": true, "obj": true, ".git": true, ".hg": true, ".svn": true, ".idea": true, ".vscode": true,
-	".cache": true, ".next": true, ".nuxt": true, "coverage": true, ".gradle": true, ".terraform": true, ".rig": true}
+	".cache": true, ".next": true, ".nuxt": true, "coverage": true, ".gradle": true, ".terraform": true, ".rig": true,
+	".tox": true, ".mypy_cache": true, ".pytest_cache": true, ".ruff_cache": true, ".m2": true, ".npm": true, ".yarn": true, ".pnpm-store": true,
+	".angular": true, ".svelte-kit": true, ".turbo": true, ".parcel-cache": true, ".expo": true, ".dart_tool": true, ".bundle": true, ".claude": true}
 
 var (
 	goMainRe   = regexp.MustCompile(`(?m)^package main\b`)
@@ -80,7 +85,9 @@ func Deep(ctx context.Context, root string) ([]Candidate, error) {
 			return nil
 		}
 		if de.IsDir() {
-			if path != root && (deepSkip[de.Name()] || strings.HasPrefix(de.Name(), ".") && de.Name() != ".run") {
+			// dot folders count (.docker/kubernetes, .deploy), except the ones deepSkip names
+			// a nested .git is another repository or a worktree of this one: never this project's
+			if path != root && (deepSkip[de.Name()] || exists(filepath.Join(path, ".git"))) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -133,7 +140,43 @@ func Deep(ctx context.Context, root string) ([]Candidate, error) {
 	}
 	out = append(out, goland(root)...)
 	out = append(out, containers(ctx, root)...)
+	liftManifestImports(out)
 	return unique(out), nil
+}
+
+// liftManifestImports makes the manifest folders under one top folder (deploy/services/api,
+// deploy/services/worker) one import of the folder they share, so a later workload there is a
+// service without another rig init.
+func liftManifestImports(cs []Candidate) {
+	share := map[string]string{}
+	for _, c := range cs {
+		if c.Import[0] != "kubernetes" {
+			continue
+		}
+		top := strings.Split(c.Import[1], "/")[0]
+		if have, ok := share[top]; ok {
+			share[top] = commonDir(have, c.Import[1])
+		} else {
+			share[top] = c.Import[1]
+		}
+	}
+	for i := range cs {
+		if cs[i].Import[0] == "kubernetes" {
+			cs[i].Import[1] = share[strings.Split(cs[i].Import[1], "/")[0]]
+		}
+	}
+}
+
+func commonDir(a, b string) string {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	n := 0
+	for n < len(as) && n < len(bs) && as[n] == bs[n] {
+		n++
+	}
+	if n == 0 {
+		return "."
+	}
+	return strings.Join(as[:n], "/")
 }
 
 type goPkg struct{ main, tests bool }
@@ -202,7 +245,11 @@ func deepFile(root, path string, add func(Candidate), mu *sync.Mutex, goDir map[
 		for n, c := range doc.Services {
 			s := fromCompose(cleanName(n), c, file)
 			rebase(s, rel)
-			add(Candidate{Kind: "compose", Name: s.Name, Where: file, Service: s})
+			cand := Candidate{Kind: "compose", Name: s.Name, Where: file, Service: s}
+			if s.Name == n {
+				cand.Import = [2]string{"compose", filepath.ToSlash(file)}
+			}
+			add(cand)
 		}
 	case name == "Chart.yaml":
 		add(Candidate{Kind: "helm", Name: cleanName(filepath.Base(dir)), Where: rel, Manifests: rel})
@@ -232,7 +279,11 @@ func deepFile(root, path string, add func(Candidate), mu *sync.Mutex, goDir map[
 				}
 				s.Ports = append(s.Ports, Port{n, pt.ContainerPort})
 			}
-			add(Candidate{Kind: "manifest", Name: s.Name, Where: filepath.Join(rel, name), Service: s, Manifests: rel})
+			cand := Candidate{Kind: "manifest", Name: s.Name, Where: filepath.Join(rel, name), Service: s, Manifests: rel}
+			if s.Name == w.Metadata.Name {
+				cand.Import = [2]string{"kubernetes", filepath.ToSlash(rel)}
+			}
+			add(cand)
 		}
 	}
 }
@@ -533,6 +584,12 @@ func PlanOf(root string, picked []Candidate) *Plan {
 	p := &Plan{Project: cleanName(filepath.Base(abs))}
 	for _, c := range picked {
 		switch {
+		case c.Service != nil && c.Import[0] != "":
+			c.Service.Section, c.Service.Imported = sectionOf[c.Kind], true
+			p.Services = append(p.Services, c.Service)
+			if !slices.Contains(p.Imports, c.Import) {
+				p.Imports = append(p.Imports, c.Import)
+			}
 		case c.Service != nil:
 			c.Service.Section = sectionOf[c.Kind]
 			p.Services = append(p.Services, c.Service)

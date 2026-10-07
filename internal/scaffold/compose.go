@@ -128,9 +128,12 @@ func (p *Plan) compose(dir string) error {
 		}
 		sort.Strings(names)
 		for _, n := range names {
-			p.Services = append(p.Services, fromCompose(cleanName(n), doc.Services[n], f))
+			s := fromCompose(cleanName(n), doc.Services[n], f)
+			s.Imported = s.Name == n
+			p.Services = append(p.Services, s)
 		}
-		p.note("%s: %d services", f, len(names))
+		p.Imports = append(p.Imports, [2]string{"compose", f})
+		p.note("%s: %d services, imported (it stays their definition)", f, len(names))
 		return nil
 	}
 	return nil

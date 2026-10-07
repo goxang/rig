@@ -481,6 +481,9 @@ func (a *App) ManifestDirs() []string {
 			return abs(o.Manifests)
 		}
 	}
+	if ds := a.Spec.ImportPaths("kubernetes", "manifests"); len(ds) > 0 {
+		return ds
+	}
 	return []string{a.Spec.Dir}
 }
 

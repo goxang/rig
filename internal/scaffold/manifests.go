@@ -103,7 +103,7 @@ func (p *Plan) manifests(root string) {
 		if name == "" || len(cs) == 0 || p.service(name) != nil {
 			continue
 		}
-		s := &Service{Name: name, Role: "app", Image: imageName(cs[0].Image), From: "manifest " + w.Kind}
+		s := &Service{Name: name, Role: "app", Image: imageName(cs[0].Image), From: "manifest " + w.Kind, Imported: name == w.Metadata.Name && w.Kind != "DaemonSet"}
 		if kindOf(cs[0].Image) != "" {
 			s.Role = "infra"
 		}
@@ -118,6 +118,9 @@ func (p *Plan) manifests(root string) {
 		added++
 	}
 	p.buildFromMains()
+	for _, d := range p.Manifests {
+		p.Imports = append(p.Imports, [2]string{"kubernetes", filepath.ToSlash(d)})
+	}
 	if len(p.Manifests) > 0 {
 		p.note("kubernetes manifests in %s: %d workloads, %d new services", strings.Join(p.Manifests, ", "), len(found), added)
 	}

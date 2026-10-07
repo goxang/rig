@@ -71,8 +71,8 @@ func TestInitFromComposeSourcesAndManifests(t *testing.T) {
 	if proj.Tests["api"] == nil || proj.Tests["site"] == nil {
 		t.Errorf("tests: %v", proj.Tests)
 	}
-	if proj.Environments["local"].Infra != "docker" || len(proj.Manifests) != 1 {
-		t.Errorf("local env or manifests wrong\n%s", raw)
+	if proj.Environments["local"].Infra != "docker" || len(proj.ImportPaths("kubernetes")) != 1 || len(proj.ImportPaths("compose")) != 1 {
+		t.Errorf("local env or imports wrong\n%s", raw)
 	}
 }
 

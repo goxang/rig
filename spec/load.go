@@ -125,7 +125,7 @@ func LoadData(raw []byte, file, env string, overrides map[string]string) (*Proje
 	if err := root.Decode(p); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", file, err)
 	}
-	if err := p.applyImports(); err != nil {
+	if err := p.applyImports(&root); err != nil {
 		return nil, nil, err
 	}
 	if p.Services == nil {
