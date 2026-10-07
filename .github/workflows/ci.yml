@@ -54,7 +54,7 @@ jobs:
       - shell: bash
         run: |
           go test -count=1 ./... 2>&1 | tee out.txt; rc=${PIPESTATUS[0]}
-          grep -E -- '^(--- FAIL|FAIL|panic:)|_test\.go:[0-9]+:' out.txt | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+          grep -aiE 'fail|panic|error|undefined|cannot' out.txt | grep -av '^ok' | head -40 | while IFS= read -r l; do echo "::error::${l//$'\r'/}"; done
           exit "$rc"
 
   version:
