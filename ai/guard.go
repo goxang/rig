@@ -30,7 +30,15 @@ func Classify(argv []string) Risk {
 		sub = argv[1]
 	}
 	switch argv[0] {
-	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "data", "source", "docs":
+	case "data":
+		switch sub {
+		case "restore":
+			return Danger
+		case "seed":
+			return Change
+		}
+		return Read
+	case "env", "status", "discover", "logs", "traces", "metrics", "alerts", "plugins", "version", "report", "profile", "source", "docs":
 		return Read
 	case "init":
 		for _, a := range argv[1:] {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -231,7 +232,53 @@ func dataCommands() []*cobra.Command {
 			return nil
 		}),
 	}
+	browse.Example += `
+  rig data snapshot db before-migration     # save db's data in .rig/<env>/snapshots/db/
+  rig data restore db before-migration      # put it back, replacing what db holds now
+  rig data snapshots db                     # the snapshots kept
+  rig data seed db                          # run db's seed: (rig up runs it on an empty database)`
+	browse.AddCommand(dataSnapshotCommands()...)
 	return []*cobra.Command{db, cache, queue, kv, browse, loadCommand(), queryCommand(), doCommand()}
+}
+
+func dataSnapshotCommands() []*cobra.Command {
+	return []*cobra.Command{
+		{Use: "snapshot <component> [name]", Short: "save a database's data with its own dump tool (name: a timestamp)", Args: cobra.RangeArgs(1, 2),
+			RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+				name := ""
+				if len(args) > 1 {
+					name = args[1]
+				}
+				s, err := a.TakeSnapshot(ctx, args[0], name, os.Stderr)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%s %s snapshot %s (%s): %s\n", green("✓"), args[0], s.Name, viz.Human(float64(s.Size), "B"), relPath(a.Spec.Dir, s.File))
+				return nil
+			})},
+		{Use: "restore <component> <name>", Short: "replace a database's data with a snapshot (asks on a protected environment)", Args: cobra.ExactArgs(2),
+			RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+				if err := a.RestoreSnapshot(ctx, args[0], args[1], os.Stderr); err != nil {
+					return err
+				}
+				fmt.Printf("%s %s restored from %s\n", green("✓"), args[0], args[1])
+				return nil
+			})},
+		{Use: "snapshots <component>", Short: "a component's snapshots, newest first", Args: cobra.ExactArgs(1),
+			RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+				ss, err := a.Snapshots(args[0])
+				var rows [][]string
+				for _, s := range ss {
+					rows = append(rows, []string{s.Name, s.At.Format("2006-01-02 15:04:05"), viz.Human(float64(s.Size), "B")})
+				}
+				printTable(os.Stdout, []string{"SNAPSHOT", "TAKEN", "SIZE"}, rows)
+				return err
+			})},
+		{Use: "seed <component>", Short: "run a database's seed: SQL files or commands (rig up runs it on an empty database)", Args: cobra.ExactArgs(1),
+			RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+				return a.SeedData(ctx, args[0], os.Stdout)
+			})},
+	}
 }
 
 func loadCommand() *cobra.Command {
@@ -530,4 +577,11 @@ func doCommand() *cobra.Command {
 			return fmt.Errorf("%s has no action %q", args[0], args[1])
 		}),
 	}
+}
+
+func relPath(base, p string) string {
+	if r, err := filepath.Rel(base, p); err == nil {
+		return r
+	}
+	return p
 }

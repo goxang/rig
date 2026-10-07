@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -134,7 +135,39 @@ func (t *dataTab) hints() [][2]string {
 	if t.editable(c) {
 		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
 	}
+	if c.kind == string(core.KindDatabase) {
+		h = append(h, [2]string{"S", "snapshot, restore, seed"})
+	}
 	return h
+}
+
+// snapshotMenu offers a database's snapshot, its seed, and a restore of any snapshot kept.
+func (t *dataTab) snapshotMenu(m *model, comp string) {
+	items, desc := []string{"snapshot now", "seed"}, []string{"save the data under .rig/" + m.app.Env.Name + "/snapshots/" + comp, "run the seed: of " + comp}
+	ss, _ := m.app.Snapshots(comp)
+	for _, s := range ss {
+		items = append(items, "restore "+s.Name)
+		desc = append(desc, s.At.Format("2006-01-02 15:04")+"  "+viz.Human(float64(s.Size), "B"))
+	}
+	m.pick(comp+": snapshots", items, desc, 0, false, func(l []string) tea.Cmd {
+		if len(l) == 0 {
+			return nil
+		}
+		switch choice := l[0]; {
+		case choice == "snapshot now":
+			return m.do("snapshot "+comp, func(ctx context.Context) error {
+				_, err := m.app.TakeSnapshot(ctx, comp, "", io.Discard)
+				return err
+			})
+		case choice == "seed":
+			return m.act("seed "+comp, false, func(ctx context.Context) error { return m.app.SeedData(ctx, comp, io.Discard) })
+		default:
+			name := strings.TrimPrefix(choice, "restore ")
+			return m.act("restore "+comp+" from "+name+" (replaces its data)", true, func(ctx context.Context) error {
+				return m.app.RestoreSnapshot(ctx, comp, name, io.Discard)
+			})
+		}
+	})
 }
 
 // editable is whether D and e work on what the right side shows: rows of a walk (not a query's) of
@@ -630,6 +663,11 @@ func (t *dataTab) key(m *model, k tea.KeyMsg) tea.Cmd {
 		}
 	}
 	switch k.String() {
+	case "S":
+		if c.kind == string(core.KindDatabase) {
+			t.snapshotMenu(m, c.name)
+		}
+		return nil
 	case "/":
 		m.ask("filter (text, or a glob like *word*)", t.filter, func(v string) tea.Cmd {
 			t.filter = strings.TrimSpace(v)

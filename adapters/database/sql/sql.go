@@ -5,10 +5,12 @@ package sql
 import (
 	"context"
 	gosql "database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -29,9 +31,12 @@ func init() {
 	plugin.Register(core.KindDatabase, "sql", "SQL servers: postgres, mssql, mysql (driver option)", New)
 }
 
+// Seed is one step of filling a database: a SQL file run on it, or a shell command run from the
+// project directory with RIG_DB_ADDR (host:port, reachable from here) and RIG_DB_NAME set.
 type Seed struct {
-	File string `yaml:"file"`
-	DB   string `yaml:"db"`
+	File    string `yaml:"file"`
+	Command string `yaml:"command"`
+	DB      string `yaml:"db"`
 }
 
 type Options struct {
@@ -41,7 +46,9 @@ type Options struct {
 	Password string            `yaml:"password"`
 	Database string            `yaml:"database"`
 	Params   map[string]string `yaml:"params"`
-	Seeds    []Seed            `yaml:"seeds"`
+	// Seed fills the database: rig data seed, and rig up when it starts the database empty.
+	Seed  []Seed `yaml:"seed"`
+	Seeds []Seed `yaml:"seeds"` // the old name of seed
 	// Clear holds the statements `clear` runs to empty the run's data without recreating the database.
 	Clear []string `yaml:"clear"`
 }
@@ -133,6 +140,7 @@ func New(env core.Env, c *spec.Component) (any, error) {
 		return nil, fmt.Errorf("driver %q: have postgres, mssql, mysql", d.opt.Driver)
 	}
 	d.dialect = dl
+	d.opt.Seed = append(d.opt.Seed, d.opt.Seeds...)
 	return d, nil
 }
 
@@ -245,6 +253,11 @@ func (d *DB) Exec(ctx context.Context, db, q string) (int64, error) {
 	if err := core.Writable(d.env); err != nil {
 		return 0, err
 	}
+	return d.exec(ctx, db, q)
+}
+
+// exec is Exec without the read-only check, for what changes nothing (a backup).
+func (d *DB) exec(ctx context.Context, db, q string) (int64, error) {
 	p, err := d.pool(ctx, db)
 	if err != nil {
 		return 0, err
@@ -298,12 +311,7 @@ func (d *DB) DropDatabase(ctx context.Context, name string) error {
 	if !nameRe.MatchString(name) {
 		return fmt.Errorf("database name %q: letters, digits, _ and - only", name)
 	}
-	d.mu.Lock()
-	if p, ok := d.pools[name]; ok {
-		_ = p.Close()
-		delete(d.pools, name)
-	}
-	d.mu.Unlock()
+	d.closePool(name)
 	for _, stmt := range d.dialect.drop {
 		if _, err := d.Exec(ctx, d.adminDB(), fmt.Sprintf(stmt, name)); err != nil {
 			return err
@@ -325,31 +333,15 @@ func (d *DB) RunQuery(ctx context.Context, q string) (core.Table, error) {
 
 func (d *DB) Actions() []core.Action {
 	return []core.Action{
-		{Name: "seed", Mutate: true, Help: "run the configured seed files, or: seed <file.sql> [db]", Run: func(ctx context.Context, args []string, out io.Writer) error {
-			seeds := d.opt.Seeds
-			if len(args) > 0 {
-				s := Seed{File: args[0]}
-				if len(args) > 1 {
-					s.DB = args[1]
-				}
-				seeds = []Seed{s}
+		{Name: "seed", Mutate: true, Help: "run the configured seed, or: seed <file.sql> [db]", Run: func(ctx context.Context, args []string, out io.Writer) error {
+			if len(args) == 0 {
+				return d.Seed(ctx, out)
 			}
-			for _, s := range seeds {
-				path := s.File
-				if !filepath.IsAbs(path) {
-					path = filepath.Join(d.env.Project().Dir, path)
-				}
-				raw, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				n, err := d.Exec(ctx, s.DB, string(raw))
-				if err != nil {
-					return fmt.Errorf("%s: %w", s.File, err)
-				}
-				fmt.Fprintf(out, "seeded %s (%d rows)\n", s.File, n)
+			s := Seed{File: args[0]}
+			if len(args) > 1 {
+				s.DB = args[1]
 			}
-			return nil
+			return d.seed(ctx, []Seed{s}, out)
 		}},
 		{Name: "clear", Mutate: true, Help: "run the configured clear statements", Run: func(ctx context.Context, args []string, out io.Writer) error {
 			for _, q := range d.opt.Clear {
@@ -377,4 +369,77 @@ func goBatches(s string) []string {
 		}
 	}
 	return out
+}
+
+// Seed runs the configured seed steps in order.
+func (d *DB) Seed(ctx context.Context, out io.Writer) error {
+	if len(d.opt.Seed) == 0 {
+		return errors.New("no seed: give the component seed: [{file: x.sql}] or [{command: ...}]")
+	}
+	return d.seed(ctx, d.opt.Seed, out)
+}
+
+func (d *DB) seed(ctx context.Context, seeds []Seed, out io.Writer) error {
+	if err := core.Writable(d.env); err != nil {
+		return err
+	}
+	for _, s := range seeds {
+		if s.Command != "" {
+			addr, err := d.env.Resolve(ctx, d.opt.Addr)
+			if err != nil {
+				return err
+			}
+			db := s.DB
+			if db == "" {
+				db = d.dbName()
+			}
+			fmt.Fprintf(out, "seed: %s\n", s.Command)
+			cmd := exec.CommandContext(ctx, "sh", "-c", s.Command)
+			cmd.Dir = d.env.Project().Dir
+			cmd.Env = append(os.Environ(), "RIG_DB_ADDR="+strings.TrimPrefix(addr, "tcp://"), "RIG_DB_NAME="+db)
+			cmd.Stdout, cmd.Stderr = out, out
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("seed %q: %w", s.Command, err)
+			}
+			continue
+		}
+		path := s.File
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(d.env.Project().Dir, path)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		n, err := d.Exec(ctx, s.DB, string(raw))
+		if err != nil {
+			return fmt.Errorf("%s: %w", s.File, err)
+		}
+		fmt.Fprintf(out, "seeded %s (%d rows)\n", s.File, n)
+	}
+	return nil
+}
+
+// Fresh is whether the database has no tables of its own yet (or does not exist), waiting up to
+// 30s for a server that is still starting.
+func (d *DB) Fresh(ctx context.Context) (bool, error) {
+	if len(d.opt.Seed) == 0 {
+		return false, nil
+	}
+	q := map[string]string{
+		"postgres": "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')",
+		"mysql":    "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE()",
+		"mssql":    "SELECT count(*) FROM sys.tables",
+	}[d.opt.Driver]
+	var err error
+	for start := time.Now(); time.Since(start) < 30*time.Second; time.Sleep(time.Second) {
+		var t core.Table
+		if t, err = d.Query(ctx, "", q); err == nil && len(t.Rows) == 1 {
+			return t.Rows[0][0] == "0", nil
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return false, err
 }

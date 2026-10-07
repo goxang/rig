@@ -101,7 +101,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `pprof` | `port`, `path`, `summary` |
 | `command` (profiler) | `kinds: {cpu: {command, where: service|host, fetch, format, ext}}`, `pid` |
 | `delve` | `dlv`, `port`, `pid` |
-| `sql` | `driver` (postgres, mssql, mysql), `addr`, `user`, `password`, `database`, `params`, `seeds`, `clear` |
+| `sql` | `driver` (postgres, mssql, mysql), `addr`, `user`, `password`, `database`, `params`, `clear`, `seed: [{file, db} or {command}]` (run by `rig data seed`, and by `rig up` when it starts the database empty; a command gets `$RIG_DB_ADDR`, `$RIG_DB_NAME`). `rig data snapshot`/`restore` use pg_dump/pg_restore or mysqldump/mysql on this machine, else inside the database's container; SQL Server backs up to its container's disk |
 | `redis` | `addr`, `password`, `db`, `unsafe` |
 | `rabbitmq` | `addr` (management API), `user`, `password`, `vhost` |
 | `kafka` | `addr` (brokers, comma separated), `user`, `password`, `sasl` (plain, scram-sha-256, scram-sha-512), `tls`; queries: `topics`, `groups`, `lag <group>`, `tail <topic> [n]` |

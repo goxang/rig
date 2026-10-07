@@ -22,6 +22,8 @@ rig watch api                 # rebuild and restart as the sources change (ctrl+
 rig doctor                    # what this environment lacks: tools, cluster, ${VARS}, ports, components (--json)
 rig vars set MAIN_DB=x        # manifest variables per environment; rig setenv api K=V for env
 rig data db Switch tables     # walk databases and caches
+rig data snapshot db before   # pg_dump/mysqldump/BACKUP into .rig/<env>/snapshots (S on the Data screen)
+rig data restore db before    # put it back; rig data seed db runs the db's seed:
 rig logs -E '(?i)timeout' api # regex over logs
 rig alerts                    # what is over its thresholds
 rig test unit --race          # a test suite; --failed reruns the failures, -o file saves the report
@@ -36,7 +38,8 @@ rig mcp                       # MCP server for AI agents
 ```
 
 `-e <env>` (or `$RIG_ENV`) picks the environment. A `protected: true` environment refuses changes
-without `--yes`; pushing over an existing image tag needs it too. In the TUI the confirmation is the `--yes`.
+without `--yes`; pushing over an existing image tag needs it too. A `readonly: true` one refuses them
+even with it. In the TUI the confirmation is the `--yes`.
 
 ## Terminal UI
 

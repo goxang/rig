@@ -572,3 +572,18 @@ type LoadScaler interface {
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
+
+// Snapshotter saves a data component's contents to a file and puts them back, with the server's own
+// tools. Restore replaces what is there.
+type Snapshotter interface {
+	Snapshot(ctx context.Context, file string, log io.Writer) error
+	Restore(ctx context.Context, file string, log io.Writer) error
+}
+
+// Seeder fills a database with its seed (SQL files or commands). Fresh tells whether it holds no
+// tables yet; Host is the rig service it runs in ("" for none), which rig up seeds when it starts empty.
+type Seeder interface {
+	Seed(ctx context.Context, log io.Writer) error
+	Fresh(ctx context.Context) (bool, error)
+	Host() string
+}

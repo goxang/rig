@@ -188,6 +188,15 @@ func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
 	if err := a.settle(ctx, deployed, o.Settle, out); err != nil {
 		return err
 	}
+	started := map[string]bool{}
+	for _, layer := range layers {
+		for _, n := range layer {
+			started[n] = true
+		}
+	}
+	if err := a.seedFresh(ctx, started, out); err != nil {
+		return err
+	}
 	if o.Tag != "" && !o.Build {
 		return a.SetState(ctx, map[string]string{"tag": o.Tag})
 	}
