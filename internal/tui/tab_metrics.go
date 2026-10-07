@@ -100,10 +100,10 @@ func (t *metricsTab) interval() time.Duration { return refreshes[t.every] }
 
 func (t *metricsTab) hints() [][2]string {
 	if t.zoom {
-		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"y", "copy query"},
+		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+alt+←→↑↓", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"⇧←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"ctrl+←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {
@@ -792,9 +792,9 @@ func value(l viz.Line, at time.Time, ok bool) float64 {
 func thresholdColor(p spec.Panel, v float64, def lipgloss.Color) lipgloss.Color {
 	switch {
 	case p.Crit != nil && v >= *p.Crit:
-		return lipgloss.Color("#F2495C")
+		return lipgloss.Color(theme.Red)
 	case p.Warn != nil && v >= *p.Warn:
-		return lipgloss.Color("#FF9830")
+		return lipgloss.Color(theme.Amber)
 	}
 	return def
 }
@@ -1381,7 +1381,7 @@ func statBody(p spec.Panel, ls []viz.Line, hidden map[int]bool, at time.Time, ha
 	if len(vis) == 1 || h < 4 {
 		l := ls[vis[0]]
 		v := value(l, at, hasAt)
-		c := thresholdColor(p, v, cGreen)
+		c := thresholdColor(p, v, lipgloss.Color(theme.Green))
 		text := viz.Human(v, p.Unit)
 		var spark []float64
 		for _, pt := range l.Points {
@@ -1444,7 +1444,7 @@ func gaugeBody(p spec.Panel, ls []viz.Line, hidden map[int]bool, at time.Time, h
 	frac := func(v float64) float64 { return (v - lo) / (hi - lo) }
 	if len(vis) == 1 {
 		v := vals[0]
-		c := thresholdColor(p, v, cGreen)
+		c := thresholdColor(p, v, lipgloss.Color(theme.Green))
 		b := big(viz.Human(v, p.Unit), c)
 		if lipgloss.Width(b) > w || h < 5 {
 			b = lipgloss.NewStyle().Foreground(c).Bold(true).Render(viz.Human(v, p.Unit))
@@ -1647,4 +1647,4 @@ func wrap(s string, w int) string {
 	return b.String()
 }
 
-func (t *metricsTab) atRoot() bool { return !t.zoom && t.cursor < 0 }
+func (t *metricsTab) atRoot() bool { return !t.zoom && t.cursor < 0 && !t.hl }

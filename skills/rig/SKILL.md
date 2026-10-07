@@ -6,8 +6,9 @@ description: Set up and run this project with rig (rig.yaml): write or extend ri
 # rig
 
 rig runs a project's services and infrastructure (local processes, docker, kind, Kubernetes) from one
-`rig.yaml`. The full key reference is `rig docs config` (MCP: `rig_docs`); read the section you
-touch before editing.
+`rig.yaml`. The full key reference is `rig docs config` (MCP: `rig_docs`). Read only the section you
+touch before editing: `rig docs <words>` (MCP: `rig_docs` with `search`) prints just the sections
+holding them, e.g. `rig docs tasks steps`, `rig docs load generator`. Features the UI has: `rig docs guide <screen>`.
 
 ## Start a project
 

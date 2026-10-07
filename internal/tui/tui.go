@@ -88,7 +88,9 @@ type model struct {
 	statusErr bool
 	statusAt  time.Time
 	// errLog keeps the last errors, newest last; ! shows them in full
-	errLog     []loggedErr
+	errLog []loggedErr
+	// drafts are inputs left with esc, by label, given back when the same input opens again
+	drafts     map[string]draft
 	showErrors bool
 	// jobs are the operations started this session (act, do, tasks), shown with their output under !
 	jobsMu    sync.Mutex
@@ -180,10 +182,16 @@ type confirm struct {
 	always tea.Cmd
 }
 
+type draft struct {
+	From string `json:"from"`
+	Text string `json:"text"`
+}
+
 type prompt struct {
-	label  string
-	input  textinput.Model
-	submit func(string) tea.Cmd
+	label   string
+	initial string
+	input   textinput.Model
+	submit  func(string) tea.Cmd
 	// hint, when set, is what the AI completes the input with: the language and where it runs
 	hint    string
 	seq     int
@@ -359,6 +367,9 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 		return fmt.Errorf("no environment: define one under environments: and set default")
 	}
 	a.RememberEnv()
+	if t, err := LoadTheme(CurrentTheme()); err == nil {
+		applyTheme(t)
+	}
 	m := &model{ctx: ctx, app: a, opened: map[int]bool{}, all: allTabs(), simple: startSimple(a), refreshed: map[int]time.Time{}, hx: -1, hy: -1, splitFrac: loadSplits()}
 	m.tabs = newTabs(a, m.all, m.simple)
 	m.sched = newScheduler(a)
@@ -464,6 +475,23 @@ func (m *model) back() (tea.Cmd, bool) {
 	return cmd, true
 }
 
+// home is where esc goes from a screen with nothing left to close: the Services list, every service.
+func (m *model) home() tea.Cmd {
+	for i, t := range m.tabs {
+		s, ok := t.(*servicesTab)
+		if !ok {
+			continue
+		}
+		if s.section != "" && s.list != nil {
+			s.setSection("")
+		}
+		if i != m.active {
+			return m.openTab(i)
+		}
+	}
+	return nil
+}
+
 func (m *model) openTab(i int) tea.Cmd {
 	m.trail = nil
 	m.active = i
@@ -567,14 +595,17 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 func (m *model) ask(label, value string, submit func(string) tea.Cmd) {
 	in := newInput()
 	in.SetValue(value)
+	if d, ok := m.drafts[label]; ok && d.From == value {
+		in.SetValue(d.Text)
+	}
 	in.CursorEnd()
 	in.Focus()
-	m.prompt = &prompt{label: label, input: in, submit: submit}
+	m.prompt = &prompt{label: label, initial: value, input: in, submit: submit}
 }
 
 type loggedErr struct {
-	at   time.Time
-	text string
+	At   time.Time `json:"at"`
+	Text string    `json:"text"`
 }
 
 func (m *model) setStatus(s string, err bool) {
@@ -595,15 +626,27 @@ func (m *model) errorsView(h int) string {
 	var b strings.Builder
 	for i := len(m.errLog) - 1; i >= 0; i-- {
 		e := m.errLog[i]
-		b.WriteString(sDim.Render(e.at.Format("15:04:05")) + "\n" + sRed.Render(wordWrap(e.text, w-4)) + "\n\n")
+		b.WriteString(sDim.Render(e.At.Format("15:04:05")) + "\n" + sRed.Render(wordWrap(e.Text, w-4)) + "\n\n")
 	}
+	var keys [][2]string
+	title, border := "activity · errors, newest first", cRed
 	if len(m.errLog) == 0 {
-		b.WriteString(sGreen.Render("no errors this session") + "\n\n")
+		title, border = "activity", cAccent
+		if len(m.jobList()) == 0 {
+			b.WriteString("nothing started and nothing failed yet\n\n" + sDim.Render("what you start (tasks, deploys, restarts, scaling) shows here with its output, and so do errors") + "\n\n")
+		} else {
+			b.WriteString(sGreen.Render("no errors") + "\n\n")
+		}
+	} else {
+		keys = append(keys, [2]string{"y", "copy them all"})
 	}
-	b.WriteString(sDim.Render("y copies them all · tab operations · esc closes"))
+	if len(m.jobList()) > 0 {
+		keys = append(keys, [2]string{"tab", "operations"})
+	}
+	b.WriteString(keyHints(append(keys, [2]string{"esc", "close"})))
 	body := clip(b.String(), w, max(3, h-6))
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cRed).Padding(1, 2).Width(w).
-		Render(sTitle.Render("errors (newest first)") + "\n\n" + body)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(1, 2).Width(w).
+		Render(sTitle.Render(title) + "\n\n" + body)
 }
 
 // errorPanel shows an error that does not fit the status line wrapped in a box above the footer.
@@ -1165,12 +1208,13 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return m.quitTwice("ctrl+c", again)
 	}
 	m.sel = nil
-	// alt+arrows switch screens from anywhere: they close what is open over the screen first. Some
-	// terminals keep alt+arrows for themselves, so ctrl+arrows do the same where they move no cursor.
+	// alt+←→ switch screens from anywhere, closing what is open over the screen first; ⇧←→ do the
+	// same where they select no text. ctrl+←→ move the screen's own tabs: screens handle them as ⇧←→.
 	s := k.String()
-	ctrlArrow := (s == "ctrl+left" || s == "ctrl+right") && m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) &&
-		len(m.tabs) > 0 && !m.tabs[m.active].typing()
-	if (s == "alt+left" || s == "alt+right" || ctrlArrow) && len(m.tabs) > 0 {
+	free := m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) && len(m.tabs) > 0 && !m.tabs[m.active].typing()
+	if free && m.picker == nil && (s == "ctrl+left" || s == "ctrl+right") {
+		k = tea.KeyMsg{Type: map[bool]tea.KeyType{true: tea.KeyShiftLeft, false: tea.KeyShiftRight}[s == "ctrl+left"]}
+	} else if (s == "alt+left" || s == "alt+right" || free && (s == "shift+left" || s == "shift+right")) && len(m.tabs) > 0 {
 		if m.confirm != nil && m.confirm.cancel != nil {
 			m.confirm.cancel()
 		}
@@ -1183,7 +1227,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.chat.focus = false
 		}
 		step := 1
-		if s == "alt+left" || s == "ctrl+left" {
+		if s == "alt+left" || s == "shift+left" {
 			step = len(m.tabs) - 1
 		}
 		return batch(esc, m.openTab((m.active+step)%len(m.tabs)))
@@ -1219,6 +1263,12 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "esc":
 			p := m.prompt
 			m.prompt = nil
+			if v := p.input.Value(); v != p.initial && p.input.EchoMode == textinput.EchoNormal {
+				if m.drafts == nil {
+					m.drafts = map[string]draft{}
+				}
+				m.drafts[p.label] = draft{p.initial, v}
+			}
 			if p.escape != nil {
 				return p.escape()
 			}
@@ -1236,6 +1286,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 				}
 				v = p.described
 			}
+			delete(m.drafts, p.label)
 			m.prompt = nil
 			cmd := p.submit(v)
 			if m.prompt != p {
@@ -1344,6 +1395,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			return m.fetchKubeconfig(cmp.Or(m.kubeEnv, m.app.Env.Name))
 		case "ctrl+w":
 			return m.toggleWatch()
+		case "ctrl+p":
+			m.pickTheme()
+			return nil
 		case "E":
 			m.pickEnv()
 			return nil
@@ -1382,6 +1436,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "esc", "backspace":
 			if cmd, ok := m.back(); ok {
 				return cmd
+			}
+			if r, ok := t.(rooted); ok && s == "esc" && r.atRoot() {
+				return m.home()
 			}
 		}
 	}
@@ -1479,6 +1536,44 @@ func (m *model) quit() tea.Cmd {
 // pickTask runs a rig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
 // may read input, so the TUI steps aside until it ends. Enter on the confirmation is the task's --yes.
 // prefix narrows the list (the KV screen's kv-*).
+// pickTheme previews each theme as the cursor lands on it; enter keeps it for good, esc puts back the old one.
+func (m *model) pickTheme() {
+	was := theme
+	names := ThemeNames()
+	sel := max(0, slices.Index(names, CurrentTheme()))
+	m.pick("theme", names, nil, sel, false, func(chosen []string) tea.Cmd {
+		if len(chosen) == 0 {
+			return nil
+		}
+		if err := UseTheme(chosen[0]); err != nil {
+			applyTheme(was)
+			m.setStatus(err.Error(), true)
+			return nil
+		}
+		m.setStatus("theme "+chosen[0]+" (rig theme --save to edit a copy)", false)
+		return nil
+	})
+	m.picker.back = func() tea.Cmd {
+		applyTheme(was)
+		return nil
+	}
+	m.picker.preview = func(name string) string {
+		t, err := LoadTheme(name)
+		if err != nil {
+			return sRed.Render(err.Error())
+		}
+		applyTheme(t)
+		sw := func(c, label string) string {
+			return lipgloss.NewStyle().Background(lipgloss.Color(c)).Render("    ") + " " + label
+		}
+		return strings.Join([]string{
+			sw(t.Accent, "accent") + "   " + sw(t.Green, "ok") + "   " + sw(t.Amber, "warn") + "   " + sw(t.Red, "error") + "   " + sw(t.Purple, "purple"),
+			sAccent.Render("accent text") + "  " + sDim.Render("dim text") + "  " + sSelected.Render(" selected row ") + " " + sCursor.Render(" cursor "),
+			"fonts and their size are the terminal's; rig sets colours only",
+		}, "\n")
+	}
+}
+
 func (m *model) pickTask(prefix string) {
 	var names []string
 	for _, n := range m.app.TaskNames() {
@@ -1506,6 +1601,53 @@ func (m *model) pickTask(prefix string) {
 	if groups := taskGroups(m.app.Tasks(), names); len(groups) > 2 {
 		m.picker.groups = groups
 	}
+	m.picker.preview = func(name string) string {
+		return taskDetail(m.app.Tasks()[name], m.app.TaskHelp(name), m.app.Spec.SecretValues())
+	}
+}
+
+// taskDetail is everything a task will do, for a look before running it: its args, whether it
+// asks first, and each step with what it is for and its commands.
+func taskDetail(t spec.Task, help string, secrets map[string]string) string {
+	var b strings.Builder
+	b.WriteString(help + "\n\n")
+	switch {
+	case t.Confirm:
+		b.WriteString(sAmber.Render("asks before the first step") + "\n")
+	case t.ReadOnly:
+		b.WriteString(sGreen.Render("read only: changes nothing") + "\n")
+	}
+	for _, a := range t.Args {
+		line := "  " + sKey.Render(a.Name) + "  " + a.Help
+		if a.Default != "" {
+			line += sDim.Render("  (default " + a.Default + ")")
+		}
+		b.WriteString(line + "\n")
+	}
+	for i, st := range t.Steps {
+		for n, v := range secrets {
+			if len(v) >= 6 { // shorter values (a user name like admin) hit ordinary words: db-admin
+				st = strings.ReplaceAll(st, v, "${"+n+"}")
+			}
+		}
+		what := ""
+		if i < len(t.StepHelp) {
+			what = t.StepHelp[i]
+		}
+		num := sAccent.Render(fmt.Sprintf("%2d ", i+1))
+		if what != "" {
+			b.WriteString(num + what + "\n")
+			num = "   "
+		}
+		for _, l := range strings.Split(strings.TrimSpace(st), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(l), "#") && what != "" {
+				continue
+			}
+			b.WriteString(num + sDim.Render(l) + "\n")
+			num = "   "
+		}
+	}
+	return b.String()
 }
 
 // taskGroups are the task picker's tabs: "all", then each task's group, else the first word of its
@@ -2142,9 +2284,9 @@ var screenHelp = map[string]string{
 // unchanged from before, just no longer rendered as one fixed block.
 func (m *model) helpLines() []string {
 	rows := [][2]string{
-		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
-		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
-		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
+		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
+		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
+		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder
 	for _, r := range rows {

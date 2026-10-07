@@ -32,6 +32,10 @@ type picker struct {
 	group  int
 	// back, when set, is where esc returns: the picker or input this one was opened from
 	back func() tea.Cmd
+	// preview, when set, shows what the selected item is in full under the list (⇧↑↓ scroll it)
+	preview       func(item string) string
+	pvOff, pvRows int
+	pvFor         string
 }
 
 type pickGroup struct {
@@ -52,8 +56,7 @@ func (m *model) pickMany(title string, items, desc, chosen []string, done func([
 }
 
 func (p *picker) visible() []int {
-	var out []int
-	f := strings.ToLower(p.filter)
+	var exact, loose []int
 	for i, it := range p.items {
 		if p.group > 0 && !p.groups[p.group].items[it] {
 			continue
@@ -62,11 +65,14 @@ func (p *picker) visible() []int {
 		if i < len(p.desc) {
 			d = p.desc[i]
 		}
-		if f == "" || strings.Contains(strings.ToLower(it+" "+d), f) {
-			out = append(out, i)
+		switch matchTier(it, d, p.filter) {
+		case 0:
+			exact = append(exact, i)
+		case 1:
+			loose = append(loose, i)
 		}
 	}
-	return out
+	return append(exact, loose...)
 }
 
 func (p *picker) finish(m *model) tea.Cmd {
@@ -110,11 +116,15 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "enter":
 		return p.finish(m)
-	case "tab", "right", "shift+tab", "left":
+	case "tab", "right", "ctrl+right", "shift+tab", "left", "ctrl+left":
 		if n := len(p.groups); n > 0 {
-			d := map[bool]int{true: 1, false: n - 1}[k.String() == "tab" || k.String() == "right"]
+			d := map[bool]int{true: 1, false: n - 1}[k.String() == "tab" || k.String() == "right" || k.String() == "ctrl+right"]
 			p.group, p.sel = (p.group+d)%n, 0
 		}
+	case "shift+up":
+		p.pvOff = max(0, p.pvOff-3)
+	case "shift+down":
+		p.pvOff += 3
 	case "up":
 		p.sel = max(0, p.sel-1)
 	case "down":
@@ -213,13 +223,17 @@ func (p *picker) hints() string {
 	if len(p.groups) > 0 {
 		h = append(h, sKey.Render("tab ←→")+sDim.Render(" group"))
 	}
+	if p.preview != nil {
+		h = append(h, sKey.Render("⇧↑↓")+sDim.Render(" scroll details"))
+	}
 	return strings.Join(append(h, sKey.Render("enter")+sDim.Render(" ok"), sKey.Render("esc")+sDim.Render(" cancel")), "  ")
 }
 
 func (p *picker) view(m *model, h int) string {
 	vis := p.visible()
 	// sized on every item, not the ones the filter or group shows, so the box stays put
-	rows := min(len(p.items), max(3, h-8-min(len(p.groups), 1)))
+	p.pvRows = p.previewRows(h)
+	rows := min(len(p.items), max(3, h-8-min(len(p.groups), 1)-p.pvRows))
 	off := scroll(p.sel, 0, rows, len(vis))
 	if p.sel >= rows {
 		off = p.sel - rows + 1
@@ -236,6 +250,9 @@ func (p *picker) view(m *model, h int) string {
 	strip := 0
 	for _, g := range p.groups {
 		strip += lipgloss.Width(g.name) + 6 // padding, a count and the bar
+	}
+	if p.preview != nil {
+		w = max(w, 100)
 	}
 	w = min(max(w, strip), m.w-8)
 	top := 4 // rows start below the border, padding, the title line and a blank one
@@ -291,7 +308,8 @@ func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 		}
 		line := mark + p.items[i]
 		if i < len(p.desc) && p.desc[i] != "" {
-			line += "  " + sDim.Render(p.desc[i])
+			nw := p.nameWidth(w)
+			line = truncate(padRight(truncate(line, nw+2), nw+4)+sDim.Render(p.desc[i]), w)
 		}
 		line = padRight(line, w)
 		if off+r == p.sel {
@@ -306,6 +324,28 @@ func (p *picker) box(m *model, w, rows, off int, vis []int, sx, sy int) string {
 	}
 	for r := max(1, len(vis)-off); r < rows; r++ {
 		b.WriteString(" \n")
+	}
+	if n := p.pvRows; n > 0 {
+		b.WriteString(sDim.Render(strings.Repeat("─", w)) + "\n")
+		item := ""
+		if p.sel < len(vis) {
+			item = p.items[vis[p.sel]]
+		}
+		if item != p.pvFor {
+			p.pvFor, p.pvOff = item, 0
+		}
+		var lines []string
+		if item != "" {
+			lines = strings.Split(lipgloss.NewStyle().Width(w).Render(p.preview(item)), "\n")
+		}
+		p.pvOff = min(p.pvOff, max(0, len(lines)-n))
+		for r := 0; r < n; r++ {
+			l := ""
+			if p.pvOff+r < len(lines) {
+				l = truncate(lines[p.pvOff+r], w)
+			}
+			b.WriteString(l + "\n")
+		}
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).Render(strings.TrimRight(b.String(), "\n"))
 }
@@ -368,4 +408,21 @@ func overlayAt(base, box string, x, y int) string {
 		lines[y+i] = left + "\x1b[0m" + bl + "\x1b[0m" + ansi.Cut(under, x+ansi.StringWidth(bl), ansi.StringWidth(under))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// nameWidth is the name column's width when items have descriptions: the widest name, at most
+// half the box, so descriptions line up as a second column.
+func (p *picker) nameWidth(w int) int {
+	n := 0
+	for _, it := range p.items {
+		n = max(n, lipgloss.Width(it))
+	}
+	return min(n, w/2)
+}
+
+func (p *picker) previewRows(h int) int {
+	if p.preview == nil {
+		return 0
+	}
+	return max(6, (h-10)/2)
 }

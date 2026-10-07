@@ -39,7 +39,23 @@ type Session struct {
 	DataPaths map[string][]string      `json:"data_paths,omitempty"`
 	Dashboard int                      `json:"dashboard,omitempty"`
 	Load      map[string]savedLoadHist `json:"load,omitempty"`
+
+	Sorts    map[string]gridSort `json:"sorts,omitempty"`
+	Drafts   map[string]draft    `json:"drafts,omitempty"`
+	Activity []savedJob          `json:"activity,omitempty"`
+	Errors   []loggedErr         `json:"errors,omitempty"`
 }
+
+// savedJob is an operation of the activity view (!) as a session keeps it: its last lines only.
+type savedJob struct {
+	Label string    `json:"label"`
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+	Err   string    `json:"err,omitempty"`
+	Lines []string  `json:"lines,omitempty"`
+}
+
+const savedJobLines = 300
 
 type savedResult struct {
 	Table core.Table    `json:"table"`
@@ -109,6 +125,19 @@ func (m *model) snapshot() *Session {
 		s.Results[n] = sr
 	}
 	s.Runs = sc.runs
+	s.Sorts, s.Drafts, s.Errors = gridSorts, m.drafts, m.errLog
+	s.Activity = nil
+	for _, j := range m.jobList() {
+		end, _, err := j.state()
+		sj := savedJob{Label: j.label, Start: j.start, End: end, Lines: j.output()}
+		if end.IsZero() {
+			sj.End, sj.Err = time.Now(), "still running when the session was saved"
+		} else if err != nil {
+			sj.Err = err.Error()
+		}
+		sj.Lines = sj.Lines[max(0, len(sj.Lines)-savedJobLines):]
+		s.Activity = append(s.Activity, sj)
+	}
 	return s
 }
 
@@ -158,6 +187,19 @@ func (m *model) restore(s *Session) {
 	}
 	sc.runs = s.Runs
 	sc.mu.Unlock()
+	for id, st := range s.Sorts {
+		gridSorts[id] = st
+	}
+	m.drafts, m.errLog = s.Drafts, s.Errors
+	m.jobsMu.Lock()
+	for _, sj := range s.Activity {
+		j := &job{label: sj.Label, start: sj.Start, end: sj.End, lines: sj.Lines}
+		if sj.Err != "" {
+			j.err = errors.New(sj.Err)
+		}
+		m.jobs = append(m.jobs, j)
+	}
+	m.jobsMu.Unlock()
 	for _, t := range m.tabs {
 		switch t := t.(type) {
 		case *logsTab:

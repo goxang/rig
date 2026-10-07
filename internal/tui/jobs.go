@@ -308,7 +308,7 @@ func (m *model) activityKey(k tea.KeyMsg) tea.Cmd {
 		if j == nil {
 			var all []string
 			for _, e := range m.errLog {
-				all = append(all, e.at.Format("15:04:05")+" "+e.text)
+				all = append(all, e.At.Format("15:04:05")+" "+e.Text)
 			}
 			copyText(strings.Join(all, "\n"))
 			m.setStatus("copied the errors", false)

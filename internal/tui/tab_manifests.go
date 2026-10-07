@@ -154,7 +154,7 @@ func (t *manifestsTab) hints() [][2]string {
 		}
 		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"esc", back}}
 	}
-	return [][2]string{{"t ⇧←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
+	return [][2]string{{"t ctrl+←→", "folders/objects"}, {"enter esc", "in/out"}, {"→ tab", "edit fields"}, {"v enter", "go to its service"}, {"e", "edit (saved into its file)"}, {"s", "sync file from the cluster"}, {"L", "edit on the cluster"},
 		{"a", "apply"}, {"/", "search fields and values"}, {"f", "filter"}, {"space", "mark"}, {"n", "new service"}, {"i/I", "issues file/all"}, {"u", "also what no service deploys"}, {"d", "pick folders"}, {"r", "rescan"}, {"o", "editor"}}
 }
 
@@ -204,7 +204,7 @@ func (t *manifestsTab) objects() []*manifest.Object {
 		if t.tree && t.file != "" && o.File != t.file || !t.shown(o) {
 			continue
 		}
-		if t.filter == "" || strings.Contains(strings.ToLower(o.ID()+" "+o.File), strings.ToLower(t.filter)) {
+		if fuzzy(o.ID()+" "+o.File, t.filter) {
 			out = append(out, o)
 		}
 	}
@@ -248,7 +248,7 @@ func (t *manifestsTab) entries() []entry {
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		if t.filter != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(t.filter)) {
+		if !fuzzy(rel, t.filter) {
 			continue
 		}
 		if first, _, deeper := strings.Cut(rel, string(filepath.Separator)); deeper {
@@ -912,4 +912,8 @@ func (t *manifestsTab) gotoService(m *model) tea.Cmd {
 		return nil
 	}
 	return m.showService(svc)
+}
+
+func (t *manifestsTab) atRoot() bool {
+	return t.issues == "" && t.filter == "" && (!t.tree || t.file == "" && (t.cwd == "" || t.cwd == filepath.Dir(t.cwd)))
 }

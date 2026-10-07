@@ -46,7 +46,7 @@ even with it. In the TUI the confirmation is the `--yes`.
 ## Terminal UI
 
 Screens load nothing until opened, and only the one showing refreshes. Everything is a sortable grid
-(`ctrl+shift+←→` pick the column, `ctrl+shift+↑↓` or `alt+↑↓` order it, or click a header) and works with the mouse. On a Kubernetes
+(`ctrl+alt+←→` pick the column, `ctrl+alt+↑↓` order it; `< > I`, `alt+↑↓` and `ctrl+shift+arrows` too, or click a header) and works with the mouse. On a Kubernetes
 cluster, dangerous changes (stop, deploy, delete, edits) ask first and `enter` confirms; local, docker
 and kind never ask. `?` shows the keys of the current screen.
 Drag over any text (results, queries, test output, the chat) to copy it; the selection stays inside the
@@ -67,8 +67,8 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
 `rig` opens on the environment it last showed (`-e` or `$RIG_ENV` picks another). Screens switch with
-`1`-`0` and `` ` `` (the eleventh), `alt+←→` or `ctrl+←→`, or a click on their name; tabs inside a screen
-(dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
+`1`-`0` and `` ` `` (the eleventh), `shift+←→` or `alt+←→`, or a click on their name; tabs inside a screen
+(dashboards, apps/infra, objects/folders, saved/history, suites, filters) switch with `ctrl+←→` and are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
 `T` runs a task from rig.yaml in the background, `ctrl+e` shows the environment (variables with secrets hidden, each
@@ -94,9 +94,18 @@ there types the answer. Several tasks can run at once. A question or an input op
 above the keys, which then show the keys that box takes; `esc` on it returns to the picker or box it
 came from. Opening a service shows its instances first: `enter` follows the picked one's log (or all
 of them), `esc` goes back to the instances, then to the list. A jump to another screen (a service's
-metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there. The help
+metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there; with no jump
+to walk back, `esc` goes home: the Services list, every service. An input left with `esc` keeps what was
+typed as a draft the next time it opens. `S` saves the session (and pins it): the screen, each grid's
+sort, drafts, query history and results, the activity view and the errors come back with it. The help
 (`?`) filters as you type. A border under the mouse lights up and drags to resize the panes. Errors a
 new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
+
+`ctrl+p` picks a colour theme, previewing each as you move (`rig theme` lists and sets them too):
+default, nord, dracula, gruvbox, catppuccin, mono, or your own. `rig theme --save mine nord` writes
+`~/.config/rig/themes/mine.yaml` to edit; a theme file sets `base:` and only the colours it changes,
+with `light:` for light terminals. `$RIG_THEME` overrides the choice for one run. Fonts belong to the
+terminal; rig sets colours only.
 
 A Kubernetes environment can name its cluster by address as well: `runtime: { context: local, server:
 https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has
@@ -214,7 +223,7 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 `rig load`, `rig data`, `rig alerts`.
 
 Tools: `rig_init` (draft or write rig.yaml for the project, with infrastructure presets), `rig_docs` (every
-rig.yaml key), `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
+rig.yaml key; `search` returns only the sections holding some words), `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
 `rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, `rig_ui` (acts in a rig UI that
 started the agent), `rig_file` (list, read, write, edit, move, delete inside the project; credentials and `.git`
 refused, delete needs `"confirm": true`), and `rig` for any other command.
@@ -222,4 +231,5 @@ Each runs the CLI, so protections apply: changes to a protected environment need
 
 `rig skill --install` puts a skill into `.claude/skills/rig` and `.agents/skills/rig`, so Claude Code, Codex,
 opencode and others know how to write and extend rig.yaml (services, infrastructure, `otel:`, `ui.tabs`,
-dashboards, tests) and check it with `rig env`; `rig docs config` is the reference they read.
+dashboards, tests) and check it with `rig env`; `rig docs config` is the reference they read, and `rig docs <words>`
+prints only the sections that hold them (`rig docs tasks steps`), across every doc.

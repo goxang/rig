@@ -62,7 +62,7 @@ func (t *tracesTab) hints() [][2]string {
 		return [][2]string{{"↑↓ wheel", "select span"}, {"y", "copy span"}, {"esc", "back to traces"}}
 	}
 	return [][2]string{{"enter", "walk spans"}, {"s", "service"}, {"o", "operation"}, {"m", "min duration"}, {"t", "time window"},
-		{"/", "text"}, {"e", "errors only"}, {"n", "limit"}, {"R", "refresh"}, {"a", "auto refresh"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+		{"/", "text"}, {"e", "errors only"}, {"n", "limit"}, {"R", "refresh"}, {"a", "auto refresh"}, {"ctrl+alt+←→↑↓", "sort"}}
 }
 
 func (t *tracesTab) interval() time.Duration {
@@ -74,7 +74,7 @@ func (t *tracesTab) interval() time.Duration {
 
 func (t *tracesTab) open(m *model) tea.Cmd {
 	t.list = newGrid("traces", col("TIME", 8), rcol("DURATION", 9), col("", 16), rcol("SPANS", 5), col("ROOT", 0), col("SERVICES", 0), col("", 5))
-	t.list.sortBy, t.list.desc = 0, true
+	t.list.sortDefault(0, true)
 	t.list.simple = []int{0, 1, 4, 6}
 	t.back, t.limit, t.auto = 1, 100, true
 	return t.refresh(m)
@@ -124,7 +124,7 @@ func (t *tracesTab) rows() []grow {
 			continue
 		}
 		svcs := strings.Join(s.Services, ",")
-		if text != "" && !strings.Contains(strings.ToLower(s.Root+" "+svcs+" "+s.ID), text) {
+		if !fuzzy(s.Root+" "+svcs+" "+s.ID, text) {
 			continue
 		}
 		bar := lipgloss.NewStyle().Foreground(viz.Palette[2]).Render(strings.Repeat("▇", max(1, int(float64(s.Duration)/float64(maxDur)*16))))
@@ -386,3 +386,5 @@ func (t *tracesTab) spansView(m *model, y, w, h int) string {
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, wf, panel("span", detail, dw, h, false))
 }
+
+func (t *tracesTab) atRoot() bool { return !t.inSpans }

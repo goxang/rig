@@ -39,7 +39,7 @@ func (t *hostsTab) interval() time.Duration { return 3 * time.Second }
 func (t *hostsTab) typing() bool            { return false }
 func (t *hostsTab) hints() [][2]string {
 	if t.podsOf != "" {
-		return [][2]string{{"esc", "hosts"}, {"ctrl+⇧←→ alt+↑↓", "sort, order"}}
+		return [][2]string{{"esc", "hosts"}, {"ctrl+alt+←→↑↓", "sort, order"}}
 	}
 	return [][2]string{{"enter", "shell"}, {"c", "run command"}, {"p", "pods"}}
 }
@@ -48,7 +48,7 @@ func (t *hostsTab) open(m *model) tea.Cmd {
 	t.cpu, t.mem = map[string][]float64{}, map[string][]float64{}
 	if t.pods == nil {
 		t.pods = newGrid("hosts:pods", col("POD", 0), col("NAMESPACE", 30), rcol("CPU", 8), rcol("MEM", 9), rcol("AGE", 7))
-		t.pods.sortBy, t.pods.desc = 2, true
+		t.pods.sortDefault(2, true)
 	}
 	return t.refresh(m)
 }
@@ -262,3 +262,5 @@ func fdiv(v float64) float64 {
 	}
 	return v
 }
+
+func (t *hostsTab) atRoot() bool { return t.podsOf == "" }

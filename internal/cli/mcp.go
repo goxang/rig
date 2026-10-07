@@ -426,12 +426,15 @@ func mcpTools() []mcpTool {
 				return append(argv, flag(a, "force", "--force")...), nil
 			}},
 		{Name: "rig_docs", Description: "rig's reference: config (every rig.yaml key: services, environments, components, otel, ui tabs, dashboards and panels, queries, tests, tasks, alerts), guide (CLI commands, every TUI screen and its keys, AI, GoLand, MCP tools), design (adapters and what each kind does), manifests",
-			InputSchema: schema(map[string]any{"name": pString("config (default), guide, design or manifests")}),
+			InputSchema: schema(map[string]any{"name": pString("config (default), guide, design or manifests"), "search": pString("words: only the sections holding all of them (across every doc when name is empty), e.g. \"tasks steps\"; prefer it over reading a whole doc")}),
 			argv: func(a map[string]any) ([]string, error) {
+				argv := []string{"docs"}
 				if n := str(a, "name"); n != "" {
-					return []string{"docs", n}, nil
+					argv = append(argv, n)
+				} else if str(a, "search") == "" {
+					argv = append(argv, "config")
 				}
-				return []string{"docs"}, nil
+				return append(argv, strings.Fields(str(a, "search"))...), nil
 			}},
 		{Name: "rig_envs", Description: "environments of the project, their runtimes, and the components of the current one",
 			InputSchema: schema(map[string]any{}),

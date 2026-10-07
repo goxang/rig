@@ -257,19 +257,19 @@ func (t *queriesTab) name() string { return "Queries" }
 func (t *queriesTab) typing() bool { return false }
 func (t *queriesTab) hints() [][2]string {
 	if t.focusRes {
-		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"ctrl+⇧←→ alt+↑↓", "sort, order"}}
+		return [][2]string{{"←", "query list"}, {"↑↓", "rows"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort, order"}}
 	}
 	if t.history {
-		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H ⇧←→", "back to queries"}}
+		return [][2]string{{"↑↓", "run"}, {"→", "its result"}, {"H ctrl+←→", "back to queries"}}
 	}
-	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H ⇧←→", "history"}, {"→", "result"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+	return [][2]string{{"enter", "run"}, {"e", "edit & run"}, {"n", "new query"}, {"y Y", "copy query, result"}, {"a", "schedule on/off"}, {"H ctrl+←→", "history"}, {"→", "result"}, {"ctrl+alt+←→↑↓", "sort"}}
 }
 
 func (t *queriesTab) interval() time.Duration { return time.Second }
 
 func (t *queriesTab) open(m *model) tea.Cmd {
 	t.list = newGrid("queries", col("", 2), col("QUERY", 26), col("GROUP", 12), col("SOURCE", 10), rcol("EVERY", 6), rcol("LAST", 8), rcol("ROWS", 5), col("TREND", 14), col("WHAT", 0))
-	t.list.sortBy = 2
+	t.list.sortDefault(2, false)
 	t.result = newGrid("result")
 	t.hist = newGrid("hist", col("TIME", 8), col("QUERY", 26), col("BY", 9), rcol("ROWS", 6), rcol("TOOK", 7), col("FIRST VALUE", 0))
 	a, gen := m.app, m.gen
@@ -720,3 +720,5 @@ func colWidths(t core.Table, _ int) []int {
 	}
 	return ws
 }
+
+func (t *queriesTab) atRoot() bool { return !t.focusRes }

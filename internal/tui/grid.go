@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// grid is a sortable, scrollable, clickable table, htop style: ctrl+shift+←→ pick the sort column, ctrl+shift+↑↓ (or alt+↑↓) order it,
+// grid is a sortable, scrollable, clickable table, htop style: ctrl+alt+←→ pick the sort column, ctrl+alt+↑↓ (or alt+↑↓) order it,
 // clicking a header sorts by it, clicking a row selects it. Rows keep their selection by id across
 // refreshes.
 type grid struct {
@@ -41,7 +41,36 @@ type grow struct {
 	pin bool
 }
 
-func newGrid(id string, cols ...gcol) *grid { return &grid{id: id, cols: cols, sortBy: -1} }
+func newGrid(id string, cols ...gcol) *grid {
+	g := &grid{id: id, cols: cols, sortBy: -1}
+	if s, ok := gridSorts[id]; ok && s.Col < len(cols) && cols[s.Col].title == s.Title {
+		g.sortBy, g.desc = s.Col, s.Desc
+	}
+	return g
+}
+
+// gridSort is how the user last sorted a grid; gridSorts keeps it by grid id, so a grid built
+// again (a screen reopened, a session resumed) sorts as it was left.
+type gridSort struct {
+	Col   int    `json:"col"`
+	Title string `json:"title"`
+	Desc  bool   `json:"desc"`
+}
+
+var gridSorts = map[string]gridSort{}
+
+// sortDefault sorts on c unless the user sorted this grid before.
+func (g *grid) sortDefault(c int, desc bool) {
+	if _, ok := gridSorts[g.id]; !ok {
+		g.sortBy, g.desc = c, desc
+	}
+}
+
+func (g *grid) remember() {
+	if g.sortBy >= 0 && g.sortBy < len(g.cols) {
+		gridSorts[g.id] = gridSort{g.sortBy, g.cols[g.sortBy].title, g.desc}
+	}
+}
 
 func col(title string, width int) gcol  { return gcol{title: title, width: width} }
 func rcol(title string, width int) gcol { return gcol{title: title, width: width, right: true} }
@@ -142,6 +171,7 @@ func (g *grid) sortOn(c int) {
 		g.sortBy, g.desc = c, false
 	}
 	g.sortRows()
+	g.remember()
 }
 
 // key handles movement and sorting keys; false when the key is not one of them.
@@ -150,19 +180,19 @@ func (g *grid) key(k tea.KeyMsg) bool {
 		return true
 	}
 	switch k.String() {
-	case "ctrl+shift+right", ">", ".":
+	case "alt+ctrl+right", "ctrl+shift+right", ">", ".":
 		g.sortBy = (g.sortBy + 1) % len(g.cols)
 		g.sortRows()
-	case "ctrl+shift+left", "<", ",":
+	case "alt+ctrl+left", "ctrl+shift+left", "<", ",":
 		g.sortBy = (max(g.sortBy, 0) - 1 + len(g.cols)) % len(g.cols)
 		g.sortRows()
-	// VTE terminals (GNOME's) keep ctrl+shift+↑↓ for their own scrolling: alt+↑↓ do the same
-	case "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down", "I":
+	// VTE (GNOME's terminal) keeps ctrl+shift+↑↓ and GNOME ctrl+alt+arrows: alt+↑↓ and < > I always work
+	case "alt+ctrl+up", "alt+ctrl+down", "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down", "I":
 		g.sortBy = max(g.sortBy, 0)
 		switch k.String() {
-		case "ctrl+shift+up", "alt+up":
+		case "alt+ctrl+up", "ctrl+shift+up", "alt+up":
 			g.desc = false
-		case "ctrl+shift+down", "alt+down":
+		case "alt+ctrl+down", "ctrl+shift+down", "alt+down":
 			g.desc = true
 		default:
 			g.desc = !g.desc
@@ -171,6 +201,7 @@ func (g *grid) key(k tea.KeyMsg) bool {
 	default:
 		return false
 	}
+	g.remember()
 	return true
 }
 

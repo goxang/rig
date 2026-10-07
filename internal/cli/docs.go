@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,19 +16,36 @@ import (
 
 func docsCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "docs [config|guide|design|manifests]",
-		Short: "rig's reference, from the binary: every rig.yaml key (config), CLI, screens and AI (guide), adapters (design), manifests",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "docs [config|guide|design|manifests] [words...]",
+		Short:   "rig's reference, from the binary: every rig.yaml key (config), CLI, screens and AI (guide), adapters (design), manifests; words print only the sections holding them",
+		Example: "  rig docs config tasks\n  rig docs load generator   (no doc named: every doc)",
 		RunE: func(_ *cobra.Command, args []string) error {
-			name := "config"
-			if len(args) == 1 {
-				name = args[0]
+			names := []string{"config"}
+			if len(args) > 0 {
+				names = docs.Names
+				if slices.Contains(docs.Names, strings.TrimSuffix(args[0], ".md")) {
+					names, args = []string{strings.TrimSuffix(args[0], ".md")}, args[1:]
+				}
 			}
-			raw, err := docs.FS.ReadFile(strings.TrimSuffix(name, ".md") + ".md")
-			if err != nil {
-				return fmt.Errorf("no doc %q: have config, guide, design, manifests", name)
+			query := strings.Join(args, " ")
+			var out strings.Builder
+			var heads []string
+			for _, n := range names {
+				raw, _ := docs.FS.ReadFile(n + ".md")
+				if query == "" {
+					out.Write(raw)
+					continue
+				}
+				found, h := docs.Sections(string(raw), query)
+				out.WriteString(found)
+				for _, x := range h {
+					heads = append(heads, n+": "+x)
+				}
 			}
-			_, err = os.Stdout.Write(raw)
+			if out.Len() == 0 {
+				return fmt.Errorf("no section holds %q; sections:\n%s", query, strings.Join(heads, "\n"))
+			}
+			_, err := os.Stdout.WriteString(out.String())
 			return err
 		},
 	}

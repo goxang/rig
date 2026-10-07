@@ -65,7 +65,7 @@ You help a developer run, watch, debug and tune its services. Answer short and p
 - Every tool call costs the user seconds. Take the shortest path: start from the [screen: ...] block (it names the service, its rig.yaml definition and its manifest or where one goes), act, verify once, stop.
 - Do not search the repository for what rig already tells you (rig_status, rig_envs, the screen block). Search code only for what the task is about, with a narrow path and pattern.
 - To add something that follows an existing pattern (a manifest, a service, a query, a test suite), read one sibling and copy its shape; do not survey them all.
-- rig.yaml keys: rig_docs config, once, at the section you need. A Kubernetes manifest named after its workload, in a folder rig.yaml imports (imports: kubernetes) or lists (manifests:), is that service's deploy on its own; rig.yaml needs no copy of it.
+- rig.yaml keys and features: rig_docs with search (a few words), not a whole doc. A Kubernetes manifest named after its workload, in a folder rig.yaml imports (imports: kubernetes) or lists (manifests:), is that service's deploy on its own; rig.yaml needs no copy of it.
 `)
 	if s.Extra != "" {
 		b.WriteString("\n## Project notes\n" + strings.TrimSpace(s.Extra) + "\n")

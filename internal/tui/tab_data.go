@@ -123,15 +123,15 @@ func (t *dataTab) hints() [][2]string {
 	case t.focus == 2:
 		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
 	case c.kind == string(core.KindMessaging) && t.qview > 0:
-		return [][2]string{{"⇧←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"esc ←", "components"}}
+		return [][2]string{{"ctrl+←→", "queues, exchanges, bindings, ..."}, {"/", "filter"}, {"y Y", "copy row, all"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
 	case c.kind == string(core.KindMessaging):
 		return [][2]string{{"enter", "queue details"}, {"m", "peek messages"}, {"space a", "mark, mark all"}, {"P", "purge marked/selected"}, {"X", "purge every queue shown"},
-			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"⇧←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"esc ←", "components"}}
+			{"D", "delete marked/selected"}, {"p", "publish to queue"}, {"ctrl+←→", "exchanges, bindings, connections, ..."}, {"/", "filter (*word*)"}, {"ctrl+alt+←→↑↓", "sort"}, {"esc ←", "components"}}
 	}
 	if t.query != "" {
-		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+		return [][2]string{{"esc Q", "edit the query (esc again: back)"}, {"y Y", "copy row, all"}, {"/", "filter (*word*)"}, {"ctrl+alt+←→↑↓", "sort"}}
 	}
-	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+	h := [][2]string{{"enter →", "open"}, {"Q", "query here (on a row: that row)"}, {"y Y", "copy row, all"}, {"esc ←", "up"}, {"/", "filter (*word*)"}, {"r", "reload"}, {"ctrl+alt+←→↑↓", "sort"}}
 	if t.editable(c) {
 		h = append([][2]string{{"e", "edit cell"}, {"space", "mark"}, {"D", "delete"}}, h...)
 	}
@@ -542,7 +542,7 @@ func (t *dataTab) show(m *model) tea.Cmd {
 	}
 	if t.current().kind == string(core.KindMessaging) {
 		t.right = newGrid("dright", col("QUEUE", 0), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
-		t.right.sortBy, t.right.desc = 1, true
+		t.right.sortDefault(1, true)
 		t.right.simple = []int{0, 1, 4}
 		t.fill()
 		return t.loadQueues(m)
@@ -1117,7 +1117,7 @@ func (t *dataTab) brokerView(m *model, c dataComp, title, head string, hh, x, w,
 	return lipgloss.JoinVertical(lipgloss.Left, list, panel(dt, db, w, dh, t.focus == 2))
 }
 
-// globMatcher matches names case-insensitively: plain text anywhere in the name, or a glob
+// globMatcher matches names case-insensitively: plain text fuzzily (letters in order), or a glob
 // (*word*, prefix*) against the whole name.
 func globMatcher(p string) func(string) bool {
 	p = strings.ToLower(strings.TrimSpace(p))
@@ -1125,8 +1125,10 @@ func globMatcher(p string) func(string) bool {
 		return func(string) bool { return true }
 	}
 	if !strings.Contains(p, "*") {
-		return func(s string) bool { return strings.Contains(strings.ToLower(s), p) }
+		return func(s string) bool { return fuzzy(s, p) }
 	}
 	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\*`, ".*") + "$")
 	return func(s string) bool { return re.MatchString(strings.ToLower(s)) }
 }
+
+func (t *dataTab) atRoot() bool { return t.focus == 0 && t.query == "" && t.filter == "" }

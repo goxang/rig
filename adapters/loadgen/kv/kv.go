@@ -6,9 +6,11 @@ package kv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goxang/rig/core"
@@ -189,6 +191,10 @@ func (g *Gen) Status(ctx context.Context) (core.LoadStatus, error) {
 		return core.LoadStatus{}, err
 	}
 	st := core.LoadStatus{Rate: rate, Extra: map[string]string{"key": g.opt.Key}}
+	// the counters are metric queries: they run beside the replica lookups, not after them
+	var counted core.LoadStatus
+	done := make(chan struct{})
+	go func() { defer close(done); g.counters(ctx, &counted) }()
 	replicas := 0
 	for _, name := range g.opt.Services {
 		if rt, s, err := g.env.Owner(name); err == nil {
@@ -202,7 +208,8 @@ func (g *Gen) Status(ctx context.Context) (core.LoadStatus, error) {
 	if replicas > 1 {
 		st.Extra["total"] = strconv.FormatFloat(rate*float64(replicas), 'f', -1, 64) + "/s"
 	}
-	g.counters(ctx, &st)
+	<-done
+	st.Sent, st.Failed, st.Latency.P99, st.PerInstance = counted.Sent, counted.Failed, counted.Latency.P99, counted.PerInstance
 	return st, nil
 }
 
@@ -229,14 +236,24 @@ func (g *Gen) counters(ctx context.Context, st *core.LoadStatus) {
 		}
 		return ss[0].Value
 	}
-	st.Sent = int64(one(m.Sent))
-	st.Failed = int64(one(m.Failed))
-	st.Latency.P99 = time.Duration(one(m.Latency) * float64(time.Second))
-	if m.PerInstance == "" {
-		return
+	var sent, failed, p99 float64
+	var wg sync.WaitGroup
+	for _, q := range []struct {
+		query string
+		into  *float64
+	}{{m.Sent, &sent}, {m.Failed, &failed}, {m.Latency, &p99}} {
+		wg.Add(1)
+		go func() { defer wg.Done(); *q.into = one(q.query) }()
 	}
-	ss, err := met.Instant(ctx, m.PerInstance)
-	if err != nil {
+	var ss []core.Sample
+	perErr := errors.New("no per-instance query")
+	if m.PerInstance != "" {
+		ss, perErr = met.Instant(ctx, m.PerInstance)
+	}
+	wg.Wait()
+	st.Sent, st.Failed = int64(sent), int64(failed)
+	st.Latency.P99 = time.Duration(p99 * float64(time.Second))
+	if perErr != nil {
 		return
 	}
 	st.PerInstance = map[string]int64{}
