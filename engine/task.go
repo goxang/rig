@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -212,7 +214,7 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		if resolveErr != nil {
 			return fmt.Errorf("task %s, step %d: %w", name, i+1, resolveErr)
 		}
-		title := stepTitle(step, secrets)
+		title := withArgs(stepTitle(step, secrets), args)
 		fmt.Fprintf(out, "▸ [%d/%d] %s\n", i+1, len(steps), title)
 		cmd := sh.New("sh", append([]string{"-c", line, name}, args...)...)
 		cmd.Dir = a.Spec.Dir
@@ -222,7 +224,7 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 			if ctx.Err() != nil {
 				return fmt.Errorf("task %s stopped at step %d of %d (%s): interrupted", name, i+1, len(steps), title)
 			}
-			return fmt.Errorf("task %s, step %d (%s): %w", name, i+1, title, err)
+			return fmt.Errorf("task %s failed at step %d of %d: %s\n  %s; the step's output is above", name, i+1, len(steps), title, exitText(err))
 		}
 		if d := time.Since(began); d >= time.Second {
 			fmt.Fprintf(out, "  ✓ %s\n", d.Round(100*time.Millisecond))
@@ -232,6 +234,37 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 		fmt.Fprintf(out, "✓ %s done in %s\n", name, d.Round(100*time.Millisecond))
 	}
 	return nil
+}
+
+var argRef = regexp.MustCompile(`\$\{?([1-9])(:-[^}]*)?\}?`)
+
+// withArgs shows $1, ${1} and ${1:-x} in a step title as the values they had.
+func withArgs(title string, args []string) string {
+	return argRef.ReplaceAllStringFunc(title, func(ref string) string {
+		m := argRef.FindStringSubmatch(ref)
+		if n := int(m[1][0] - '0'); n <= len(args) {
+			return args[n-1]
+		}
+		return ref
+	})
+}
+
+// exitText says why a step's shell ended in words, not "exit status 1".
+func exitText(err error) string {
+	var x *exec.ExitError
+	if !errors.As(err, &x) {
+		return err.Error()
+	}
+	switch code := x.ExitCode(); code {
+	case -1:
+		return "it was killed (" + x.String() + ")"
+	case 126:
+		return "a command in it is not executable (exit code 126)"
+	case 127:
+		return "a command in it was not found (exit code 127)"
+	default:
+		return fmt.Sprintf("it ended with exit code %d", code)
+	}
 }
 
 // stepTitle is how a step shows while it runs: its first line, with secret values put back as

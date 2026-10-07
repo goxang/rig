@@ -44,6 +44,9 @@ func Execute() int {
 	root := newRoot()
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, red("error: ")+err.Error())
+		if f := os.Getenv("RIG_ERROR_FILE"); f != "" {
+			_ = os.WriteFile(f, []byte(err.Error()), 0o600) // the UI that ran this shows it after the terminal closes
+		}
 		if errors.Is(err, engine.ErrProtected) {
 			return 3
 		}

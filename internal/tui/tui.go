@@ -1374,9 +1374,17 @@ func (m *model) runTask(name string, args []string) {
 		}
 		script := `trap 'echo; echo "✖ stopped"' INT; "$0" "$@"; rc=$?; echo; [ $rc = 0 ] && echo "✓ done" || echo "✖ failed ($rc)"; printf "press enter "; read _; exit $rc`
 		cmd := exec.Command("sh", append([]string{"-c", script, self, "-f", m.app.Spec.File, "-e", m.app.Env.Name, "--yes", "task", name}, args...)...)
+		errFile := filepath.Join(os.TempDir(), fmt.Sprintf("rig-task-%d.err", os.Getpid()))
+		_ = os.Remove(errFile)
+		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+errFile)
 		return execProcess(cmd, func(err error) tea.Msg {
 			if err != nil {
-				return statusMsg{text: "task " + name + ": " + err.Error(), err: true}
+				text := "task " + name + " failed"
+				if raw, rerr := os.ReadFile(errFile); rerr == nil {
+					text = strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n ", " ·")
+				}
+				_ = os.Remove(errFile)
+				return statusMsg{text: text, err: true}
 			}
 			return statusMsg{text: "task " + name + " ✓"}
 		})()
