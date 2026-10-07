@@ -104,8 +104,8 @@ type model struct {
 	chat *chat
 	// aiAllowed are the assistant's commands the user said "always" to, for this run of rig
 	aiAllowed map[string]bool
-	sock string
-	ai   *ai.Runner
+	sock      string
+	ai        *ai.Runner
 	// completeCancel stops the AI completion in flight
 	completeCancel context.CancelFunc
 

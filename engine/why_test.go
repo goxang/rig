@@ -48,8 +48,8 @@ func TestMentions(t *testing.T) {
 	for line, want := range map[string]bool{
 		`dial tcp: lookup postgres on 127.0.0.11:53: no such host`: true,
 		`failed to connect to host=postgres user=postgres`:         true,
-		`postgresql driver error`:                                   false,
-		`pg-postgres-2 refused`:                                     false,
+		`postgresql driver error`:                                  false,
+		`pg-postgres-2 refused`:                                    false,
 	} {
 		if mentions(line, "postgres") != want {
 			t.Errorf("mentions(%q) != %v", line, want)
