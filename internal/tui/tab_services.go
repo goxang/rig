@@ -132,8 +132,8 @@ func (t *servicesTab) hints() [][2]string {
 			{"d", "deploy a tag/image"}, {"b", "build, push, deploy"}, {"e", "shell"}, {"p", "profile: cpu, heap, goroutine…"}, {"D", "debug"}, {"l", "this service on the Logs screen"}, {"m", "metrics"},
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
-	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"d", "image"}, {"$", "env"}, {"F", "live manifests"}, {"b", "build/push/deploy"}, {"a", "mark section"}, {"⇧←→", "section"}, {"i", "infra"},
-		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"d", "image"}, {"$", "env"}, {"F", "live manifests"}, {"b", "build/push/deploy"}, {"a", "mark section"}, {"ctrl+←→", "section"}, {"i", "infra"},
+		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+alt+←→↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -676,7 +676,7 @@ func (t *servicesTab) view(m *model, w, h int) string {
 	}
 	names := t.sectionNames(m)
 	strip := m.stripFit("svc:section", 1, 1, t.sectionLabels(m, names), slices.Index(names, t.section), w-2)
-	if hint := sDim.Render("  ⇧←→ · dbl-click marks"); lipgloss.Width(strip)+lipgloss.Width(hint) <= w-2 {
+	if hint := sDim.Render("  ctrl+←→ · dbl-click marks"); lipgloss.Width(strip)+lipgloss.Width(hint) <= w-2 {
 		strip += hint
 	}
 	body := strip + "\n" + m.stripRule(0, w-2) + "\n" + t.list.view(m, 1, 3, w-2, h-4, true)
@@ -746,7 +746,7 @@ func (t *servicesTab) serviceView(m *model, w, h int) string {
 	var logs string
 	switch {
 	case t.prof != nil && t.prof.svc == name:
-		title := fmt.Sprintf("%s profile · %s · ↑↓ ctrl+⇧←→↑↓ sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
+		title := fmt.Sprintf("%s profile · %s · ↑↓ ctrl+alt+←→↑↓ sort · W save report · esc close", t.prof.res.Kind, relTo(m.app.Spec.Dir, t.prof.res.File))
 		logs = panel(title, t.prof.view(m, 1, headH+1+podsH+1, w-2, logH-2), w, logH, true)
 	case t.detail != "":
 		logs = panel("result · esc closes", t.detail, w, logH, true)

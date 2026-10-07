@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// grid is a sortable, scrollable, clickable table, htop style: ctrl+shift+←→ pick the sort column, ctrl+shift+↑↓ (or alt+↑↓) order it,
+// grid is a sortable, scrollable, clickable table, htop style: ctrl+alt+←→ pick the sort column, ctrl+alt+↑↓ (or alt+↑↓) order it,
 // clicking a header sorts by it, clicking a row selects it. Rows keep their selection by id across
 // refreshes.
 type grid struct {
@@ -150,19 +150,19 @@ func (g *grid) key(k tea.KeyMsg) bool {
 		return true
 	}
 	switch k.String() {
-	case "ctrl+shift+right", ">", ".":
+	case "alt+ctrl+right", "ctrl+shift+right", ">", ".":
 		g.sortBy = (g.sortBy + 1) % len(g.cols)
 		g.sortRows()
-	case "ctrl+shift+left", "<", ",":
+	case "alt+ctrl+left", "ctrl+shift+left", "<", ",":
 		g.sortBy = (max(g.sortBy, 0) - 1 + len(g.cols)) % len(g.cols)
 		g.sortRows()
-	// VTE terminals (GNOME's) keep ctrl+shift+↑↓ for their own scrolling: alt+↑↓ do the same
-	case "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down", "I":
+	// VTE (GNOME's terminal) keeps ctrl+shift+↑↓ and GNOME ctrl+alt+arrows: alt+↑↓ and < > I always work
+	case "alt+ctrl+up", "alt+ctrl+down", "ctrl+shift+up", "ctrl+shift+down", "alt+up", "alt+down", "I":
 		g.sortBy = max(g.sortBy, 0)
 		switch k.String() {
-		case "ctrl+shift+up", "alt+up":
+		case "alt+ctrl+up", "ctrl+shift+up", "alt+up":
 			g.desc = false
-		case "ctrl+shift+down", "alt+down":
+		case "alt+ctrl+down", "ctrl+shift+down", "alt+down":
 			g.desc = true
 		default:
 			g.desc = !g.desc

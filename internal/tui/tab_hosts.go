@@ -39,7 +39,7 @@ func (t *hostsTab) interval() time.Duration { return 3 * time.Second }
 func (t *hostsTab) typing() bool            { return false }
 func (t *hostsTab) hints() [][2]string {
 	if t.podsOf != "" {
-		return [][2]string{{"esc", "hosts"}, {"ctrl+⇧←→ alt+↑↓", "sort, order"}}
+		return [][2]string{{"esc", "hosts"}, {"ctrl+alt+←→↑↓", "sort, order"}}
 	}
 	return [][2]string{{"enter", "shell"}, {"c", "run command"}, {"p", "pods"}}
 }

@@ -46,7 +46,7 @@ even with it. In the TUI the confirmation is the `--yes`.
 ## Terminal UI
 
 Screens load nothing until opened, and only the one showing refreshes. Everything is a sortable grid
-(`ctrl+shift+←→` pick the column, `ctrl+shift+↑↓` or `alt+↑↓` order it, or click a header) and works with the mouse. On a Kubernetes
+(`ctrl+alt+←→` pick the column, `ctrl+alt+↑↓` order it; `< > I`, `alt+↑↓` and `ctrl+shift+arrows` too, or click a header) and works with the mouse. On a Kubernetes
 cluster, dangerous changes (stop, deploy, delete, edits) ask first and `enter` confirms; local, docker
 and kind never ask. `?` shows the keys of the current screen.
 Drag over any text (results, queries, test output, the chat) to copy it; the selection stays inside the
@@ -67,8 +67,8 @@ box it starts in. Copies go to the system clipboard (wl-copy, xclip or xsel) and
 | Tests | suites as tabs and the `go test` command they run; `r` runs, `f` reruns failures, `.` the selected test, `O` sets flags (race, cover, -run, …); a tree of packages and tests (`i` cycles failed/passed/skipped/running), its output beside it, benchmarks with the change since the last run, saved runs (`h`) |
 
 `rig` opens on the environment it last showed (`-e` or `$RIG_ENV` picks another). Screens switch with
-`1`-`0` and `` ` `` (the eleventh), `alt+←→` or `ctrl+←→`, or a click on their name; tabs inside a screen
-(dashboards, apps/infra, objects/folders, saved/history, suites, filters) are clickable too. A screen
+`1`-`0` and `` ` `` (the eleventh), `shift+←→` or `alt+←→`, or a click on their name; tabs inside a screen
+(dashboards, apps/infra, objects/folders, saved/history, suites, filters) switch with `ctrl+←→` and are clickable too. A screen
 shows only when rig.yaml gives it something (no `kv` component, no KV screen); `ui: { tabs: [services,
 logs, data, tests] }` picks the screens and their order, and the number keys follow it.
 `T` runs a task from rig.yaml in the background, `ctrl+e` shows the environment (variables with secrets hidden, each

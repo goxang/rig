@@ -112,9 +112,9 @@ func (p *picker) key(m *model, k tea.KeyMsg) tea.Cmd {
 		return nil
 	case "enter":
 		return p.finish(m)
-	case "tab", "right", "shift+tab", "left":
+	case "tab", "right", "ctrl+right", "shift+tab", "left", "ctrl+left":
 		if n := len(p.groups); n > 0 {
-			d := map[bool]int{true: 1, false: n - 1}[k.String() == "tab" || k.String() == "right"]
+			d := map[bool]int{true: 1, false: n - 1}[k.String() == "tab" || k.String() == "right" || k.String() == "ctrl+right"]
 			p.group, p.sel = (p.group+d)%n, 0
 		}
 	case "up":

@@ -62,7 +62,7 @@ func (t *tracesTab) hints() [][2]string {
 		return [][2]string{{"↑↓ wheel", "select span"}, {"y", "copy span"}, {"esc", "back to traces"}}
 	}
 	return [][2]string{{"enter", "walk spans"}, {"s", "service"}, {"o", "operation"}, {"m", "min duration"}, {"t", "time window"},
-		{"/", "text"}, {"e", "errors only"}, {"n", "limit"}, {"R", "refresh"}, {"a", "auto refresh"}, {"ctrl+⇧←→ alt+↑↓", "sort"}}
+		{"/", "text"}, {"e", "errors only"}, {"n", "limit"}, {"R", "refresh"}, {"a", "auto refresh"}, {"ctrl+alt+←→↑↓", "sort"}}
 }
 
 func (t *tracesTab) interval() time.Duration {

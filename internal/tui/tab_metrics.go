@@ -100,10 +100,10 @@ func (t *metricsTab) interval() time.Duration { return refreshes[t.every] }
 
 func (t *metricsTab) hints() [][2]string {
 	if t.zoom {
-		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+⇧←→ alt+↑↓", "sort"}, {"y", "copy query"},
+		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+alt+←→↑↓", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"⇧←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"ctrl+←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {

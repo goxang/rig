@@ -1165,12 +1165,13 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		return m.quitTwice("ctrl+c", again)
 	}
 	m.sel = nil
-	// alt+arrows switch screens from anywhere: they close what is open over the screen first. Some
-	// terminals keep alt+arrows for themselves, so ctrl+arrows do the same where they move no cursor.
+	// alt+←→ switch screens from anywhere, closing what is open over the screen first; ⇧←→ do the
+	// same where they select no text. ctrl+←→ move the screen's own tabs: screens handle them as ⇧←→.
 	s := k.String()
-	ctrlArrow := (s == "ctrl+left" || s == "ctrl+right") && m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) &&
-		len(m.tabs) > 0 && !m.tabs[m.active].typing()
-	if (s == "alt+left" || s == "alt+right" || ctrlArrow) && len(m.tabs) > 0 {
+	free := m.prompt == nil && (m.chat == nil || !m.chat.open || !m.chat.focus) && len(m.tabs) > 0 && !m.tabs[m.active].typing()
+	if free && m.picker == nil && (s == "ctrl+left" || s == "ctrl+right") {
+		k = tea.KeyMsg{Type: map[bool]tea.KeyType{true: tea.KeyShiftLeft, false: tea.KeyShiftRight}[s == "ctrl+left"]}
+	} else if (s == "alt+left" || s == "alt+right" || free && (s == "shift+left" || s == "shift+right")) && len(m.tabs) > 0 {
 		if m.confirm != nil && m.confirm.cancel != nil {
 			m.confirm.cancel()
 		}
@@ -1183,7 +1184,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.chat.focus = false
 		}
 		step := 1
-		if s == "alt+left" || s == "ctrl+left" {
+		if s == "alt+left" || s == "shift+left" {
 			step = len(m.tabs) - 1
 		}
 		return batch(esc, m.openTab((m.active+step)%len(m.tabs)))
@@ -2142,8 +2143,8 @@ var screenHelp = map[string]string{
 // unchanged from before, just no longer rendered as one fixed block.
 func (m *model) helpLines() []string {
 	rows := [][2]string{
-		{"1-9 0 `  tab ⇧tab  alt/ctrl+←→", "switch screen (or click its name)"}, {"⇧←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
-		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+⇧←→ alt+↑↓", "sort column, order (or click a header; ctrl+⇧↑↓ where the terminal passes them)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
+		{"1-9 0 `  tab ⇧tab  ⇧←→ alt+←→", "switch screen (or click its name)"}, {"ctrl+←→", "switch the sub-tab inside a screen"}, {"E", "switch environment"}, {"N", "switch or create a Kubernetes namespace"}, {"T", "run a task (rig task shows what each does)"},
+		{"↑↓ / wheel", "move"}, {"enter / dbl-click", "open, run"}, {"ctrl+alt+←→↑↓", "sort column, order (or click a header; also < > I, alt+↑↓, ctrl+⇧ arrows)"}, {"+ - z", "expand all, fold all, toggle (trees, dashboard rows)"},
 		{"esc ⌫", "back: closes what is open, then returns to the screen you jumped from"}, {"drag a border", "resize panes (kept for next time; it lights up under the mouse)"}, {"@", "AI chat about this screen (rig ai config sets it up)"}, {"A", "alerts (header badge)"}, {"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"}, {"ctrl+k", "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"}, {"ctrl+e", "this environment: variables, databases, addresses (↑↓, e edits a variable)"}, {"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"}, {"S", "save this session: rig opens on it from now on (rig --fresh starts clean)"}, {"M", "mouse on/off (off: select text)"}, {"V", "simple / detailed view"}, {"?", "this help"}, {"q  ctrl+c", "quit"},
 	}
 	var b strings.Builder

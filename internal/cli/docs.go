@@ -16,8 +16,8 @@ import (
 
 func docsCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "docs [config|guide|design|manifests] [words...]",
-		Short: "rig's reference, from the binary: every rig.yaml key (config), CLI, screens and AI (guide), adapters (design), manifests; words print only the sections holding them",
+		Use:     "docs [config|guide|design|manifests] [words...]",
+		Short:   "rig's reference, from the binary: every rig.yaml key (config), CLI, screens and AI (guide), adapters (design), manifests; words print only the sections holding them",
 		Example: "  rig docs config tasks\n  rig docs load generator   (no doc named: every doc)",
 		RunE: func(_ *cobra.Command, args []string) error {
 			names := []string{"config"}

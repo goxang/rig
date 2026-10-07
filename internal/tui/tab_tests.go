@@ -72,7 +72,7 @@ func (t *testsTab) hints() [][2]string {
 	if t.outFocus {
 		return [][2]string{{"↑↓ pgup pgdn", "scroll"}, {"g G", "top/end"}, {"y", "copy"}, {"esc o", "back"}}
 	}
-	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"l ⇧←→", "suite (list, prev/next)"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
+	return [][2]string{{"r", "run"}, {"f", "rerun failed"}, {".", "rerun this"}, {"x", "stop"}, {"l ctrl+←→", "suite (list, prev/next)"}, {"O", "options (race, cover, -run, …)"}, {"/", "search"},
 		{"i", "filter: all, failed, passed, …"}, {"enter", "fold/output"}, {"+ -", "unfold/fold all"}, {"b", "benchmarks"}, {"h", "saved runs"}, {"w", "write report"}, {"y Y", "copy"}}
 }
 

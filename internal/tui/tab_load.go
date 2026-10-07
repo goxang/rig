@@ -361,7 +361,7 @@ components:
 			labels[i] = fmt.Sprintf("all instances (%d)", len(ids)-1)
 		}
 	}
-	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (⇧←→ i) · rate and config are shared by every instance"), rw)
+	strip := truncate(" "+m.strip("load:inst", lw+1, 0, labels, slices.Index(ids, t.inst[n]))+sDim.Render("  (ctrl+←→ i) · rate and config are shared by every instance"), rw)
 	strip += "\n" + m.stripRule(1, rw)
 	var right string
 	m.originY++
