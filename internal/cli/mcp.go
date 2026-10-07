@@ -288,13 +288,18 @@ func uiTool(args map[string]any) (string, bool) {
 		return "no rig UI is attached to this session: use rig_query instead", true
 	}
 	req := ai.Request{Op: "ui", Action: str(args, "action"), Args: map[string]string{}}
-	for _, k := range []string{"name", "component", "query", "every", "screen", "services", "grep"} {
+	for _, k := range []string{"name", "component", "query", "every", "screen", "services", "grep", "dashboard"} {
 		if v := str(args, k); v != "" {
 			req.Args[k] = v
 		}
 	}
 	if v := list(args, "services"); len(v) > 0 {
 		req.Args["services"] = strings.Join(v, " ")
+	}
+	for _, k := range []string{"keys", "panels"} {
+		if v := list(args, k); len(v) > 0 {
+			req.Args[k] = strings.Join(v, "\n")
+		}
 	}
 	if q := req.Args["query"]; q != "" && ai.ClassifyQuery(q) != ai.Read {
 		return "refused: only reading queries go on the Queries screen; run a change once with rig_query", true
@@ -577,9 +582,11 @@ func mcpTools() []mcpTool {
 				}
 				return argv, nil
 			}},
-		{Name: "rig_ui", Description: "act in the rig UI the user has open: add_query (component, query, optional name and every like \"30s\" to schedule it), schedule (name, every), unschedule (name), open (screen: services, logs, metrics, traces, queries, kv, data, load, manifests, hosts, tests), logs (services, optional grep)",
-			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"add_query", "schedule", "unschedule", "open", "logs"}},
-				"name": pString("query name"), "component": pString("component to query"), "query": pString("query text"), "every": pString("schedule interval, e.g. 30s"),
+		{Name: "rig_ui", Description: "act in the rig UI the user has open: add_query (component, query, optional name and every like \"30s\" to schedule it), schedule (name, every), unschedule (name), open (screen: services, logs, metrics, traces, queries, kv, data, load, manifests, hosts, tests), logs (services, optional grep), state (the screens, the open one's settings, dashboards and panel titles on Metrics, and the screen's text: call it first and after acting), keys (keys: pressed in order on the open screen as the user would, e.g. [\"3\", \"/\", \"api\", \"enter\"]; enter, esc, tab, up, down, left, right, ctrl+r, space; any other entry is typed as text; any change they start waits for the user's confirmation), panels (dashboard, panels: show only these panel titles on Metrics, none shows all)",
+			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"add_query", "schedule", "unschedule", "open", "logs", "state", "keys", "panels"}},
+				"keys": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "dashboard": pString("Metrics dashboard"),
+				"panels": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"name":   pString("query name"), "component": pString("component to query"), "query": pString("query text"), "every": pString("schedule interval, e.g. 30s"),
 				"screen": pString("screen to open"), "services": pTargets, "grep": pString("log filter")}, "action")},
 		{Name: "rig_file", Description: "the project's files, inside its directory only: list (path, recursive), read (path), write (path, content: creates or replaces), edit (path, old, new: old must be exact and unique unless all: true), move (path, to), delete (path: a file, or a directory with what is in it; needs the user's go-ahead). Paths are relative to the project. Credentials and .git are out of reach.",
 			InputSchema: schema(map[string]any{"action": map[string]any{"type": "string", "enum": []string{"list", "read", "write", "edit", "move", "delete"}},

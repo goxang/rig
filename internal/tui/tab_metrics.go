@@ -86,15 +86,17 @@ type metricsTab struct {
 	varErr    string
 	pending   string // a service to select once the dashboard's variables are known
 	collapsed map[string]bool
-	series    map[string]*seriesState
-	stack     map[string]bool
-	cursor    float64
-	hl        bool
-	scroll    int
-	contentH  int
-	bodyH     int
-	placed    []placed
-	legend    *grid
+	// only, per dashboard, is the panel titles rig_ui narrowed it to; O shows them all again
+	only     map[string]map[string]bool
+	series   map[string]*seriesState
+	stack    map[string]bool
+	cursor   float64
+	hl       bool
+	scroll   int
+	contentH int
+	bodyH    int
+	placed   []placed
+	legend   *grid
 }
 
 func (t *metricsTab) name() string            { return "Metrics" }
@@ -106,13 +108,14 @@ func (t *metricsTab) hints() [][2]string {
 		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"p", "open its pod in Services"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+alt+←→↑↓", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"ctrl+←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"ctrl+←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"O + -", "show every panel, expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {
 	if t.vars == nil {
 		t.vars, t.choices = map[string]map[string][]string{}, map[string]map[string][]string{}
 		t.collapsed, t.series, t.stack = map[string]bool{}, map[string]*seriesState{}, map[string]bool{}
+		t.only = map[string]map[string]bool{}
 		t.cursor, t.every = -1, 2
 		t.win.presets, t.win.rng = ranges, 1
 		t.legend = newGrid("mlegend", col("", 1), col("series", 0), rcol("min", 12), rcol("max", 12), rcol("mean", 12), rcol("last", 12), rcol("@cursor", 12))
@@ -175,7 +178,16 @@ func (t *metricsTab) items(m *model) ([]mitem, []spec.Panel) {
 		items = append(items, mitem{pi: len(ps)})
 		ps = append(ps, p)
 	}
+	only, row := t.only[t.dashName(m)], ""
 	for _, p := range t.dashboard(m).Panels {
+		if len(only) > 0 && !only[strings.ToLower(p.Title)] {
+			row = cmp.Or(p.Row, row)
+			continue
+		}
+		if p.Row == "" {
+			p.Row = row
+		}
+		row = ""
 		add(p)
 	}
 	for i, p := range t.adhoc {
@@ -461,6 +473,7 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 			t.collapsed[k] = !t.collapsed[k]
 		}
 	case "O", "+", "=":
+		delete(t.only, t.dashName(m))
 		for k := range t.collapsed {
 			if strings.HasPrefix(k, t.dashName(m)+"/") {
 				delete(t.collapsed, k)
@@ -1109,6 +1122,9 @@ func (t *metricsTab) header(m *model, w int) string {
 	}
 	if t.varErr != "" {
 		line2.WriteString(sRed.Render(t.varErr) + " ")
+	}
+	if n := len(t.only[name]); n > 0 {
+		line2.WriteString(sAmber.Render(fmt.Sprintf("only %d of %d panels · O shows all", n, len(d.Panels))) + "  ")
 	}
 	if d.Help != "" {
 		line2.WriteString(sDim.Render(d.Help))

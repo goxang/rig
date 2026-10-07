@@ -118,6 +118,8 @@ type model struct {
 	trail []crumb
 
 	confirm *confirm
+	// driving is rig_ui pressing keys for the AI: every change they start waits for the user
+	driving bool
 	prompt  *prompt
 	picker  *picker
 	help    bool
@@ -583,7 +585,7 @@ func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 // environment, wait for enter. Local, docker and kind run at once.
 func (m *model) needsConfirm(dangerous bool) bool {
 	e := m.app.Env
-	return e.Protected || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
+	return m.driving || e.Protected || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
 }
 
 // act runs a change, asking first when needsConfirm says so; the answer also counts as the

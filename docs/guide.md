@@ -234,7 +234,9 @@ TUI screen has a CLI twin: `rig logs -E`, `rig metrics`, `rig profile`, `rig que
 Tools: `rig_init` (draft or write rig.yaml for the project, with infrastructure presets), `rig_docs` (every
 rig.yaml key; `search` returns only the sections holding some words), `rig_envs`, `rig_status`, `rig_up`, `rig_down`, `rig_service`, `rig_scale`, `rig_build`, `rig_deploy`,
 `rig_logs`, `rig_query`, `rig_load`, `rig_kv`, `rig_infra`, `rig_task`, `rig_test`, `rig_ui` (acts in a rig UI that
-started the agent), `rig_file` (list, read, write, edit, move, delete inside the project; credentials and `.git`
+started the agent: reads the open screen, opens screens, shows only some Metrics panels, presses keys,
+so "open domain metrics, only the important panels" works from the chat; a change those keys start waits
+for your confirmation, and `O` on Metrics shows every panel again), `rig_file` (list, read, write, edit, move, delete inside the project; credentials and `.git`
 refused, delete needs `"confirm": true`), and `rig` for any other command.
 Each runs the CLI, so protections apply: changes to a protected environment need `"confirm": true`.
 

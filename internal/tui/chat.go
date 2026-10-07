@@ -764,8 +764,138 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 				return true, "showing logs", lt.start(m)
 			}
 		}
+	case "state":
+		return true, m.uiState(), nil
+	case "keys":
+		return m.uiKeys(strings.Split(a["keys"], "\n"))
+	case "panels":
+		return m.uiPanels(a["dashboard"], a["panels"])
 	}
 	return false, "unknown action " + r.Action, nil
+}
+
+// uiState is what rig_ui "state" answers: the screens, the open one's settings and its text.
+func (m *model) uiState() string {
+	var b strings.Builder
+	names := make([]string, len(m.tabs))
+	for i, t := range m.tabs {
+		names[i] = fmt.Sprintf("%d %s", i+1, t.name())
+	}
+	t := m.tabs[m.active]
+	fmt.Fprintf(&b, "screens: %s\nopen: %s\n", strings.Join(names, ", "), t.name())
+	if k, ok := t.(keeper); ok {
+		fmt.Fprintf(&b, "settings: %v\n", k.keep())
+	}
+	if mt, ok := t.(*metricsTab); ok {
+		var titles []string
+		for _, p := range mt.dashboard(m).Panels {
+			titles = append(titles, p.Title)
+		}
+		fmt.Fprintf(&b, "dashboards: %s\ndashboard %s panels: %s\n", strings.Join(mt.dashNames(m), ", "), mt.dashName(m), strings.Join(titles, " | "))
+	}
+	if m.confirm != nil {
+		b.WriteString("a confirmation is waiting for the user\n")
+	}
+	chatOpen := m.chat != nil && m.chat.open
+	if chatOpen {
+		m.chat.open = false
+	}
+	b.WriteString("screen:\n" + ansi.Strip(m.View()))
+	if chatOpen {
+		m.chat.open = true
+	}
+	return b.String()
+}
+
+// uiKeys presses keys on the open screen as the user would; it stops at a confirmation, which
+// stays the user's to answer.
+func (m *model) uiKeys(keys []string) (bool, string, tea.Cmd) {
+	focus := m.chat != nil && m.chat.focus
+	if focus {
+		m.chat.focus = false
+	}
+	m.driving = true
+	defer func() {
+		m.driving = false
+		if m.chat != nil && m.chat.open {
+			m.chat.focus = focus
+		}
+	}()
+	var cmds []tea.Cmd
+	for i, k := range keys {
+		if m.confirm != nil {
+			return false, fmt.Sprintf("stopped before %q: a confirmation is waiting for the user", strings.Join(keys[i:], " ")), batch(cmds...)
+		}
+		_, c := m.Update(keyOf(k))
+		cmds = append(cmds, c)
+	}
+	return true, "pressed; rig_ui state shows the screen once it loads", batch(cmds...)
+}
+
+// keyOf reads a key the way bubbletea names it (enter, esc, ctrl+r, shift+tab, up, f5, space);
+// anything else is typed as text.
+func keyOf(s string) tea.KeyMsg {
+	if s == "space" {
+		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+	}
+	for t := tea.KeyType(-100); t < 128; t++ {
+		if t != tea.KeyRunes && t.String() == s {
+			return tea.KeyMsg{Type: t}
+		}
+	}
+	alt, rest := false, s
+	if r, ok := strings.CutPrefix(s, "alt+"); ok && r != "" {
+		alt, rest = true, r
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(rest), Alt: alt}
+}
+
+// uiPanels shows only the named panels of a dashboard (every panel when titles is empty).
+func (m *model) uiPanels(dash, titles string) (bool, string, tea.Cmd) {
+	for i, tab := range m.tabs {
+		t, ok := tab.(*metricsTab)
+		if !ok {
+			continue
+		}
+		t.init()
+		if dash != "" {
+			found := false
+			for di, n := range t.dashNames(m) {
+				if strings.EqualFold(n, dash) {
+					t.dash, t.focus, t.scroll, t.zoom, found = di, 0, 0, false, true
+				}
+			}
+			if !found {
+				return false, "no dashboard " + dash + "; have " + strings.Join(t.dashNames(m), ", "), nil
+			}
+		}
+		have := map[string]bool{}
+		for _, p := range t.dashboard(m).Panels {
+			have[strings.ToLower(p.Title)] = true
+		}
+		only := map[string]bool{}
+		for _, ti := range strings.Split(titles, "\n") {
+			if ti = strings.ToLower(strings.TrimSpace(ti)); ti == "" {
+				continue
+			}
+			if !have[ti] {
+				return false, fmt.Sprintf("no panel %q on %s; rig_ui state lists them", ti, t.dashName(m)), nil
+			}
+			only[ti] = true
+		}
+		t.only[t.dashName(m)] = only
+		t.focus = 0
+		var cmd tea.Cmd
+		if m.active != i || !m.opened[i] {
+			cmd = m.openTab(i)
+		}
+		text := "showing every panel of " + t.dashName(m)
+		if len(only) > 0 {
+			text = fmt.Sprintf("showing %d panels of %s; O on the screen shows all", len(only), t.dashName(m))
+		}
+		return true, text, batch(cmd, t.reload(m))
+	}
+	return false, "this rig has no Metrics screen", nil
 }
 
 func (m *model) chatWidth(h int) int {
