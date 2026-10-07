@@ -913,3 +913,7 @@ func (t *manifestsTab) gotoService(m *model) tea.Cmd {
 	}
 	return m.showService(svc)
 }
+
+func (t *manifestsTab) atRoot() bool {
+	return t.issues == "" && t.filter == "" && (!t.tree || t.file == "" && (t.cwd == "" || t.cwd == filepath.Dir(t.cwd)))
+}

@@ -41,7 +41,36 @@ type grow struct {
 	pin bool
 }
 
-func newGrid(id string, cols ...gcol) *grid { return &grid{id: id, cols: cols, sortBy: -1} }
+func newGrid(id string, cols ...gcol) *grid {
+	g := &grid{id: id, cols: cols, sortBy: -1}
+	if s, ok := gridSorts[id]; ok && s.Col < len(cols) && cols[s.Col].title == s.Title {
+		g.sortBy, g.desc = s.Col, s.Desc
+	}
+	return g
+}
+
+// gridSort is how the user last sorted a grid; gridSorts keeps it by grid id, so a grid built
+// again (a screen reopened, a session resumed) sorts as it was left.
+type gridSort struct {
+	Col   int    `json:"col"`
+	Title string `json:"title"`
+	Desc  bool   `json:"desc"`
+}
+
+var gridSorts = map[string]gridSort{}
+
+// sortDefault sorts on c unless the user sorted this grid before.
+func (g *grid) sortDefault(c int, desc bool) {
+	if _, ok := gridSorts[g.id]; !ok {
+		g.sortBy, g.desc = c, desc
+	}
+}
+
+func (g *grid) remember() {
+	if g.sortBy >= 0 && g.sortBy < len(g.cols) {
+		gridSorts[g.id] = gridSort{g.sortBy, g.cols[g.sortBy].title, g.desc}
+	}
+}
 
 func col(title string, width int) gcol  { return gcol{title: title, width: width} }
 func rcol(title string, width int) gcol { return gcol{title: title, width: width, right: true} }
@@ -142,6 +171,7 @@ func (g *grid) sortOn(c int) {
 		g.sortBy, g.desc = c, false
 	}
 	g.sortRows()
+	g.remember()
 }
 
 // key handles movement and sorting keys; false when the key is not one of them.
@@ -171,6 +201,7 @@ func (g *grid) key(k tea.KeyMsg) bool {
 	default:
 		return false
 	}
+	g.remember()
 	return true
 }
 

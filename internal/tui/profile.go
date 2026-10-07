@@ -96,7 +96,7 @@ func (t *servicesTab) capture(m *model, svc, v string) tea.Cmd {
 func newProfView(svc string, res core.Profile) *profView {
 	v := &profView{svc: svc, res: res}
 	v.grid = newGrid("prof", rcol("FLAT", 10), rcol("FLAT%", 7), rcol("SUM%", 7), rcol("CUM", 10), rcol("CUM%", 7), col("FUNCTION", 0))
-	v.grid.sortBy, v.grid.desc = 0, true
+	v.grid.sortDefault(0, true)
 	var rows []grow
 	table := false
 	for _, l := range strings.Split(res.Summary, "\n") {

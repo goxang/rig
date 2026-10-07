@@ -1044,3 +1044,5 @@ func (t *testsTab) benchView(m *model, r *engine.TestRun, benches []engine.Bench
 	}
 	return panel(title, t.bench.view(m, 1, 5, w-2, h-2, true), w, h, true)
 }
+
+func (t *testsTab) atRoot() bool { return !t.outFocus }

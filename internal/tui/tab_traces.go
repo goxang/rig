@@ -74,7 +74,7 @@ func (t *tracesTab) interval() time.Duration {
 
 func (t *tracesTab) open(m *model) tea.Cmd {
 	t.list = newGrid("traces", col("TIME", 8), rcol("DURATION", 9), col("", 16), rcol("SPANS", 5), col("ROOT", 0), col("SERVICES", 0), col("", 5))
-	t.list.sortBy, t.list.desc = 0, true
+	t.list.sortDefault(0, true)
 	t.list.simple = []int{0, 1, 4, 6}
 	t.back, t.limit, t.auto = 1, 100, true
 	return t.refresh(m)
@@ -386,3 +386,5 @@ func (t *tracesTab) spansView(m *model, y, w, h int) string {
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, wf, panel("span", detail, dw, h, false))
 }
+
+func (t *tracesTab) atRoot() bool { return !t.inSpans }

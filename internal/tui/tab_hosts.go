@@ -48,7 +48,7 @@ func (t *hostsTab) open(m *model) tea.Cmd {
 	t.cpu, t.mem = map[string][]float64{}, map[string][]float64{}
 	if t.pods == nil {
 		t.pods = newGrid("hosts:pods", col("POD", 0), col("NAMESPACE", 30), rcol("CPU", 8), rcol("MEM", 9), rcol("AGE", 7))
-		t.pods.sortBy, t.pods.desc = 2, true
+		t.pods.sortDefault(2, true)
 	}
 	return t.refresh(m)
 }
@@ -262,3 +262,5 @@ func fdiv(v float64) float64 {
 	}
 	return v
 }
+
+func (t *hostsTab) atRoot() bool { return t.podsOf == "" }

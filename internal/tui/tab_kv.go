@@ -105,7 +105,7 @@ func (t *kvTab) comps(m *model) []string { return m.app.Names(core.KindKV) }
 
 func (t *kvTab) open(m *model) tea.Cmd {
 	t.list = newGrid("kv", col("", 2), col("KEY", 0))
-	t.list.sortBy = 1
+	t.list.sortDefault(1, false)
 	if cs := t.comps(m); len(cs) > 0 {
 		t.comp = cs[0]
 	}
@@ -847,3 +847,5 @@ func (t *kvTab) jump(m *model, h kvHit) tea.Cmd {
 	t.viaSearch = true
 	return t.load(m)
 }
+
+func (t *kvTab) atRoot() bool { return t.prefix == "" && !t.inTree && t.filter == "" && !t.viaSearch }

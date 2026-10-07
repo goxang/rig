@@ -678,3 +678,5 @@ func (t *loadTab) wheel(m *model, h hit, up bool) (tea.Cmd, bool) {
 	}
 	return nil, t.full.wheel(h, up)
 }
+
+func (t *loadTab) atRoot() bool { return t.full == nil }

@@ -88,7 +88,9 @@ type model struct {
 	statusErr bool
 	statusAt  time.Time
 	// errLog keeps the last errors, newest last; ! shows them in full
-	errLog     []loggedErr
+	errLog []loggedErr
+	// drafts are inputs left with esc, by label, given back when the same input opens again
+	drafts     map[string]draft
 	showErrors bool
 	// jobs are the operations started this session (act, do, tasks), shown with their output under !
 	jobsMu    sync.Mutex
@@ -180,10 +182,16 @@ type confirm struct {
 	always tea.Cmd
 }
 
+type draft struct {
+	From string `json:"from"`
+	Text string `json:"text"`
+}
+
 type prompt struct {
-	label  string
-	input  textinput.Model
-	submit func(string) tea.Cmd
+	label   string
+	initial string
+	input   textinput.Model
+	submit  func(string) tea.Cmd
 	// hint, when set, is what the AI completes the input with: the language and where it runs
 	hint    string
 	seq     int
@@ -464,6 +472,23 @@ func (m *model) back() (tea.Cmd, bool) {
 	return cmd, true
 }
 
+// home is where esc goes from a screen with nothing left to close: the Services list, every service.
+func (m *model) home() tea.Cmd {
+	for i, t := range m.tabs {
+		s, ok := t.(*servicesTab)
+		if !ok {
+			continue
+		}
+		if s.section != "" && s.list != nil {
+			s.setSection("")
+		}
+		if i != m.active {
+			return m.openTab(i)
+		}
+	}
+	return nil
+}
+
 func (m *model) openTab(i int) tea.Cmd {
 	m.trail = nil
 	m.active = i
@@ -567,14 +592,17 @@ func (m *model) act(label string, dangerous bool, f func(ctx context.Context) er
 func (m *model) ask(label, value string, submit func(string) tea.Cmd) {
 	in := newInput()
 	in.SetValue(value)
+	if d, ok := m.drafts[label]; ok && d.From == value {
+		in.SetValue(d.Text)
+	}
 	in.CursorEnd()
 	in.Focus()
-	m.prompt = &prompt{label: label, input: in, submit: submit}
+	m.prompt = &prompt{label: label, initial: value, input: in, submit: submit}
 }
 
 type loggedErr struct {
-	at   time.Time
-	text string
+	At   time.Time `json:"at"`
+	Text string    `json:"text"`
 }
 
 func (m *model) setStatus(s string, err bool) {
@@ -595,15 +623,27 @@ func (m *model) errorsView(h int) string {
 	var b strings.Builder
 	for i := len(m.errLog) - 1; i >= 0; i-- {
 		e := m.errLog[i]
-		b.WriteString(sDim.Render(e.at.Format("15:04:05")) + "\n" + sRed.Render(wordWrap(e.text, w-4)) + "\n\n")
+		b.WriteString(sDim.Render(e.At.Format("15:04:05")) + "\n" + sRed.Render(wordWrap(e.Text, w-4)) + "\n\n")
 	}
+	var keys [][2]string
+	title, border := "activity · errors, newest first", cRed
 	if len(m.errLog) == 0 {
-		b.WriteString(sGreen.Render("no errors this session") + "\n\n")
+		title, border = "activity", cAccent
+		if len(m.jobList()) == 0 {
+			b.WriteString("nothing started and nothing failed yet\n\n" + sDim.Render("what you start (tasks, deploys, restarts, scaling) shows here with its output, and so do errors") + "\n\n")
+		} else {
+			b.WriteString(sGreen.Render("no errors") + "\n\n")
+		}
+	} else {
+		keys = append(keys, [2]string{"y", "copy them all"})
 	}
-	b.WriteString(sDim.Render("y copies them all · tab operations · esc closes"))
+	if len(m.jobList()) > 0 {
+		keys = append(keys, [2]string{"tab", "operations"})
+	}
+	b.WriteString(keyHints(append(keys, [2]string{"esc", "close"})))
 	body := clip(b.String(), w, max(3, h-6))
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cRed).Padding(1, 2).Width(w).
-		Render(sTitle.Render("errors (newest first)") + "\n\n" + body)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(border).Padding(1, 2).Width(w).
+		Render(sTitle.Render(title) + "\n\n" + body)
 }
 
 // errorPanel shows an error that does not fit the status line wrapped in a box above the footer.
@@ -1220,6 +1260,12 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "esc":
 			p := m.prompt
 			m.prompt = nil
+			if v := p.input.Value(); v != p.initial && p.input.EchoMode == textinput.EchoNormal {
+				if m.drafts == nil {
+					m.drafts = map[string]draft{}
+				}
+				m.drafts[p.label] = draft{p.initial, v}
+			}
 			if p.escape != nil {
 				return p.escape()
 			}
@@ -1237,6 +1283,7 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 				}
 				v = p.described
 			}
+			delete(m.drafts, p.label)
 			m.prompt = nil
 			cmd := p.submit(v)
 			if m.prompt != p {
@@ -1383,6 +1430,9 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 		case "esc", "backspace":
 			if cmd, ok := m.back(); ok {
 				return cmd
+			}
+			if r, ok := t.(rooted); ok && s == "esc" && r.atRoot() {
+				return m.home()
 			}
 		}
 	}

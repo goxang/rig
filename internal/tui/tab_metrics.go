@@ -1647,4 +1647,4 @@ func wrap(s string, w int) string {
 	return b.String()
 }
 
-func (t *metricsTab) atRoot() bool { return !t.zoom && t.cursor < 0 }
+func (t *metricsTab) atRoot() bool { return !t.zoom && t.cursor < 0 && !t.hl }

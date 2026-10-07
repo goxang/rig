@@ -542,7 +542,7 @@ func (t *dataTab) show(m *model) tea.Cmd {
 	}
 	if t.current().kind == string(core.KindMessaging) {
 		t.right = newGrid("dright", col("QUEUE", 0), rcol("DEPTH", 8), col("TREND", 16), rcol("UNACKED", 8), rcol("CONS", 5), rcol("IN", 8), rcol("OUT", 8))
-		t.right.sortBy, t.right.desc = 1, true
+		t.right.sortDefault(1, true)
 		t.right.simple = []int{0, 1, 4}
 		t.fill()
 		return t.loadQueues(m)
@@ -1130,3 +1130,5 @@ func globMatcher(p string) func(string) bool {
 	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(p), `\*`, ".*") + "$")
 	return func(s string) bool { return re.MatchString(strings.ToLower(s)) }
 }
+
+func (t *dataTab) atRoot() bool { return t.focus == 0 && t.query == "" && t.filter == "" }

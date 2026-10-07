@@ -94,7 +94,10 @@ there types the answer. Several tasks can run at once. A question or an input op
 above the keys, which then show the keys that box takes; `esc` on it returns to the picker or box it
 came from. Opening a service shows its instances first: `enter` follows the picked one's log (or all
 of them), `esc` goes back to the instances, then to the list. A jump to another screen (a service's
-metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there. The help
+metrics, its logs) is walked back with `esc` or `⌫` once nothing is left to close there; with no jump
+to walk back, `esc` goes home: the Services list, every service. An input left with `esc` keeps what was
+typed as a draft the next time it opens. `S` saves the session (and pins it): the screen, each grid's
+sort, drafts, query history and results, the activity view and the errors come back with it. The help
 (`?`) filters as you type. A border under the mouse lights up and drags to resize the panes. Errors a
 new setup meets (a tool not installed, Docker not running, no Kubernetes cluster) say what to do.
 
