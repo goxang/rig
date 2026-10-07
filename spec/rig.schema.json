@@ -328,6 +328,13 @@
           "description": "saved queries replacing the project's of the same name",
           "type": "object"
         },
+        "readonly": {
+          "description": "every change is refused, even with --yes: start, stop, deploy, exec, builds, data and KV writes, load; reads, logs, metrics, traces and read-only queries (SQL in a read-only transaction) still work",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
         "runtime": {
           "allOf": [
             {
@@ -1021,6 +1028,13 @@
                 "string",
                 "number",
                 "boolean"
+              ]
+            },
+            "readonly": {
+              "description": "Marks a task that changes nothing, so it runs in a read-only environment too.",
+              "type": [
+                "boolean",
+                "string"
               ]
             },
             "steps": {

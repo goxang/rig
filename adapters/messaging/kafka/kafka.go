@@ -199,6 +199,9 @@ func (k *Kafka) Queues(ctx context.Context) ([]core.Queue, error) {
 
 // Purge deletes every record the topic holds.
 func (k *Kafka) Purge(ctx context.Context, topic string) error {
+	if err := core.Writable(k.env); err != nil {
+		return err
+	}
 	adm, err := k.admin(ctx)
 	if err != nil {
 		return err
@@ -218,6 +221,9 @@ func (k *Kafka) Purge(ctx context.Context, topic string) error {
 
 // Publish sends body to target: "topic", or "topic/key".
 func (k *Kafka) Publish(ctx context.Context, target string, body []byte) error {
+	if err := core.Writable(k.env); err != nil {
+		return err
+	}
 	cl, err := k.client(ctx)
 	if err != nil {
 		return err

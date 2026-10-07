@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"github.com/goxang/rig/ai"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,7 +61,7 @@ func (a *App) SharedElsewhere(name string) bool {
 }
 
 func (a *App) Start(ctx context.Context, name string) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -68,7 +69,7 @@ func (a *App) Start(ctx context.Context, name string) error {
 }
 
 func (a *App) Stop(ctx context.Context, name string) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,7 @@ func (a *App) Stop(ctx context.Context, name string) error {
 }
 
 func (a *App) Restart(ctx context.Context, name string) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func (a *App) Restart(ctx context.Context, name string) error {
 }
 
 func (a *App) Scale(ctx context.Context, name string, n int) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -110,7 +111,7 @@ func (a *App) Logs(ctx context.Context, name string, o core.LogOptions) (<-chan 
 }
 
 func (a *App) Exec(ctx context.Context, name string, o core.ExecOptions) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func (a *App) Exec(ctx context.Context, name string, o core.ExecOptions) error {
 
 // Deploy rolls out a service. A tag deploys that tag of its image from the registry without building.
 func (a *App) Deploy(ctx context.Context, name, tag string) error {
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -213,6 +214,9 @@ func (a *App) StatusAll(ctx context.Context, names []string) []core.Status {
 
 // bridge makes shared services reachable inside this environment's runtime, when it needs that.
 func (a *App) bridge(ctx context.Context, name string) error {
+	if err := a.Writable(); err != nil {
+		return err
+	}
 	b, ok := a.runtime.(core.Bridger)
 	if !ok || !a.SharedElsewhere(name) {
 		return nil
@@ -312,9 +316,28 @@ func (a *App) RunQuery(ctx context.Context, comp, text string) (core.Table, erro
 	if !ok {
 		return core.Table{}, fmt.Errorf("%s does not answer queries", comp)
 	}
+	if writes(q.QueryLanguage(), text) {
+		if err := a.Writable(); err != nil {
+			return core.Table{}, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	return q.RunQuery(ctx, text)
+}
+
+// writes tells whether a query in lang may change something. The SQL adapter also runs every query
+// of a read-only environment in a read-only transaction; the other languages only read.
+func writes(lang, q string) bool {
+	switch lang {
+	case "sql", "redis":
+		return ai.ClassifyQuery(q) != ai.Read
+	case "http":
+		m, _, _ := strings.Cut(strings.TrimSpace(q), " ")
+		m = strings.ToUpper(m)
+		return m != "GET" && m != "HEAD" && !strings.HasPrefix(m, "/")
+	}
+	return false
 }
 
 // ---- per-service env overrides (rig setenv, the Load screen), kept in the environment's state ----
@@ -434,7 +457,7 @@ func (a *App) SetAutoscale(ctx context.Context, name string, b core.Bounds) erro
 	if err := a.Guard(); err != nil {
 		return err
 	}
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}
@@ -463,7 +486,7 @@ func (a *App) SetResources(ctx context.Context, name string, r core.Resources) e
 	if err := a.Guard(); err != nil {
 		return err
 	}
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		return err
 	}

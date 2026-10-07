@@ -13,6 +13,7 @@ type Scope struct {
 	Env       string
 	Runtime   string
 	Protected bool
+	ReadOnly  bool
 	Envs      []string
 	// Deny are project paths the assistant must not read (rig.yaml ai.deny), on top of DefaultDeny.
 	Deny []string
@@ -42,6 +43,10 @@ You help a developer run, watch, debug and tune its services. Answer short and p
 `, s.Project, s.Dir, s.File, s.Env, s.Runtime, protectedNote(s.Protected), s.Env, otherEnvs(s), strings.Join(s.denied(), ", "))
 	if s.Protected {
 		b.WriteString(`- ` + s.Env + ` is PROTECTED (shared or production-like). Read freely. Change only what the user asked for; a direct request (even "stop all services") is fine. Never take a dangerous step on your own initiative: propose it and wait.
+`)
+	}
+	if s.ReadOnly {
+		b.WriteString(`- ` + s.Env + ` is READ-ONLY: rig refuses every change there, confirmed or not. Investigate and explain; to change something, the user does it in another environment.
 `)
 	}
 	b.WriteString(`- Never print secrets (passwords, tokens, keys) you come across in values, logs or code: say they exist and where.

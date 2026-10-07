@@ -47,6 +47,12 @@ func (e Endpoint) Base(ctx context.Context, env core.Env) (string, error) {
 
 // Do sends a request to base+path and decodes a JSON answer into out (when out is not nil).
 func (e Endpoint) Do(ctx context.Context, env core.Env, method, path string, body any, out any) error {
+	// every adapter that writes over HTTP (kv puts, queue purges, publishes) comes through here
+	if method != "GET" && method != "HEAD" {
+		if err := core.Writable(env); err != nil {
+			return err
+		}
+	}
 	base, err := e.Base(ctx, env)
 	if err != nil {
 		return err

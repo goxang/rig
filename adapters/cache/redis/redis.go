@@ -4,6 +4,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"github.com/goxang/rig/ai"
 	"io"
 	"sort"
 	"strconv"
@@ -78,6 +79,11 @@ var unsafe = map[string]bool{"FLUSHALL": true, "FLUSHDB": true, "CONFIG": true, 
 func (r *Cache) Do(ctx context.Context, args ...string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("give a redis command, e.g. GET key")
+	}
+	if ai.ClassifyQuery(strings.Join(args, " ")) != ai.Read {
+		if err := core.Writable(r.env); err != nil {
+			return "", err
+		}
 	}
 	if unsafe[strings.ToUpper(args[0])] && !r.opt.Unsafe {
 		return "", fmt.Errorf("%s is blocked; set unsafe: true on the component to allow it", strings.ToUpper(args[0]))

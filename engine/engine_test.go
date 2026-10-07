@@ -88,8 +88,12 @@ services:
 environments:
   test: { runtime: { type: fake } }
   prod: { runtime: { type: fake }, protected: true }
+  ro: { runtime: { type: fake }, readonly: true }
 components:
   load: { type: fakeload, max: 100, step: 25 }
+tasks:
+  touch: [ "true" ]
+  look: { readonly: true, steps: [ "true" ] }
 `
 
 func open(t *testing.T, env string) *App {

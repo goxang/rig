@@ -102,7 +102,7 @@ func (a *App) Watch(ctx context.Context, names []string, emit func(WatchEvent)) 
 // processes. A build that fails leaves the service running what it ran.
 func (a *App) Rebuild(ctx context.Context, name string, emit func(WatchEvent)) {
 	start := time.Now()
-	rt, s, err := a.Owner(name)
+	rt, s, err := a.changing(name)
 	if err != nil {
 		emit(WatchEvent{Service: name, State: "failed", Err: err})
 		return

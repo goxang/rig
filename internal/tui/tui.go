@@ -462,6 +462,10 @@ func (m *model) needsConfirm(dangerous bool) bool {
 // act runs a change, asking first when needsConfirm says so; the answer also counts as the
 // confirmation a protected environment needs.
 func (m *model) act(label string, dangerous bool, f func(ctx context.Context) error) tea.Cmd {
+	if err := m.app.Writable(); err != nil {
+		m.setStatus(label+": "+err.Error(), true)
+		return nil
+	}
 	a, ctx := m.app, core.WithConfirmed(m.work())
 	run := func() tea.Msg {
 		a.Confirmed = true
@@ -1459,7 +1463,9 @@ func (m *model) pickEnv() {
 		if e.Runtime != nil {
 			d = padRight(e.Runtime.Type, 11)
 		}
-		if e.Protected {
+		if e.ReadOnly {
+			d += sAmber.Render("read-only ")
+		} else if e.Protected {
 			d += sRed.Render("protected ")
 		}
 		desc = append(desc, d+e.Description)
@@ -1533,7 +1539,9 @@ func (m *model) header() string {
 	if ns := a.Namespace(); ns != "" {
 		left += sDim.Render("  ns ") + sTitle.Render(ns)
 	}
-	if a.Env.Protected {
+	if a.Env.ReadOnly {
+		left += " " + lipgloss.NewStyle().Background(cAmber).Foreground(lipgloss.Color("#000000")).Bold(true).Render(" READ-ONLY ")
+	} else if a.Env.Protected {
 		left += " " + lipgloss.NewStyle().Background(cRed).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" PROTECTED ")
 	}
 	if m.simple {
@@ -1762,7 +1770,9 @@ func (m *model) helpLines() []string {
 	if m.needsConfirm(true) {
 		ask = "dangerous changes (stop, deploy, delete, edits) ask first: enter confirms"
 	}
-	if m.app.Env.Protected {
+	if m.app.Env.ReadOnly {
+		ask = "read-only: every change is refused, reads and queries work"
+	} else if m.app.Env.Protected {
 		ask = "protected: every change asks first, enter confirms"
 	}
 	b.WriteString("\n" + sDim.Render(ask) + "\n")

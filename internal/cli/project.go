@@ -175,6 +175,9 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				return err
 			}
 			if len(args) >= 2 && args[0] == "ssh" {
+				if err := a.Writable(); err != nil {
+					return err
+				}
 				cmd, err := h.Shell(ctx, args[1], args[2:])
 				if err != nil {
 					return err

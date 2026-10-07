@@ -23,7 +23,7 @@ func (a *App) AI(sock string) (*ai.Runner, error) {
 	}
 	sc := ai.Scope{Project: a.Spec.Name, Dir: a.Spec.Dir, File: a.Spec.File, Envs: a.Spec.EnvironmentNames()}
 	if a.Env != nil {
-		sc.Env, sc.Protected = a.Env.Name, a.Env.Protected
+		sc.Env, sc.Protected, sc.ReadOnly = a.Env.Name, a.Env.Protected, a.Env.ReadOnly
 		if a.Env.Runtime != nil {
 			sc.Runtime = a.Env.Runtime.Type
 		}

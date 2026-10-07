@@ -185,7 +185,19 @@ func (d *DB) Query(ctx context.Context, db, q string) (core.Table, error) {
 	if err != nil {
 		return core.Table{}, err
 	}
-	rows, err := p.QueryContext(ctx, q)
+	var rows *gosql.Rows
+	if core.Writable(d.env) != nil {
+		// postgres and mysql refuse writes in a read-only transaction; SQL Server has none, so its
+		// transaction is only ever rolled back
+		tx, txErr := p.BeginTx(ctx, &gosql.TxOptions{ReadOnly: d.opt.Driver != "mssql"})
+		if txErr != nil {
+			return core.Table{}, txErr
+		}
+		defer tx.Rollback() //nolint:errcheck
+		rows, err = tx.QueryContext(ctx, q)
+	} else {
+		rows, err = p.QueryContext(ctx, q)
+	}
 	if err != nil {
 		return core.Table{}, err
 	}
@@ -230,6 +242,9 @@ func format(v any) string {
 }
 
 func (d *DB) Exec(ctx context.Context, db, q string) (int64, error) {
+	if err := core.Writable(d.env); err != nil {
+		return 0, err
+	}
 	p, err := d.pool(ctx, db)
 	if err != nil {
 		return 0, err

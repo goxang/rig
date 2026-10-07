@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"os/exec"
@@ -39,6 +40,17 @@ var Kinds = []Kind{KindRuntime, KindBuilder, KindMetrics, KindTracing, KindProfi
 	KindDatabase, KindCache, KindMessaging, KindKV, KindLoad, KindHosts, KindQuery}
 
 var ErrUnsupported = errors.New("not supported by this adapter")
+
+// ErrReadOnly refuses a change in an environment rig.yaml marks readonly: true, whatever confirms it.
+var ErrReadOnly = errors.New("environment is read-only (readonly: true in rig.yaml)")
+
+// Writable refuses with ErrReadOnly when env's environment is read-only.
+func Writable(env Env) error {
+	if e := env.Environment(); e != nil && e.ReadOnly {
+		return fmt.Errorf("%s: %w", e.Name, ErrReadOnly)
+	}
+	return nil
+}
 
 // Env is what an adapter can reach: the project, the runtime of the active environment,
 // address resolution through that runtime, and the other components.

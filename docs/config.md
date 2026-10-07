@@ -65,6 +65,7 @@ is out of date.
 |---|---|
 | `runtime` | a component: `type` plus the runtime's options (below) |
 | `protected` | changes need `--yes` or the TUI's confirmation |
+| `readonly` | every change is refused, even with `--yes`: start, stop, deploy, exec, builds, data and KV writes, load; reads, logs, metrics, traces and read-only queries (SQL in a read-only transaction) still work |
 | `description` | shown by `rig env` and the TUI |
 | `vars` | variables for this environment |
 | `only` | services and groups that exist here; dependencies on the rest are dropped |
@@ -274,7 +275,7 @@ run it with different parameters.
 (`rig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
 first step on any environment. Neither asks with `--yes` or without a terminal (agents, CI, a step
 of another task). A protected environment asks once on a terminal instead of refusing without
-`--yes`. Steps print how long they took; secret values in a step's title show as `${NAME}`.
+`--yes`. A read-only environment runs only tasks marked `readonly: true`. Steps print how long they took; secret values in a step's title show as `${NAME}`.
 `rig completion zsh|bash|fish` completes tasks, their args, services, components and `-e`.
 
 In the TUI, `T` runs any task; the KV screen's `F` lists the tasks named `kv-*` (filling the store from

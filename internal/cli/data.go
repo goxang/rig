@@ -45,6 +45,9 @@ func dataCommands() []*cobra.Command {
 			return d.CreateDatabase(ctx, args[0])
 		})},
 		&cobra.Command{Use: "drop <name>", Args: cobra.ExactArgs(1), Short: "drop a database (asks for --yes)", RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
+			if err := a.Guard(); err != nil {
+				return err
+			}
 			if !g.yes {
 				return fmt.Errorf("dropping %s deletes its data; repeat with --yes", args[0])
 			}

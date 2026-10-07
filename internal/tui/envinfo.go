@@ -106,6 +106,9 @@ func envInfoBox(ctx context.Context, a *engine.App) *envBox {
 	if ns := a.Namespace(); ns != "" {
 		row("namespace", ns, "", "")
 	}
+	if env.ReadOnly {
+		row("read-only", sAmber.Render("yes"), "every change is refused, even confirmed", "")
+	}
 	if env.Protected {
 		row("protected", sRed.Render("yes"), "every change asks", "")
 	}

@@ -130,6 +130,9 @@ func (a *App) Namespaces(ctx context.Context) ([]string, error) {
 }
 
 func (a *App) CreateNamespace(ctx context.Context, ns string) error {
+	if err := a.Writable(); err != nil {
+		return err
+	}
 	if !a.onKubernetes() {
 		return fmt.Errorf("%s is not on Kubernetes", a.envName())
 	}

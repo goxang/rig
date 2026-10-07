@@ -61,7 +61,7 @@ func (a *App) infraLike(n string) bool {
 // layer to be ready before the next starts. Dependencies pulled in by the targets, and infrastructure
 // when no target is given, are only started when not already running, never redeployed.
 func (a *App) Up(ctx context.Context, targets []string, o UpOptions) error {
-	if err := a.Guard(); err != nil && !o.DryRun {
+	if err := a.Guard(); err != nil && (!o.DryRun || errors.Is(err, core.ErrReadOnly)) {
 		return err
 	}
 	out := o.Out
@@ -303,6 +303,9 @@ func (a *App) Build(ctx context.Context, s *spec.Service, tag string, out io.Wri
 // BuildFrom builds one service's image with the builder its build section asks for, from a git ref
 // when given, and returns the reference. Pushing over a tag the registry already has needs confirmation.
 func (a *App) BuildFrom(ctx context.Context, s *spec.Service, tag, ref string, out io.Writer) (string, error) {
+	if err := a.Writable(); err != nil {
+		return "", err
+	}
 	if s.Build == nil {
 		return s.Image, nil
 	}

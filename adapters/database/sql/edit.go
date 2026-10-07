@@ -73,6 +73,9 @@ func (d *DB) primaryKey(ctx context.Context, path []string, quoted string, t cor
 // change runs stmt, narrowed to each row by its primary key, in one transaction; each must touch
 // exactly one row.
 func (d *DB) change(ctx context.Context, path []string, t core.Table, rows []int, stmt func(table string) (string, []any)) error {
+	if err := core.Writable(d.env); err != nil {
+		return err
+	}
 	table, err := d.table(path)
 	if err != nil {
 		return err

@@ -338,8 +338,12 @@ func (a *App) envName() string {
 	return "environment " + a.Env.Name
 }
 
-// Guard refuses a mutating operation on a protected environment the caller did not confirm.
+// Guard refuses a mutating operation on a read-only environment, and on a protected one the caller
+// did not confirm. Every change passes here (or through Writable), so readonly holds whoever calls.
 func (a *App) Guard() error {
+	if err := a.Writable(); err != nil {
+		return err
+	}
 	if a.Env == nil || !a.Env.Protected {
 		return nil
 	}
@@ -353,6 +357,17 @@ func (a *App) Guard() error {
 		return fmt.Errorf("%s: %w", a.Env.Name, ErrProtected)
 	}
 	return nil
+}
+
+// Writable refuses any change to a read-only environment; --yes and a confirmation do not lift it.
+func (a *App) Writable() error { return core.Writable(a) }
+
+// changing is Owner for an operation that changes the service.
+func (a *App) changing(name string) (core.Runtime, *spec.Service, error) {
+	if err := a.Writable(); err != nil {
+		return nil, nil, err
+	}
+	return a.Owner(name)
 }
 
 // Resolve turns svc://service:port[/path] into an address reachable from here; anything else is returned as is.
@@ -415,6 +430,9 @@ func (a *App) LoadState(ctx context.Context) (map[string]string, error) {
 
 // SetState merges kv into the state; an empty value deletes the key.
 func (a *App) SetState(ctx context.Context, kv map[string]string) error {
+	if err := a.Writable(); err != nil {
+		return err
+	}
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	m, err := a.LoadState(ctx)

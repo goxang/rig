@@ -119,6 +119,10 @@ func (t *hostsTab) update(m *model, msg tea.Msg) tea.Cmd {
 }
 
 func (t *hostsTab) shell(m *model, host string, command []string) tea.Cmd {
+	if err := m.app.Writable(); err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
 	h, _, err := engine.Get[core.Hosts](m.app, core.KindHosts, "")
 	if err != nil {
 		m.setStatus(err.Error(), true)

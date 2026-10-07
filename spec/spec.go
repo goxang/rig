@@ -190,14 +190,17 @@ type Probe struct {
 }
 
 type Environment struct {
-	Name        string                `yaml:"-"`
-	Description string                `yaml:"description"`
-	Runtime     *Component            `yaml:"runtime"`
-	Protected   bool                  `yaml:"protected"`
-	Vars        map[string]string     `yaml:"vars"`
-	Only        []string              `yaml:"only"`
-	Components  map[string]*Component `yaml:"components"`
-	Services    map[string]yaml.Node  `yaml:"services"`
+	Name        string     `yaml:"-"`
+	Description string     `yaml:"description"`
+	Runtime     *Component `yaml:"runtime"`
+	Protected   bool       `yaml:"protected"`
+	// ReadOnly refuses every change (start, stop, deploy, exec, data and KV writes, load), even with
+	// --yes; reads, logs, metrics, traces and read-only queries still work.
+	ReadOnly   bool                  `yaml:"readonly"`
+	Vars       map[string]string     `yaml:"vars"`
+	Only       []string              `yaml:"only"`
+	Components map[string]*Component `yaml:"components"`
+	Services   map[string]yaml.Node  `yaml:"services"`
 	// Tasks replace the project's tasks of the same name in this environment.
 	Tasks map[string]Task `yaml:"tasks"`
 	// Queries replace the project's queries of the same name in this environment.
@@ -288,8 +291,10 @@ type Task struct {
 	Help string    `yaml:"help"`
 	Args []TaskArg `yaml:"args"`
 	// Confirm asks before the first step, on any environment; --yes answers it.
-	Confirm bool     `yaml:"confirm"`
-	Steps   []string `yaml:"steps"`
+	Confirm bool `yaml:"confirm"`
+	// ReadOnly marks a task that changes nothing, so it runs in a read-only environment too.
+	ReadOnly bool     `yaml:"readonly"`
+	Steps    []string `yaml:"steps"`
 }
 
 // TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).

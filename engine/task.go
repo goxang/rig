@@ -166,8 +166,10 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 	if !ok {
 		return fmt.Errorf("no task %q in %s (have %v)", name, a.envName(), a.TaskNames())
 	}
-	if err := a.Guard(); err != nil {
-		return err
+	if !task.ReadOnly {
+		if err := a.Guard(); err != nil {
+			return err
+		}
 	}
 	var positional, params []string
 	for _, arg := range args {
