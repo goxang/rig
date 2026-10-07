@@ -102,6 +102,8 @@ type model struct {
 	mouseOff bool
 	// chat is the assistant's drawer (@); sock is where its tools reach this UI
 	chat *chat
+	// aiAllowed are the assistant's commands the user said "always" to, for this run of rig
+	aiAllowed map[string]bool
 	sock string
 	ai   *ai.Runner
 	// completeCancel stops the AI completion in flight
@@ -145,6 +147,8 @@ type confirm struct {
 	text   string
 	run    tea.Cmd
 	cancel func()
+	// always, when set, is what "a" runs: yes now and to the same question for the rest of the session
+	always tea.Cmd
 }
 
 type prompt struct {
@@ -1036,6 +1040,11 @@ func (m *model) key(k tea.KeyMsg) tea.Cmd {
 			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
 			return c.run
 		}
+		if k.String() == "a" && c.always != nil {
+			m.busy++
+			m.setStatus(strings.TrimSuffix(c.text, "?")+"…", false)
+			return c.always
+		}
 		if c.cancel != nil {
 			c.cancel()
 		}
@@ -1627,6 +1636,9 @@ func (m *model) footer() string {
 	switch {
 	case m.confirm != nil:
 		line = sAmber.Bold(true).Render(" "+m.confirm.text) + "   " + m.buttons("confirm (enter)", "cancel (any key)", lipgloss.Width(sAmber.Bold(true).Render(" "+m.confirm.text))+3, m.h-2)
+		if m.confirm.always != nil {
+			line += sDim.Render("  a: always, this session")
+		}
 	case m.prompt != nil && m.prompt.popup:
 		var hs []string
 		for _, h := range [][2]string{{"enter", "run"}, {"esc", "cancel"}, {"ctrl+a", "select all"}, {"ctrl+c ctrl+y", "copy"}, {"drag", "select text"}, {"tab", "take the AI's / the template"}} {

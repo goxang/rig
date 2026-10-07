@@ -13,15 +13,20 @@ import (
 // Request is what rig's MCP server asks the rig that started the assistant: a person's go-ahead
 // (op "approve") or an action in the UI (op "ui").
 type Request struct {
-	Op     string            `json:"op"`
-	Text   string            `json:"text,omitempty"`
-	Action string            `json:"action,omitempty"`
-	Args   map[string]string `json:"args,omitempty"`
+	Op   string `json:"op"`
+	Text string `json:"text,omitempty"`
+	// Command is the exact action an "approve" is for, which "always allow" remembers.
+	Command string            `json:"command,omitempty"`
+	Action  string            `json:"action,omitempty"`
+	Args    map[string]string `json:"args,omitempty"`
 }
 
+// Reply answers a Request. For an "approve", Text names who said yes, or why not.
 type Reply struct {
 	OK   bool   `json:"ok"`
 	Text string `json:"text,omitempty"`
+	// NoOne is an "approve" nobody could be asked (no terminal): the user's quoted words decide.
+	NoOne bool `json:"no_one,omitempty"`
 }
 
 // SocketPath is one per rig process: short, since unix socket paths are capped near 100 bytes.

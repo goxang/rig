@@ -3,10 +3,12 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,8 +41,9 @@ models work with no setup; an existing opencode or Claude Code login is used as 
   rig ai config provider=deepseek api_key=sk-… proxy=localhost:10808
   rig resume                     pick a conversation (or a saved UI session) to continue or close
 
-Changes are checked before they run: other environments are out of reach, and on protected or
-Kubernetes environments a dangerous step you did not ask for in so many words waits for your yes.`,
+Changes are checked before they run: other environments are out of reach, reads run at once, and
+every change shows its command and waits for your yes (or "always" for that command, this session).
+rig ai log lists what the assistant ran, who confirmed it and how it went.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if cont && session == "" {
@@ -57,7 +60,7 @@ Kubernetes environments a dangerous step you did not ask for in so many words wa
 	}
 	c.Flags().StringVarP(&session, "session", "s", "", "continue this conversation")
 	c.Flags().BoolVarP(&cont, "continue", "c", false, "continue the last conversation")
-	c.AddCommand(aiConfigCommand(), &cobra.Command{
+	c.AddCommand(aiConfigCommand(), aiLogCommand(), &cobra.Command{
 		Use:   "sessions",
 		Short: "conversations of this project, newest first",
 		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
@@ -166,16 +169,35 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 	sock := ai.SocketPath()
 	tty := term.IsTerminal(int(os.Stdin.Fd()))
 	in := bufio.NewReader(os.Stdin)
+	var mu sync.Mutex
+	always := map[string]bool{}
 	stop, err := ai.Serve(sock, func(r ai.Request) ai.Reply {
-		if r.Op != "approve" {
+		switch r.Op {
+		case "audit":
+			fmt.Fprintln(os.Stderr, dim("  "+r.Text))
+			return ai.Reply{OK: true}
+		case "approve":
+		default:
 			return ai.Reply{Text: "no rig UI here: run `rig ai` without a question for the UI"}
 		}
 		if !tty {
-			return ai.Reply{Text: "no terminal to ask on"}
+			return ai.Reply{NoOne: true, Text: "no terminal to ask on"}
 		}
-		fmt.Fprint(os.Stderr, "\n"+amber("? "+r.Text)+" [y/N] ")
+		mu.Lock()
+		defer mu.Unlock()
+		if always[r.Command] {
+			return ai.Reply{OK: true, Text: "allowed for this session"}
+		}
+		fmt.Fprint(os.Stderr, "\n"+amber("? "+r.Text)+" [y/N/a=always this session] ")
 		line, _ := in.ReadString('\n')
-		return ai.Reply{OK: strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "y")}
+		switch strings.ToLower(strings.TrimSpace(line)) {
+		case "y", "yes":
+			return ai.Reply{OK: true, Text: "the user, on the terminal"}
+		case "a", "always":
+			always[r.Command] = true
+			return ai.Reply{OK: true, Text: "the user, on the terminal (always this session)"}
+		}
+		return ai.Reply{}
 	})
 	if err != nil {
 		return err
@@ -212,4 +234,49 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 	})
 	fmt.Fprintln(os.Stderr, dim("continue: rig ai -s "+s.ID+" \"…\"  ·  rig resume "+s.ID))
 	return err
+}
+
+func aiLogCommand() *cobra.Command {
+	var n int
+	var all, asJSON bool
+	c := &cobra.Command{
+		Use:   "log",
+		Short: "what the assistant ran on this environment: time, command, result, who confirmed",
+		Args:  cobra.NoArgs,
+		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
+			es, err := ai.ReadAudit(a.AuditFile())
+			if err != nil {
+				return err
+			}
+			if !all {
+				kept := es[:0]
+				for _, e := range es {
+					if e.Risk != ai.Read.String() || e.Result != "ok" {
+						kept = append(kept, e)
+					}
+				}
+				es = kept
+			}
+			if n > 0 && len(es) > n {
+				es = es[len(es)-n:]
+			}
+			if asJSON {
+				return json.NewEncoder(os.Stdout).Encode(es)
+			}
+			if len(es) == 0 {
+				fmt.Println(dim("the assistant changed nothing on " + a.Env.Name + " yet (--all shows its reads too)"))
+				return nil
+			}
+			var rows [][]string
+			for _, e := range es {
+				rows = append(rows, []string{e.At.Local().Format("01-02 15:04:05"), e.Result, e.Risk, e.By, e.Command})
+			}
+			printTable(os.Stdout, []string{"TIME", "RESULT", "RISK", "CONFIRMED BY", "COMMAND"}, rows)
+			return nil
+		}),
+	}
+	c.Flags().IntVarP(&n, "last", "n", 50, "the newest n entries (0: all)")
+	c.Flags().BoolVar(&all, "all", false, "reads too, not only changes and refusals")
+	c.Flags().BoolVar(&asJSON, "json", false, "entries as JSON")
+	return c
 }

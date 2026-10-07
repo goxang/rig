@@ -222,28 +222,22 @@ func keptInside(root string, deny []string, dir string) string {
 	return kept
 }
 
-// deleteGoAhead is the user's yes to a delete: quoted in user_request, approved in the rig UI the
-// assistant runs in, or, for an agent of its own, confirm: true.
+// deleteGoAhead is the user's yes to a delete: approved in the rig UI or terminal the assistant runs
+// in, quoted in user_request, or, for an agent of its own, confirm: true.
 func deleteGoAhead(args map[string]any, what string) error {
-	if os.Getenv(ai.EnvLock) == "" {
+	lock := os.Getenv(ai.EnvLock)
+	if lock == "" {
 		if str(args, "confirm") == "true" {
 			return nil
 		}
 		return fmt.Errorf("not deleted: deleting %s needs the user's go-ahead; ask them, then call again with confirm: true", what)
 	}
-	if ai.Quoted(ai.LastPrompt(os.Getenv(ai.EnvDir)), str(args, "user_request")) {
-		return nil
-	}
-	sock := os.Getenv(ai.EnvSock)
-	if sock == "" {
-		return fmt.Errorf("not deleted: deleting %s needs the user's go-ahead. Ask them; when they agree, call again with user_request set to their words, verbatim", what)
-	}
-	r, err := ai.Call(sock, ai.Request{Op: "approve", Text: "AI: delete " + what}, 10*time.Minute)
+	e := ai.AuditEntry{At: time.Now(), Env: lock, Command: "delete " + what, Risk: ai.Danger.String(), Result: "approved"}
+	by, err := approval(args, e.Command, "AI: delete "+what)
 	if err != nil {
-		return fmt.Errorf("not deleted: could not ask the user (%v); ask them in the chat", err)
+		e.Result, e.Output = "declined", err.Error()
 	}
-	if !r.OK {
-		return fmt.Errorf("not deleted: the user declined%s", note(r.Text))
-	}
-	return nil
+	e.By = by
+	audit(e)
+	return err
 }

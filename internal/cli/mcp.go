@@ -152,7 +152,7 @@ func instructions() string {
 }
 
 // callTool runs a tool; serving an assistant started by rig (RIG_AI_ENV set), it first holds the
-// call to the session's environment and to what the user asked for.
+// call to the session's environment, has the user confirm any change, and logs what ran.
 func callTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool) {
 	if args == nil {
 		args = map[string]any{}
@@ -167,57 +167,92 @@ func callTool(ctx context.Context, t mcpTool, args map[string]any) (string, bool
 	if err != nil {
 		return err.Error(), true
 	}
-	yes := false
-	if b, _ := args["confirm"].(bool); b {
-		yes = true
+	lock := os.Getenv(ai.EnvLock)
+	if lock == "" {
+		yes, _ := args["confirm"].(bool)
+		return runTool(ctx, argv, str(args, "env"), yes)
 	}
-	if lock := os.Getenv(ai.EnvLock); lock != "" {
-		if yes, err = guard(lock, args, argv, yes); err != nil {
-			return err.Error(), true
-		}
-		args["env"] = lock
+	e := ai.AuditEntry{At: time.Now(), Env: lock, Command: "rig " + strings.Join(argv, " "), Risk: ai.Classify(argv).String()}
+	by, result, err := guard(lock, args, argv)
+	if err != nil {
+		e.Result, e.Output = result, err.Error()
+		audit(e)
+		return err.Error(), true
 	}
-	return runTool(ctx, argv, str(args, "env"), yes)
+	text, failed := runTool(ctx, argv, lock, by != "")
+	e.Result, e.By, e.Output = "ok", by, text
+	if failed {
+		e.Result = "failed"
+	}
+	audit(e)
+	return text, failed
 }
 
-// guard decides whether an assistant's call may run: refused outright, run, or run once the user
-// asked for it (their words quoted in user_request) or approved it in rig. yes is whether to pass --yes.
-func guard(lock string, args map[string]any, argv []string, confirm bool) (bool, error) {
+// audit appends e to the session's audit log and, for anything but a plain read, shows it in the
+// rig that runs the assistant.
+func audit(e ai.AuditEntry) {
+	_ = ai.AppendAudit(os.Getenv(ai.EnvAudit), e)
+	if sock := os.Getenv(ai.EnvSock); sock != "" && (e.Risk != ai.Read.String() || e.Result != "ok") {
+		_, _ = ai.Call(sock, ai.Request{Op: "audit", Text: e.String()}, 2*time.Second)
+	}
+}
+
+// guard decides whether an assistant's call may run: refused outright, run as a read, or run once
+// the user confirmed it. by is who confirmed ("" for a read, which needs no one); result is
+// "refused" or "declined" with err.
+func guard(lock string, args map[string]any, argv []string) (by, result string, err error) {
 	if env := str(args, "env"); env != "" && env != lock {
-		return false, fmt.Errorf("refused: this session is bound to environment %s; to work on %s the user switches rig to it (E) and asks there", lock, env)
+		return "", "refused", fmt.Errorf("refused: this session is bound to environment %s; to work on %s the user switches rig to it (E) and asks there", lock, env)
 	}
 	for _, a := range argv {
 		f, _, _ := strings.Cut(a, "=")
 		switch f {
 		case "-e", "--env", "-f", "--file", "--namespace", "-y", "--yes":
-			return false, fmt.Errorf("refused: %s is not allowed here; the session's environment and confirmations are set by rig", f)
+			return "", "refused", fmt.Errorf("refused: %s is not allowed here; the session's environment and confirmations are set by rig", f)
 		}
 	}
 	risk := ai.Classify(argv)
 	if risk == ai.Refused {
-		return false, fmt.Errorf("refused: rig %s is not available to the assistant", argv[0])
+		return "", "refused", fmt.Errorf("refused: rig %s is not available to the assistant", argv[0])
 	}
-	protected, kube := os.Getenv(ai.EnvProtected) != "", os.Getenv(ai.EnvKube) != ""
-	need := confirm || risk == ai.Danger && (protected || kube) || risk == ai.Change && protected
-	if !need {
-		return false, nil
+	if risk == ai.Read {
+		return "", "", nil
 	}
 	what := "rig " + strings.Join(argv, " ")
-	if ai.Quoted(ai.LastPrompt(os.Getenv(ai.EnvDir)), str(args, "user_request")) {
-		return true, nil
+	by, err = approval(args, what, fmt.Sprintf("AI: %s  (%s on %s)", what, risk, aiEnvLabel(lock, os.Getenv(ai.EnvProtected) != "")))
+	if err != nil {
+		return "", "declined", err
+	}
+	return by, "", nil
+}
+
+// approval puts an assistant's change to the user: in the rig UI or terminal that runs the assistant,
+// or, with no one there to ask, their own words quoted in user_request. It returns who said yes.
+func approval(args map[string]any, command, question string) (string, error) {
+	quoted := func(why string) (string, error) {
+		if q := str(args, "user_request"); ai.Quoted(ai.LastPrompt(os.Getenv(ai.EnvDir)), q) {
+			return "the user's words: " + strconv.Quote(q), nil
+		}
+		return "", fmt.Errorf("not run: %s needs the user's go-ahead%s. Ask them; when they agree, call again with user_request set to their words, verbatim", command, why)
 	}
 	sock := os.Getenv(ai.EnvSock)
 	if sock == "" {
-		return false, fmt.Errorf("not run: %s is a %s on %s and needs the user's go-ahead. Ask them; when they agree, call again with user_request set to their words, verbatim", what, risk, aiEnvLabel(lock, protected))
+		return quoted("")
 	}
-	r, err := ai.Call(sock, ai.Request{Op: "approve", Text: fmt.Sprintf("AI: %s  (%s on %s)", what, risk, aiEnvLabel(lock, protected))}, 10*time.Minute)
+	r, err := ai.Call(sock, ai.Request{Op: "approve", Command: command, Text: question}, 10*time.Minute)
 	if err != nil {
-		return false, fmt.Errorf("not run: could not ask the user (%v); ask them in the chat, then call again with user_request set to their words", err)
+		return quoted(fmt.Sprintf(" (could not ask in rig: %v)", err))
+	}
+	if r.NoOne {
+		return quoted(" (" + r.Text + ")")
 	}
 	if !r.OK {
-		return false, fmt.Errorf("not run: the user declined %s%s", what, note(r.Text))
+		return "", fmt.Errorf("not run: the user declined %s%s", command, note(r.Text))
 	}
-	return true, nil
+	if r.Text == "" {
+		return "the user", nil
+	}
+	return r.Text, nil
 }
 
 func aiEnvLabel(env string, protected bool) string {

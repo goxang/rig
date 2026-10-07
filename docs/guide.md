@@ -138,10 +138,15 @@ and DSNs, and JWTs, AWS keys, GitHub tokens, bearer headers and private keys in 
 Guard rails, enforced by rig's MCP server rather than the prompt: a conversation is bound to the
 environment it started on (other `env`s are refused); the project directory is the only workspace, with
 credentials, `ai.deny` paths and `.git` out of reach; files change only through `rig_file` (create, edit, move;
-deleting asks you), never a shell. On a protected or Kubernetes
-environment a dangerous step (stop, scale down, deploy, delete, DROP/DELETE without WHERE, tasks,
-infrastructure) runs only when your message asked for it in so many words, else rig asks you first;
-on a protected one every change needs that. Secrets and `rig mcp`/`debug` are out of reach.
+deleting asks you), never a shell. Reads run at once; every change (restart, deploy, a KV put, a write
+query, a task, ...) first shows its command and waits for your yes: enter runs it, `a` runs it and
+allows that same command for the rest of the session. With no terminal or UI to ask on, only a change
+your message asked for in so many words runs. A read-only environment refuses changes whoever confirms.
+Secrets and `rig mcp`/`debug` are out of reach.
+
+Every action the assistant ran or tried is appended to `.rig/<env>/ai-audit.jsonl` (time, environment,
+command, risk, result, who confirmed); `rig ai log` lists the changes and refusals (`--all` adds reads,
+`--json` for tools), and the chat shows each one as it happens.
 
 ## GoLand
 

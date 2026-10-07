@@ -254,6 +254,9 @@ func indexOf(list []string, s string) int {
 	return -1
 }
 
+// aiAllowMsg is a command the user always allows the assistant, from now until rig quits.
+type aiAllowMsg string
+
 type aiModelsMsg struct {
 	fast   bool
 	models []string
@@ -401,6 +404,14 @@ func (m *model) chatUpdate(msg tea.Msg) (tea.Cmd, bool) {
 		return m.tabs[m.active].refresh(m), true
 	case bridgeMsg:
 		return m.bridge(msg), true
+	case aiAllowMsg:
+		if m.aiAllowed == nil {
+			m.aiAllowed = map[string]bool{}
+		}
+		m.aiAllowed[string(msg)] = true
+		m.busy = max(0, m.busy-1)
+		m.setStatus("always allowed for the assistant this session: "+string(msg), false)
+		return nil, true
 	case aiModelsMsg:
 		m.modelsListed(msg)
 		return nil, true
@@ -410,15 +421,32 @@ func (m *model) chatUpdate(msg tea.Msg) (tea.Cmd, bool) {
 
 // bridge answers the assistant's tools: a confirmation the person gives in the footer, or a UI action.
 func (m *model) bridge(b bridgeMsg) tea.Cmd {
-	if b.req.Op == "approve" {
+	switch b.req.Op {
+	case "approve":
+		if cmd := b.req.Command; cmd != "" && m.aiAllowed[cmd] {
+			b.reply <- ai.Reply{OK: true, Text: "allowed for this session"}
+			return nil
+		}
 		if m.confirm != nil || m.prompt != nil {
 			b.reply <- ai.Reply{Text: "the user is busy with another prompt; ask them in the chat"}
 			return nil
 		}
 		m.confirm = &confirm{text: b.req.Text + "?", run: func() tea.Msg {
-			b.reply <- ai.Reply{OK: true}
+			b.reply <- ai.Reply{OK: true, Text: "the user, in rig"}
 			return statusMsg{text: "approved for the assistant"}
 		}, cancel: func() { b.reply <- ai.Reply{Text: "declined in rig"} }}
+		if cmd := b.req.Command; cmd != "" {
+			m.confirm.always = func() tea.Msg {
+				b.reply <- ai.Reply{OK: true, Text: "the user, in rig (always this session)"}
+				return aiAllowMsg(cmd)
+			}
+		}
+		return nil
+	case "audit":
+		b.reply <- ai.Reply{OK: true}
+		if m.chat != nil {
+			m.chat.msgs = append(m.chat.msgs, ai.Message{Role: "audit", Text: b.req.Text, At: time.Now()})
+		}
 		return nil
 	}
 	ok, text, cmd := m.uiAction(b.req)
@@ -554,6 +582,8 @@ func (c *chat) view(m *model, x, w, h int) string {
 			add(sDim.Render(wordWrap("  → "+msg.Text, iw)))
 		case "error":
 			add(sRed.Render(wordWrap("✖ "+msg.Text, iw)))
+		case "audit":
+			add(sAmber.Render(wordWrap("  "+msg.Text, iw)))
 		}
 		for _, t := range msg.Tools {
 			add(sDim.Render(wordWrap("  → "+t, iw)))

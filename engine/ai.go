@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -31,12 +32,15 @@ func (a *App) AI(sock string) (*ai.Runner, error) {
 	if p := a.Spec.AI; p != nil {
 		sc.Deny, sc.Extra = p.Deny, p.Instructions
 	}
-	r := &ai.Runner{Setup: ai.Resolve(c), Scope: sc, Self: self, Sock: sock, Kube: sc.Runtime == "kubernetes"}
+	r := &ai.Runner{Setup: ai.Resolve(c), Scope: sc, Self: self, Sock: sock, Kube: sc.Runtime == "kubernetes", AuditFile: a.AuditFile()}
 	if c.RedactOn() {
 		r.Redactor = a.Redactor()
 	}
 	return r, nil
 }
+
+// AuditFile is the log of what the assistant ran on this environment (ai.AuditEntry lines).
+func (a *App) AuditFile() string { return filepath.Join(a.StateDir(), "ai-audit.jsonl") }
 
 // Redactor takes this project's secrets out of text bound for a model (ai.Redactor).
 func (a *App) Redactor() *ai.Redactor { return ai.NewRedactor(a.KnownSecrets()) }

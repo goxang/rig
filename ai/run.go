@@ -48,6 +48,8 @@ type Runner struct {
 	Kube bool
 	// Redactor takes the secrets out of every prompt; nil sends them as they are (redact=false).
 	Redactor *Redactor
+	// AuditFile is the JSONL file every action of the assistant is appended to.
+	AuditFile string
 
 	clientOnce sync.Once
 	client     *http.Client
@@ -172,7 +174,7 @@ func tail(s string, n int) string {
 // the proxy the assistant uses taken away again (clusters and databases are reached directly).
 func (r *Runner) mcpServer(s *Session) ([]string, map[string]string) {
 	argv := []string{r.Self, "-f", r.Scope.File, "-e", r.Scope.Env, "mcp"}
-	env := map[string]string{EnvLock: r.Scope.Env, EnvDir: s.Dir(), EnvSock: r.Sock, EnvProtected: "", EnvKube: ""}
+	env := map[string]string{EnvLock: r.Scope.Env, EnvDir: s.Dir(), EnvSock: r.Sock, EnvProtected: "", EnvKube: "", EnvAudit: r.AuditFile}
 	if r.Scope.Protected {
 		env[EnvProtected] = "1"
 	}
