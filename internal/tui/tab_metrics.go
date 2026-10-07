@@ -101,7 +101,7 @@ func (t *metricsTab) hints() [][2]string {
 		return [][2]string{{"esc v", "back"}, {"↑↓", "series"}, {"space", "hide"}, {"enter", "only this"}, {"a", "all"}, {"/", "filter"}, {"←→", "cursor"}, {"s", "stack"}, {"ctrl+⇧←→ ↑↓", "sort"}, {"y", "copy query"},
 			{"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"t", "range"}}
 	}
-	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"⇧←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o O", "fold rows"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
+	return [][2]string{{"←→↑↓", "focus"}, {"v enter", "view"}, {"⇧←→ d", "dashboard"}, {"i", "variables"}, {"t", "range"}, {"drag", "zoom to a time range"}, {"Z", "zoom out"}, {", .", "shift range"}, {"ctrl+wheel", "zoom time"}, {"m", "source"}, {"R", "refresh"}, {"o", "fold row"}, {"+ -", "expand all, fold all"}, {"a e x", "ad hoc"}, {"click legend", "only/hide"}}
 }
 
 func (t *metricsTab) init() {
@@ -455,10 +455,17 @@ func (t *metricsTab) gridKey(m *model, k tea.KeyMsg) tea.Cmd {
 			k := t.dashName(m) + "/" + r
 			t.collapsed[k] = !t.collapsed[k]
 		}
-	case "O":
+	case "O", "+", "=":
 		for k := range t.collapsed {
 			if strings.HasPrefix(k, t.dashName(m)+"/") {
 				delete(t.collapsed, k)
+			}
+		}
+	case "-":
+		items, _ := t.items(m)
+		for _, it := range items {
+			if it.pi < 0 && it.row != "" {
+				t.collapsed[t.dashName(m)+"/"+it.row] = true
 			}
 		}
 	case "s":

@@ -90,7 +90,7 @@ func (t *kvTab) hints() [][2]string {
 		if t.viaSearch {
 			back = "back to search"
 		}
-		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"+ -", "expand/fold all"}, {"y", "copy value"}, {"s", "config file"}, {"esc", back}}
+		return [][2]string{{"enter e", "edit field"}, {"a", "add field"}, {"D", "delete field"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"s", "config file"}, {"esc", back}}
 	}
 	h := [][2]string{{"enter", "open (JSON: field by field)"}, {"←", "up"}, {"e", "edit"}, {"i", "edit inline"}, {"n", "new key"}, {"D", "delete"}, {"/", "search keys and values"}, {"I", "reindex search (re-read store)"}, {"s", "config file"}, {"J/K", "scroll value"}}
 	if len(t.related) > 0 {

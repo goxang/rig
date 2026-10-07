@@ -80,7 +80,7 @@ func (t *logsTab) hints() [][2]string {
 		return [][2]string{{"↑↓ pgup pgdn", "previous/next log line"}, {"enter →", "into the fields"}, {"Y", "copy the line"}, {"esc v", "close"}}
 	}
 	if t.inspect != nil {
-		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"z", "fold/expand all"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
+		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"J K  ctrl+↓↑", "next/previous log line"}, {"w", "wrap"}, {"H L  shift+←→", "sideways"},
 			{"f", "filter lines by this field"}, {"y", "copy value"}, {"Y", "copy the line"}, {"esc", "back to the lines"}, {"v", "close"}}
 	}
 	return [][2]string{{"f", "pick services"}, {"/", "filter: text, regex, a.b=value"}, {"↑↓ click", "pick a line"}, {"enter v", "inspect the line"}, {"w", "wrap"}, {"s", "structured/raw"},

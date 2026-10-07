@@ -119,7 +119,7 @@ func (t *dataTab) hints() [][2]string {
 	case t.focus == 0:
 		return [][2]string{{"↑↓", "component"}, {"enter →", "open"}}
 	case t.focus == 2 && t.payload != nil:
-		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"y", "copy value"}, {"esc", "back to messages"}}
+		return [][2]string{{"↑↓", "move"}, {"←→ space", "fold"}, {"+ - z", "expand all, fold all, toggle"}, {"y", "copy value"}, {"esc", "back to messages"}}
 	case t.focus == 2:
 		return [][2]string{{"↑↓", "move"}, {"enter", "message body as JSON"}, {"m", "peek messages"}, {"i", "queue info"}, {"y", "copy row"}, {"esc", "back to queues"}}
 	case c.kind == string(core.KindMessaging) && t.qview > 0:
