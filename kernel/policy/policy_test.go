@@ -3,7 +3,7 @@ package policy
 import (
 	"testing"
 
-	"github.com/goxang/jig/kernel/identity"
+	"github.com/goxang/rig/kernel/identity"
 )
 
 var envs = map[string]Env{"loadtest2": {Protected: true}, "prod": {Readonly: true}}

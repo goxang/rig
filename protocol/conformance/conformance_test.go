@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/conformance"
-	"github.com/goxang/jig/protocol/rpc"
-	"github.com/goxang/jig/protocol/transcript"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/conformance"
+	"github.com/goxang/rig/protocol/rpc"
+	"github.com/goxang/rig/protocol/transcript"
 )
 
 var record = flag.Bool("record", false, "record testdata/hello.jsonl from the Go example")
@@ -71,12 +71,12 @@ func session(t *testing.T, p *rpc.Process) {
 		method string
 		params any
 	}{
-		{protocol.MethodInitialize, protocol.InitializeParams{Host: protocol.HostInfo{Name: "jig", Version: "1.0.0"}, Protocols: []string{protocol.Version}}},
+		{protocol.MethodInitialize, protocol.InitializeParams{Host: protocol.HostInfo{Name: "rig", Version: "1.0.0"}, Protocols: []string{protocol.Version}}},
 		{protocol.MethodConfigure, protocol.ConfigureParams{Config: protocol.Args{"greeting": "hi"}}},
-		{protocol.MethodQuery, protocol.QueryParams{Source: "greetings", Args: protocol.Args{"name": "jig"}}},
-		{protocol.MethodRun, protocol.RunParams{Action: "greet", Job: "j1", Args: protocol.Args{"name": "jig"}}},
-		{protocol.MethodPlan, protocol.RunParams{Action: "greet", Args: protocol.Args{"name": "jig"}}},
-		{protocol.MethodResolve, protocol.ResolveParams{Ref: "hello://jig"}},
+		{protocol.MethodQuery, protocol.QueryParams{Source: "greetings", Args: protocol.Args{"name": "rig"}}},
+		{protocol.MethodRun, protocol.RunParams{Action: "greet", Job: "j1", Args: protocol.Args{"name": "rig"}}},
+		{protocol.MethodPlan, protocol.RunParams{Action: "greet", Args: protocol.Args{"name": "rig"}}},
+		{protocol.MethodResolve, protocol.ResolveParams{Ref: "hello://rig"}},
 		{protocol.MethodResolve, protocol.ResolveParams{Ref: "svc://api"}},
 		{protocol.MethodSearch, protocol.SearchParams{Query: "wor"}},
 		{protocol.MethodDoctor, protocol.DoctorParams{}},

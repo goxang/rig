@@ -1,4 +1,4 @@
-// Package server is `jig serve`: the Engine API over HTTPS for remote CLIs, MCP clients and the web
+// Package server is `rig serve`: the Engine API over HTTPS for remote CLIs, MCP clients and the web
 // inbox, with accounts, server-side policy, reauth, approvals, leases and one audit log per
 // environment. Requests carry a bearer token; streams are newline-delimited JSON.
 package server
@@ -16,18 +16,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/kernel/actions"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/kernel/actions"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/protocol"
 )
 
 type Server struct {
-	// File is the project's jig.yaml.
+	// File is the project's rig.yaml.
 	File  string
 	Store *Store
 	OIDC  *OIDC
@@ -169,7 +169,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		secret, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		t, found := s.Store.Token(secret)
 		if !ok || !found {
-			writeErr(w, http.StatusUnauthorized, &protocol.Error{Code: protocol.CodeDenied, Message: "sign in first: jig login"})
+			writeErr(w, http.StatusUnauthorized, &protocol.Error{Code: protocol.CodeDenied, Message: "sign in first: rig login"})
 			return
 		}
 		if !s.allow("u:"+t.User, s.rate()) {
@@ -380,7 +380,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.OIDC.finish(state, secret, "")
-	_, _ = fmt.Fprintf(w, "Signed in to jig as %s. You can close this tab and go back to the terminal.\n", id.User)
+	_, _ = fmt.Fprintf(w, "Signed in to rig as %s. You can close this tab and go back to the terminal.\n", id.User)
 }
 
 func (s *Server) oidcPoll(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +398,7 @@ func (s *Server) oidcPoll(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) engine(w http.ResponseWriter, r *http.Request) {
 	c := callerOf(r)
-	l, err := s.Engine(r.Header.Get("X-Jig-Env"))
+	l, err := s.Engine(r.Header.Get("X-Rig-Env"))
 	if err != nil {
 		writeErr(w, 0, err)
 		return
@@ -409,7 +409,7 @@ func (s *Server) engine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := identity.With(r.Context(), c.subj)
-	confirmed := r.Header.Get("X-Jig-Confirm") == "1"
+	confirmed := r.Header.Get("X-Rig-Confirm") == "1"
 	if confirmed {
 		ctx = core.WithConfirmed(ctx)
 	}

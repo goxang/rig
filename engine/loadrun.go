@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 // LoadResult is one load run, saved under the state directory so later runs compare against it.

@@ -17,7 +17,7 @@ func TestFileAction(t *testing.T) {
 	if os.Symlink(outside, filepath.Join(root, "escape")) == nil {
 		escapes = append(escapes, "escape/new.txt")
 	}
-	t.Setenv("JIG_AI_ENV", "")
+	t.Setenv("RIG_AI_ENV", "")
 	run := func(args map[string]any) (string, error) { return fileAction(root, []string{"configs/**"}, args) }
 
 	for _, p := range escapes {

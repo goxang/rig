@@ -8,17 +8,17 @@ import (
 	"strings"
 )
 
-// SecretsFile is where `jig secret set` keeps a project's secrets: the user's config directory,
+// SecretsFile is where `rig secret set` keeps a project's secrets: the user's config directory,
 // readable by the user only, never inside the repository.
 func SecretsFile(project string) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "jig", "secrets", project+".json"), nil
+	return filepath.Join(dir, "rig", "secrets", project+".json"), nil
 }
 
-// DataDir is where jig keeps what it writes for a project checkout outside the repository (saved
+// DataDir is where rig keeps what it writes for a project checkout outside the repository (saved
 // sessions): the user's config directory, one folder per project path.
 func DataDir(projectDir string) (string, error) {
 	dir, err := os.UserConfigDir()
@@ -29,7 +29,7 @@ func DataDir(projectDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "jig", "projects", strings.NewReplacer("/", "-", `\`, "-", ":", "").Replace(abs)), nil
+	return filepath.Join(dir, "rig", "projects", strings.NewReplacer("/", "-", `\`, "-", ":", "").Replace(abs)), nil
 }
 
 func LoadSecrets(project string) (map[string]string, error) {
@@ -72,7 +72,7 @@ func SetSecret(project, name, value string) error {
 }
 
 // SecretValues are the values the project's secrets resolve to, as Load expands them: the
-// environment, then `jig secret set`, then the default. Empty ones are left out.
+// environment, then `rig secret set`, then the default. Empty ones are left out.
 func (p *Project) SecretValues() map[string]string {
 	stored, _ := LoadSecrets(p.Name)
 	out := map[string]string{}

@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/goxang/jig/kernel/jobs"
+	"github.com/goxang/rig/kernel/jobs"
 	"slices"
 	"sort"
 	"strings"
@@ -12,9 +12,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 // pickShipServices lets the services to ship be changed first, names marked, one tab per section.
@@ -155,7 +155,7 @@ func askShipTag(m *model, names, chosen []string, ref string) tea.Cmd {
 	return nil
 }
 
-// pickDeployVars shows the variables a deploy fills in (jig.yaml's, or `jig vars set` ones);
+// pickDeployVars shows the variables a deploy fills in (rig.yaml's, or `rig vars set` ones);
 // picking one changes it, the first row deploys with what is shown.
 func pickDeployVars(m *model, changed map[string]string, run func(map[string]string) tea.Cmd) tea.Cmd {
 	vars, _ := m.app.Vars(m.ctx)
@@ -174,7 +174,7 @@ func pickDeployVars(m *model, changed map[string]string, run func(map[string]str
 		if c, ok := changed[k]; ok {
 			v = c + sAmber.Render("  (new)")
 			if c == "" {
-				v = sAmber.Render("back to jig.yaml's")
+				v = sAmber.Render("back to rig.yaml's")
 			}
 		}
 		items, desc = append(items, k), append(desc, maskValue(k, v))
@@ -191,7 +191,7 @@ func pickDeployVars(m *model, changed map[string]string, run func(map[string]str
 		if !ok && !secretName.MatchString(k) {
 			cur = vars[k].Value
 		}
-		m.ask("value of "+k+" (empty: jig.yaml's)", cur, func(v string) tea.Cmd {
+		m.ask("value of "+k+" (empty: rig.yaml's)", cur, func(v string) tea.Cmd {
 			if v != vars[k].Value {
 				changed[k] = v
 			} else {
@@ -275,7 +275,7 @@ func (p *shipPlan) pickEnv(m *model, i int, env map[string]string, over map[stri
 		case ok:
 			v = maskValue(k, c) + sAmber.Render("  (new)")
 		case over[k]:
-			v += sDim.Render("  (set with jig setenv)")
+			v += sDim.Render("  (set with rig setenv)")
 		}
 		items, desc = append(items, k), append(desc, truncate(v, 80))
 	}
@@ -388,7 +388,7 @@ func runShip(m *model, names, steps []string, tag, ref string, vars map[string]s
 	})
 }
 
-// setVars keeps vars in the environment's state and opens the environment again, since jig.yaml's
+// setVars keeps vars in the environment's state and opens the environment again, since rig.yaml's
 // ${VARS} are filled in when it is read; the UI switches to the new one.
 func setVars(ctx context.Context, a *engine.App, vars map[string]string) (*engine.App, error) {
 	kv := map[string]string{}

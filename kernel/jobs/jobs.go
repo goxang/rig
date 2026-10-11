@@ -25,7 +25,7 @@ type Job struct {
 	Start time.Time
 	// Stdin, when set, takes what the user types for the job (a task step that reads input).
 	Stdin io.WriteCloser
-	// Log and PID, for a task: it writes to Log.log and keeps running when jig closes, so a session
+	// Log and PID, for a task: it writes to Log.log and keeps running when rig closes, so a session
 	// reopened later follows it again.
 	Log string
 	PID int

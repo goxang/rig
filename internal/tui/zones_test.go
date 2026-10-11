@@ -7,15 +7,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 // TestZonesDoNotOverlap renders every screen and fails when two click targets on a row cross
 // without one holding the other: a click there would reach the wrong one.
 func TestZonesDoNotOverlap(t *testing.T) {
-	a, err := engine.Open("../../examples/shop/jig.yaml", "")
+	a, err := engine.Open("../../examples/shop/rig.yaml", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,11 +5,11 @@ package api
 import (
 	"context"
 
-	"github.com/goxang/jig/kernel/catalog"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/catalog"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
 type Engine interface {

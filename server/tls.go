@@ -47,7 +47,7 @@ func selfSigned(certFile, keyFile string, hosts []string) error {
 	}
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
 	tpl := &x509.Certificate{
-		SerialNumber: serial, Subject: pkix.Name{CommonName: "jig serve"},
+		SerialNumber: serial, Subject: pkix.Name{CommonName: "rig serve"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(5, 0, 0),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

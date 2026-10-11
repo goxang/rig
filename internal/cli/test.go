@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 func testCommand() *cobra.Command {
@@ -24,14 +24,14 @@ func testCommand() *cobra.Command {
 	)
 	test := &cobra.Command{
 		Use:   "test [suite | ./pkg/...]",
-		Short: "run a test suite from jig.yaml, or packages without one (go test -json): --failed reruns the last run's failures; without arguments, list the suites",
-		Example: `  jig test unit                 # a suite of jig.yaml
-  jig test unit --failed        # only what failed last time
-  jig test ./pkg/validate/...   # any packages, no suite needed
-  jig test load -o report.md    # save the report (tests and the suite's metrics) to a file`,
+		Short: "run a test suite from rig.yaml, or packages without one (go test -json): --failed reruns the last run's failures; without arguments, list the suites",
+		Example: `  rig test unit                 # a suite of rig.yaml
+  rig test unit --failed        # only what failed last time
+  rig test ./pkg/validate/...   # any packages, no suite needed
+  rig test load -o report.md    # save the report (tests and the suite's metrics) to a file`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) > 0 && strings.HasPrefix(args[0], ".") {
-				a.Spec.Tests = map[string]*spec.TestSuite{"packages": {Name: "packages", Packages: args, Help: "jig test " + strings.Join(args, " ")}}
+				a.Spec.Tests = map[string]*spec.TestSuite{"packages": {Name: "packages", Packages: args, Help: "rig test " + strings.Join(args, " ")}}
 				args = []string{"packages"}
 			}
 			if len(args) > 1 {
@@ -99,7 +99,7 @@ func testCommand() *cobra.Command {
 			printProgress(run, printed, all, v)
 			fmt.Println()
 			run.WriteReport(os.Stdout, true)
-			fmt.Println(dim("saved as " + run.ID + ": jig test report " + run.ID))
+			fmt.Println(dim("saved as " + run.ID + ": rig test report " + run.ID))
 			if junit != "" {
 				if err := writeJUnit(run, junit); err != nil {
 					return err
@@ -119,7 +119,7 @@ func testCommand() *cobra.Command {
 				return runErr
 			}
 			if n := run.Counts()[engine.TestFail]; n > 0 {
-				return fmt.Errorf("%d tests %w (jig test %s --failed reruns them)", n, engine.ErrFailed, s.Name)
+				return fmt.Errorf("%d tests %w (rig test %s --failed reruns them)", n, engine.ErrFailed, s.Name)
 			}
 			if n := run.FailedPackages(); n > 0 {
 				return fmt.Errorf("%d packages %w (build output above)", n, engine.ErrFailed)
@@ -205,7 +205,7 @@ func testCommand() *cobra.Command {
 	return test
 }
 
-// testFlagChanged reports whether a flag of jig test was given; set when the command is built.
+// testFlagChanged reports whether a flag of rig test was given; set when the command is built.
 var testFlagChanged = func(string) bool { return false }
 
 // mergeFlags puts the options given on the command line over the suite's.

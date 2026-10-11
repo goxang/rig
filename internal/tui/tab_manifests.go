@@ -14,14 +14,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/manifest"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/manifest"
 )
 
 // manifestsTab browses any folder of manifests: objects by kind, or folders and files (t), how each
 // object relates to the rest, what is wrong (i: the file's, I: all). Marked objects (space) or the
-// selected one can be applied to the environment (a) or become a jig.yaml service (n).
+// selected one can be applied to the environment (a) or become a rig.yaml service (n).
 type manifestsTab struct {
 	dirs   []string
 	set    *manifest.Set
@@ -637,7 +637,7 @@ func (t *manifestsTab) apply(m *model) tea.Cmd {
 	})
 }
 
-// newService appends a service for the selected workload to jig.yaml, asking its name, role and groups.
+// newService appends a service for the selected workload to rig.yaml, asking its name, role and groups.
 func (t *manifestsTab) newService(m *model) tea.Cmd {
 	var w *manifest.Object
 	for _, o := range t.targets() {
@@ -673,16 +673,16 @@ func (t *manifestsTab) newService(m *model) tea.Cmd {
 			img = "" // the manifest fills it at deploy
 		}
 		if err := addService(m.app.Spec.File, f[0], f[1], groups, img, strings.ToLower(w.Kind)+"/"+w.Name, file); err != nil {
-			m.setStatus("jig.yaml: "+err.Error(), true)
+			m.setStatus("rig.yaml: "+err.Error(), true)
 			return nil
 		}
-		m.setStatus(fmt.Sprintf("added service %s to %s; switch environment (E) or restart jig to use it", f[0], filepath.Base(m.app.Spec.File)), false)
+		m.setStatus(fmt.Sprintf("added service %s to %s; switch environment (E) or restart rig to use it", f[0], filepath.Base(m.app.Spec.File)), false)
 		return nil
 	})
 	return nil
 }
 
-// addService writes a service at the end of jig.yaml's services: block, keeping the file's comments.
+// addService writes a service at the end of rig.yaml's services: block, keeping the file's comments.
 func addService(file, name, role, groups, image, workload, manifestFile string) error {
 	raw, err := os.ReadFile(file)
 	if err != nil {
@@ -1057,7 +1057,7 @@ func masked(o *manifest.Object) any {
 	return m
 }
 
-// serviceOf is the jig service whose workload o is (or is bundled with), for the env vars its deploys inject.
+// serviceOf is the rig service whose workload o is (or is bundled with), for the env vars its deploys inject.
 func (t *manifestsTab) serviceOf(m *model, o *manifest.Object) string {
 	k, ok := m.k8s()
 	if !ok {

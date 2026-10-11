@@ -20,14 +20,14 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 // chat is the assistant's drawer (@): conversations bound to the environment on screen, sent with
-// what the screen shows. Turns run the user's opencode or Claude Code; jig's MCP server is its hands.
+// what the screen shows. Turns run the user's opencode or Claude Code; rig's MCP server is its hands.
 // The conversation on screen is the embedded convo; live holds every one this run still follows, so
 // several can run at once.
 type chat struct {
@@ -214,7 +214,7 @@ var screenStarters = map[string][]string{
 	"Hosts":     {"which host is under pressure and why?"},
 }
 
-// ideas are the project's ai.ideas for this screen and for "all", then jig's own.
+// ideas are the project's ai.ideas for this screen and for "all", then rig's own.
 func (m *model) ideas() []string {
 	name := m.tabs[m.active].name()
 	var out []string
@@ -256,7 +256,7 @@ func (m *model) chatOpen() *chat {
 	if c.runner == nil {
 		c.runner = m.aiRunner()
 		if c.runner == nil {
-			c.err = "could not read the AI setup: jig ai config"
+			c.err = "could not read the AI setup: rig ai config"
 		}
 	}
 	c.open, c.focus = true, true
@@ -573,7 +573,7 @@ func indexOf(list []string, s string) int {
 	return -1
 }
 
-// aiAllowMsg is a command the user always allows the assistant, from now until jig quits.
+// aiAllowMsg is a command the user always allows the assistant, from now until rig quits.
 type aiAllowMsg string
 
 type aiModelsMsg struct {
@@ -716,7 +716,7 @@ func (m *model) pickChatSession() {
 	}
 }
 
-// chatWhy is jig why in the chat: jig gathers the evidence, then the assistant (with its tools, so
+// chatWhy is rig why in the chat: rig gathers the evidence, then the assistant (with its tools, so
 // it can dig further) explains it.
 func (m *model) chatWhy(args []string) tea.Cmd {
 	c := m.chat
@@ -757,7 +757,7 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 		if err != nil {
 			return chatDoneMsg{s: s, err: err}
 		}
-		program.Send(chatEventMsg{s: s, e: ai.Event{Kind: "tool", Text: "jig why " + what + ": " + inc.Brief()}})
+		program.Send(chatEventMsg{s: s, e: ai.Event{Kind: "tool", Text: "rig why " + what + ": " + inc.Brief()}})
 		prompt := inc.Prompt()
 		if fix {
 			prompt += "\nThe user already answered: " + engine.FixPrompt
@@ -771,7 +771,7 @@ func (m *model) chatWhy(args []string) tea.Cmd {
 func (m *model) chatSend(text string) tea.Cmd {
 	c := m.chat
 	if !c.enabled() {
-		m.setStatus("AI is off: jig ai config", true)
+		m.setStatus("AI is off: rig ai config", true)
 		return nil
 	}
 	if c.sess == nil {
@@ -884,11 +884,11 @@ func (m *model) bridge(b bridgeMsg) tea.Cmd {
 			return nil
 		}
 		m.confirm = &confirm{text: b.req.Text + "?", run: func() tea.Msg {
-			b.reply <- ai.Reply{OK: true, Text: "the user, in jig"}
+			b.reply <- ai.Reply{OK: true, Text: "the user, in rig"}
 			return statusMsg{text: "approved for the assistant"}
-		}, cancel: func() { b.reply <- ai.Reply{Text: "declined in jig"} }}
+		}, cancel: func() { b.reply <- ai.Reply{Text: "declined in rig"} }}
 		m.confirm.always = func() tea.Msg {
-			b.reply <- ai.Reply{OK: true, Text: "the user, in jig (everything this session)"}
+			b.reply <- ai.Reply{OK: true, Text: "the user, in rig (everything this session)"}
 			return aiAllowMsg("*")
 		}
 		return nil
@@ -904,7 +904,7 @@ func (m *model) bridge(b bridgeMsg) tea.Cmd {
 	return cmd
 }
 
-// uiAction is what jig_ui does: queries on the Queries screen, a screen opened, logs shown.
+// uiAction is what rig_ui does: queries on the Queries screen, a screen opened, logs shown.
 func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 	a := r.Args
 	switch r.Action {
@@ -957,7 +957,7 @@ func (m *model) uiAction(r ai.Request) (bool, string, tea.Cmd) {
 		m.sched.active[a["name"]] = on
 		m.sched.mu.Unlock()
 		if on {
-			return true, a["name"] + " runs every " + nq.Every.String() + " while jig is open", nil
+			return true, a["name"] + " runs every " + nq.Every.String() + " while rig is open", nil
 		}
 		return true, a["name"] + " is no longer scheduled", nil
 	case "open":
@@ -1034,7 +1034,7 @@ func (m *model) uiSelect(t tab, sel, path, filter string) (bool, string, tea.Cmd
 	return true, " (select, path and filter do not apply to " + t.name() + ")", nil
 }
 
-// uiState is what jig_ui "state" answers: the screens, the open one's settings and its text.
+// uiState is what rig_ui "state" answers: the screens, the open one's settings and its text.
 func (m *model) uiState() string {
 	var b strings.Builder
 	names := make([]string, len(m.tabs))
@@ -1089,7 +1089,7 @@ func (m *model) uiKeys(keys []string) (bool, string, tea.Cmd) {
 		_, c := m.Update(keyOf(k))
 		cmds = append(cmds, c)
 	}
-	return true, "pressed; jig_ui state shows the screen once it loads", batch(cmds...)
+	return true, "pressed; rig_ui state shows the screen once it loads", batch(cmds...)
 }
 
 // keyOf reads a key the way bubbletea names it (enter, esc, ctrl+r, shift+tab, up, f5, space);
@@ -1166,7 +1166,7 @@ func (m *model) uiPanels(dash, titles string) (bool, string, tea.Cmd) {
 				continue
 			}
 			if !have[ti] {
-				return false, fmt.Sprintf("no panel %q on %s; jig_ui state lists them", ti, t.dashName(m)), nil
+				return false, fmt.Sprintf("no panel %q on %s; rig_ui state lists them", ti, t.dashName(m)), nil
 			}
 			only[ti] = true
 		}
@@ -1182,7 +1182,7 @@ func (m *model) uiPanels(dash, titles string) (bool, string, tea.Cmd) {
 		}
 		return true, text, batch(cmd, t.reload(m))
 	}
-	return false, "this jig has no Metrics screen", nil
+	return false, "this rig has no Metrics screen", nil
 }
 
 func (m *model) chatWidth(h int) int {
@@ -1258,9 +1258,9 @@ func (c *chat) view(m *model, x, w, h int) string {
 		}
 		add(sAmber.Render(wordWrap("AI is off: "+why, iw)))
 		add("")
-		add(sDim.Render(wordWrap("/connect picks an installed opencode or Claude Code with its own setup. Else install one (opencode has free models, no key), or set a provider:\n  jig ai config provider=deepseek api_key=…\n  jig ai config provider=openai url=… api_key=… model=…\n  jig ai config proxy=localhost:10808\nrig ai check tests it.", iw)))
+		add(sDim.Render(wordWrap("/connect picks an installed opencode or Claude Code with its own setup. Else install one (opencode has free models, no key), or set a provider:\n  rig ai config provider=deepseek api_key=…\n  rig ai config provider=openai url=… api_key=… model=…\n  rig ai config proxy=localhost:10808\nrig ai check tests it.", iw)))
 	case len(c.msgs) == 0:
-		add(sDim.Render(wordWrap("Ask about what this screen shows, or to do anything you can do in jig. It works on "+m.app.Env.Name+" only; the project directory is its only workspace.", iw)))
+		add(sDim.Render(wordWrap("Ask about what this screen shows, or to do anything you can do in rig. It works on "+m.app.Env.Name+" only; the project directory is its only workspace.", iw)))
 		add("")
 		add(sTitle.Render("ideas (tab)"))
 		for _, s := range m.ideas() {
@@ -1511,7 +1511,7 @@ func (t *servicesTab) aiContext(m *model) string {
 	return b.String()
 }
 
-// serviceFacts is what jig knows of a service: its definition and, on Kubernetes, the manifest a
+// serviceFacts is what rig knows of a service: its definition and, on Kubernetes, the manifest a
 // deploy applies or where one would go, so the assistant need not search the repository for it.
 func serviceFacts(m *model, n string) string {
 	s := m.app.Spec.Services[n]
@@ -1519,7 +1519,7 @@ func serviceFacts(m *model, n string) string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s in jig.yaml: role %s", n, s.Role)
+	fmt.Fprintf(&b, "%s in rig.yaml: role %s", n, s.Role)
 	if s.Image != "" {
 		b.WriteString(", image " + s.Image)
 	}
@@ -1807,7 +1807,7 @@ func (m *model) toggleRedact() {
 func (m *model) toggleAutocomplete() {
 	r := m.aiRunner()
 	if r == nil || !r.Setup.Enabled() {
-		m.setStatus("AI is off: jig ai config", true)
+		m.setStatus("AI is off: rig ai config", true)
 		return
 	}
 	on := !r.Setup.AutocompleteOn()

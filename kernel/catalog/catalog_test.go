@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func TestBuild(t *testing.T) {
@@ -16,7 +16,7 @@ environments:
   local: {}
 tasks:
   seed: [echo hi]
-`), "/x/jig.yaml", "", nil)
+`), "/x/rig.yaml", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ tasks:
 	if !ok || api.Ref() != "svc://api" || len(api.Links) != 1 || api.Links[0] != "svc://db" {
 		t.Fatalf("api = %+v", api)
 	}
-	if api.Origin.Line != 3 || !strings.HasSuffix(api.Origin.File, "jig.yaml") {
+	if api.Origin.Line != 3 || !strings.HasSuffix(api.Origin.File, "rig.yaml") {
 		t.Errorf("origin %v", api.Origin)
 	}
 	if k := c.Kinds(); k["service"] != 2 || k["environment"] != 1 || k["task"] != 1 {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 // WatchEvent is a step of a live rebuild: State is changed, building, restarting, ok or failed.
@@ -27,7 +27,7 @@ type WatchEvent struct {
 	Took   time.Duration
 }
 
-var defaultIgnore = []string{"*_test.go", "*.md", ".git", ".jig", "node_modules", "*.swp", "*~", ".#*"}
+var defaultIgnore = []string{"*_test.go", "*.md", ".git", ".rig", "node_modules", "*.swp", "*~", ".#*"}
 
 // watchPoll and watchQuiet: how often sources are looked at, and how long they must stay unchanged
 // after a change before the rebuild starts (an editor's save, a git checkout, come in bursts).
@@ -140,7 +140,7 @@ func (a *App) Rebuild(ctx context.Context, name string, emit func(WatchEvent)) {
 	emit(WatchEvent{Service: name, State: "ok", Took: time.Since(start)})
 }
 
-// Affected are the services whose sources (as jig watch sees them) hold one of files, paths from the
+// Affected are the services whose sources (as rig watch sees them) hold one of files, paths from the
 // project directory: what a change set touches and so what to rebuild, deploy and test.
 func (a *App) Affected(ctx context.Context, files []string) []string {
 	var out []string

@@ -1,6 +1,6 @@
-// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.
+// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.
 
-export const VERSION: "jig/1";
+export const VERSION: "rig/1";
 export const METHODS: Record<string, "host" | "plugin" | "any">;
 export const ERRORS: {
   readonly ParseError: -32700;
@@ -82,7 +82,7 @@ export interface HostInfo {
 
 export interface InitializeParams {
   host: HostInfo;
-  /** Protocol versions the host speaks, such as jig/1. */
+  /** Protocol versions the host speaks, such as rig/1. */
   protocols: string[];
   capabilities?: HostCapabilities;
 }
@@ -258,7 +258,7 @@ export interface ImportParams {
 }
 
 export interface ImportResult {
-  /** A jig.yaml fragment. */
+  /** A rig.yaml fragment. */
   fragment: Args;
   /** Files whose change re-runs the import. */
   watch?: string[];

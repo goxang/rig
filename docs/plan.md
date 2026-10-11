@@ -1,35 +1,35 @@
-# jig: plan
+# rig: plan
 
-**jig** is the successor to rig. It gives engineers and AI one place to run the whole software lifecycle
+**rig** is the successor to rig. It gives engineers and AI one place to run the whole software lifecycle
 (plan, build, test, ship, run, observe, fix). Everything that talks to a technology is a plugin.
 
-A jig holds the work and guides every tool to the same spot. It is three letters, sits next to rig in
-meaning, and `jig.yaml` reads naturally. `goxang/jig` is free on GitHub, and no `jig` binary exists on
+A rig holds the work and guides every tool to the same spot. It is three letters, sits next to rig in
+meaning, and `rig.yaml` reads naturally. `goxang/rig` is free on GitHub, and no `rig` binary exists on
 this machine.
 
 This plan is written to be executed in one continuous run (section 19). It is not a set of phases to
-release separately. The end state is jig 1.0 and jig-plugins 1.0, with full rig parity except `flow:`,
+release separately. The end state is rig 1.0 and rig-plugins 1.0, with full rig parity except `flow:`,
 the switch project migrated, and everything installed on this machine. Windows is not supported.
 
 ---
 
 ## 1. Decisions at a glance
 
-1. **jig is a fork of rig, restructured in place.** The tree stays working after every step: a strangler
+1. **rig is a fork of rig, restructured in place.** The tree stays working after every step: a strangler
    refactor, not a rewrite from zero. The rig repo is never touched.
 2. **The kernel knows nouns and verbs. Plugins know technologies.** Core has no docker, Kubernetes,
-   SQL, Prometheus, Jira or GitLab code. All of it lives in `goxang/jig-plugins`.
+   SQL, Prometheus, Jira or GitLab code. All of it lives in `goxang/rig-plugins`.
 3. **Six primitives**, and everything else is built from them: **Catalog** (what exists), **Source**
    (data as frames and streams), **Action** (verbs that change things), **View** (widget trees),
    **Event** (what happened) and **Policy** (who may). **Refs** (URIs) link them.
-4. **A plugin is a reusable `jig.yaml` plus an optional program.** If you can write `jig.yaml`, you can
+4. **A plugin is a reusable `rig.yaml` plus an optional program.** If you can write `rig.yaml`, you can
    write a plugin. Code is needed only when YAML and shell are not enough.
 5. **Four ways to implement a plugin:**
    - declarative (YAML only)
    - script (any executable, JSON or table on stdout)
    - server (JSON-RPC over stdio, any language, SDKs for Go, Python and TypeScript)
    - MCP bridge (any existing MCP server becomes a plugin)
-6. **The protocol is the contract, not Go types.** The protocol `jig/1` is append-only. Widgets and
+6. **The protocol is the contract, not Go types.** The protocol `rig/1` is append-only. Widgets and
    contracts are versioned separately. Capabilities are negotiated. Golden transcripts of every official
    plugin run in core CI. Old plugins keep working.
 7. **Views are data (widget trees), never terminal code.** The TUI is one renderer. A web renderer can
@@ -41,13 +41,13 @@ the switch project migrated, and everything installed on this machine. Windows i
 9. **Policy is enforced in one place**, for every caller: a human, the AI, an MCP agent or a remote
    user. RBAC, protected environments, re-authentication and four-eyes approval are all policy effects.
 10. **One source of truth.** Importers turn other tools' files (compose, Kubernetes, godev, just, make,
-    Grafana, Prometheus rules, OpenAPI, GitLab CI, rig.yaml) into `jig.yaml` fragments on every load.
-    `jig.yaml` holds only what no other file states, and `jig lint --redundant --fix` enforces it.
-11. **Install is automatic and safe.** A project declares its plugins, or jig infers them from the
-    component types it uses. The first run installs exactly what `jig.lock` pins, after a workspace
+    Grafana, Prometheus rules, OpenAPI, GitLab CI, rig.yaml) into `rig.yaml` fragments on every load.
+    `rig.yaml` holds only what no other file states, and `rig lint --redundant --fix` enforces it.
+11. **Install is automatic and safe.** A project declares its plugins, or rig infers them from the
+    component types it uses. The first run installs exactly what `rig.lock` pins, after a workspace
     trust prompt.
-12. **Standard, learnable controls.** The CLI grammar is `jig <verb> [targets]` and
-    `jig <name> <action>`. The TUI command palette (`:`) uses the same grammar. **Lowercase keys look,
+12. **Standard, learnable controls.** The CLI grammar is `rig <verb> [targets]` and
+    `rig <name> <action>`. The TUI command palette (`:`) uses the same grammar. **Lowercase keys look,
     uppercase keys change.** Right-click on anything lists every action that applies to it.
 13. **Rig's performance decisions are kept** (section 17): lazy everything, one batched status call,
     work done once per change and never per frame, external tools over client libraries.
@@ -60,17 +60,17 @@ the switch project migrated, and everything installed on this machine. Windows i
 
 | repo | what | module / artifacts |
 |---|---|---|
-| `goxang/jig` (fork of `goxang/rig`, history kept) | kernel, engine, Engine API, server, TUI, widgets, AI, CLI, contracts, protocol, SDKs | `github.com/goxang/jig`; the SDK is a separate zero-dependency module `github.com/goxang/jig/sdk` |
-| `goxang/jig-plugins` | every official plugin, the packs, and the registry index | one Go module; one multiplexed binary `jig-std` per OS and architecture; `registry/index.json` |
-| `<company>/jig-pack` (example: the switch's org) | a company pack: required plugins, policy, skills, shared tasks | a plugin whose manifest mostly lists `requires:` |
+| `goxang/rig` (fork of `goxang/rig`, history kept) | kernel, engine, Engine API, server, TUI, widgets, AI, CLI, contracts, protocol, SDKs | `github.com/goxang/rig`; the SDK is a separate zero-dependency module `github.com/goxang/rig/sdk` |
+| `goxang/rig-plugins` | every official plugin, the packs, and the registry index | one Go module; one multiplexed binary `rig-std` per OS and architecture; `registry/index.json` |
+| `<company>/rig-pack` (example: the switch's org) | a company pack: required plugins, policy, skills, shared tasks | a plugin whose manifest mostly lists `requires:` |
 
-The official plugins are versioned in lockstep (`jig-plugins vX.Y.Z` tags every plugin). Third-party
+The official plugins are versioned in lockstep (`rig-plugins vX.Y.Z` tags every plugin). Third-party
 plugins version themselves.
 
 Names and paths:
-- Files: `jig.yaml`, `jig.lock`, `.jig/`.
-- Config: `~/.config/jig/`. Data: `~/.local/share/jig/`. Cache: `~/.cache/jig/`.
-- Environment variables use the prefix `JIG_*`. During migration, `RIG_*` is still read and also set
+- Files: `rig.yaml`, `rig.lock`, `.rig/`.
+- Config: `~/.config/rig/`. Data: `~/.local/share/rig/`. Cache: `~/.cache/rig/`.
+- Environment variables use the prefix `RIG_*`. During migration, `RIG_*` is still read and also set
   for task steps.
 
 ---
@@ -110,7 +110,7 @@ Names and paths:
  engine       environments, dependency order, up/down/wait, svc:// resolution, shared infra, run state
  host         discovery · install/lock/trust · supervisor (lazy start, idle stop, restart, limits)
               transports: declarative │ script │ JSON-RPC stdio │ MCP bridge · sandbox (Landlock)
- plugins      jig-std (docker, kubernetes, sql, prometheus, ...) · jira · gitlab · terraform · yours
+ plugins      rig-std (docker, kubernetes, sql, prometheus, ...) · jira · gitlab · terraform · yours
 ```
 
 ### 4.2 The six primitives
@@ -128,7 +128,7 @@ Names and paths:
 - Core owns: `svc://`, `env://`, `view://`, `job://`, `file://path#L12`.
 - Plugins own, for example: `k8s://ns/deployment/api`, `db://db/dbo.transactions?id=7`, `trace://abc`,
   `jira://PAY-12`, `gitlab://grp/proj/-/merge_requests/12`, `confluence://SPACE/Page`, `tf://infra/aws_db.main`.
-- `enter` on a ref opens it. `jig open <ref>` opens it from the CLI. The AI follows refs with
+- `enter` on a ref opens it. `rig open <ref>` opens it from the CLI. The AI follows refs with
   `open(ref)`. Links between refs (an MR to an issue to a service to a deploy to an alert) are how the
   AI and the user cross tools.
 
@@ -157,8 +157,8 @@ type Engine interface {
 }
 ```
 
-- **Local:** `engine.Local` runs in the jig process. This is the default: one binary, no daemon.
-- **Remote:** `api.Client` speaks HTTPS and WebSocket to `jig serve`. The JSON types are the same ones
+- **Local:** `engine.Local` runs in the rig process. This is the default: one binary, no daemon.
+- **Remote:** `api.Client` speaks HTTPS and WebSocket to `rig serve`. The JSON types are the same ones
   the plugin protocol uses.
 - **Test:** `api.Fake` drives TUI and CLI tests.
 
@@ -182,7 +182,7 @@ host, tracker, docs system, cloud or IaC tool. All of these are plugins.
 
 ## 5. Configuration: one source of truth
 
-### 5.1 `jig.yaml`
+### 5.1 `rig.yaml`
 
 ```yaml
 project: switch
@@ -190,7 +190,7 @@ default: local
 plugins:                                  # optional: pins and settings; types used below are inferred
   gitlab: { url: https://gitlab.example.local }
   jira:   { url: https://jira.example.local, project: PAY }
-packs: [chm/jig-pack@^1]
+packs: [chm/rig-pack@^1]
 imports:
   - compose: docker-compose.yml           # 54 services stay defined only there
   - godev: .godev.yaml
@@ -198,7 +198,7 @@ imports:
   - prometheus-rules: .docker/kubernetes/heavyload/monitoring/prometheus-rules.yml   # alerts
   - grafana: pkg/monitoring/node_exporter/grafana.json                               # a dashboard
   - kubernetes: .docker/kubernetes/service/test
-include: [jig.d/*.yaml]                   # split a big file without new concepts
+include: [rig.d/*.yaml]                   # split a big file without new concepts
 templates:
   app: { groups: [all], health: { port: http, path: /healthz }, build: { go: "./services/${name}/cmd" } }
 services:
@@ -223,34 +223,34 @@ and `links`. `flow:` is dropped.
 ### 5.2 The pipeline
 
 Load, then `include`, then plugin and pack defaults, then `imports`, then `templates`/`extends`, then
-the environment overlay, then `.jig/local.yaml` (personal and gitignored: disabled plugins, keymap,
+the environment overlay, then `.rig/local.yaml` (personal and gitignored: disabled plugins, keymap,
 editor), then interpolation (`${VAR}`, `${VAR:-default}`, `${component.outputs.x}`, `${env.name}`,
 `${name}` inside templates), then validation against the **composed schema** (core plus every active
 plugin's `config` and `types` schemas), then the catalog.
 
 - **Provenance:** every value remembers `file:line` and the importer it came from.
-  - `jig config explain services.parser.image` prints its origin and every layer that touched it.
-  - Errors point at the real source file, not at `jig.yaml`.
+  - `rig config explain services.parser.image` prints its origin and every layer that touched it.
+  - Errors point at the real source file, not at `rig.yaml`.
 - **Speed:**
-  - Importer output is cached in `.jig/cache/import/` by the sha256 of the files it watches plus the
+  - Importer output is cached in `.rig/cache/import/` by the sha256 of the files it watches plus the
     importer's version. Warm loads parse no foreign files.
   - The composed schema is compiled once per plugin set.
 - **Reload:** file changes trigger an incremental re-run of only the affected importers. `ctrl+r` in the
   TUI and automatic reload with a status-line note are kept from rig.
-- **No `jig.yaml` yet:** jig infers the project in memory, exactly like rig, and writes nothing until
-  `jig init`.
+- **No `rig.yaml` yet:** rig infers the project in memory, exactly like rig, and writes nothing until
+  `rig init`.
 
 ### 5.3 Boilerplate killers
 
 1. **Importers return whole fragments** (services, tasks, queries, dashboards, alerts, tests,
-   components), not only services. Merge rule as in rig: `jig.yaml` keys win, and `key: null` drops an
+   components), not only services. Merge rule as in rig: `rig.yaml` keys win, and `key: null` drops an
    imported key.
 2. **`templates` and `extends`** for many similar services. **`defaults`** per section.
-3. **Inference.** `jig init` and the in-memory default detect stacks, ports, health paths and
+3. **Inference.** `rig init` and the in-memory default detect stacks, ports, health paths and
    dependencies (rig's deep scan, kept). Plugins can add detectors (`detect:` globs).
 4. **Types imply plugins.** `type: sql` resolves to the plugin that provides `sql` through the registry
    index, so `plugins:` is needed only for pins, settings or third-party sources.
-5. **`jig lint --redundant [--fix]`** lists and removes values equal to what an import already provides.
+5. **`rig lint --redundant [--fix]`** lists and removes values equal to what an import already provides.
    A config that passes is minimal by construction.
 6. **Packs** carry shared company configuration (registry mirrors, policy, AI instructions, shared
    tasks) so each repo does not repeat it.
@@ -262,8 +262,8 @@ plugin's `config` and `types` schemas), then the catalog.
 ### 6.1 Anatomy
 
 ```
-jig-gitlab/
-  jig-plugin.yaml          # the manifest: a jig.yaml fragment plus plugin keys
+rig-gitlab/
+  rig-plugin.yaml          # the manifest: a rig.yaml fragment plus plugin keys
   bin/                     # optional executables (or built by the release)
   views/*.yaml             # widget trees
   skills/gitlab/SKILL.md   # what the AI and external agents learn
@@ -273,22 +273,22 @@ jig-gitlab/
 ```
 
 ```yaml
-# jig-plugin.yaml
+# rig-plugin.yaml
 name: gitlab
 version: 1.3.0                     # set by the release
-jig: ">=1.0"                       # host versions it supports
+rig: ">=1.0"                       # host versions it supports
 description: GitLab merge requests, pipelines, issues and CI logs
 publisher: goxang
 requires: { git: ^1 }              # packs are plugins that are mostly `requires`
 implements: [scm/1, tracker/1]     # contracts: standard views and AI recipes light up
-detect: { git_remote: "gitlab", files: [".gitlab-ci.yml"] }      # jig init suggests it
+detect: { git_remote: "gitlab", files: [".gitlab-ci.yml"] }      # rig init suggests it
 server: { command: bin/gitlab }    # JSON-RPC process; omit for a declarative plugin
 permissions:
   net: ["${config.url}"]
   secrets: [GITLAB_TOKEN]
   exec: [git]
   uses: ["vcs.*"]                  # other plugins' sources and actions it may call through the host
-config:                            # JSON Schema of `plugins.gitlab:` in jig.yaml
+config:                            # JSON Schema of `plugins.gitlab:` in rig.yaml
   url:   { type: string, default: https://gitlab.com }
   token: { type: string, secret: true, default: "${GITLAB_TOKEN}" }
 types:     { gitlab-project: { schema: schemas/project.json } }
@@ -298,7 +298,7 @@ actions:   { mr.approve: { effect: write, args: { ref: { type: ref } }, keys: [A
 views:     { MRs: { slot: tab, file: views/mrs.yaml }, ServiceMRs: { slot: service.section, file: views/svc.yaml } }
 importers: { gitlab-ci: { files: [".gitlab-ci.yml"], run: bin/gitlab import-ci } }
 on:        { scm.mr.merged: { action: tracker.sync-links } }
-tasks:     { mr-cleanup: { steps: [ "jig gitlab mr ls --merged -o json | ..." ] } }
+tasks:     { mr-cleanup: { steps: [ "rig gitlab mr ls --merged -o json | ..." ] } }
 skills:    [skills/gitlab]
 ```
 
@@ -321,9 +321,9 @@ views:
 | way | when | contract |
 |---|---|---|
 | **Declarative** | tabs, terminal panes, dashboards, tasks, queries, themes, keymaps, skills, packs | YAML only |
-| **Script** | quick sources, importers and actions in any language | `run:`; args in `$JIG_ARGS` (JSON) and on stdin; stdout is JSON, NDJSON, CSV, TSV, YAML or plain lines (auto-detected, `format:` overrides); the exit code is the result; stderr goes to the plugin log |
+| **Script** | quick sources, importers and actions in any language | `run:`; args in `$RIG_ARGS` (JSON) and on stdin; stdout is JSON, NDJSON, CSV, TSV, YAML or plain lines (auto-detected, `format:` overrides); the exit code is the result; stderr goes to the plugin log |
 | **Server** | providers (runtime, metrics, scm, ...), streams, dynamic views, custom widgets, state | JSON-RPC 2.0 over stdio (section 6.5); SDKs in Go, Python and TypeScript |
-| **MCP bridge** | any MCP server (Atlassian, GitHub, GitLab, AWS, Terraform, ...) | `mcp: { command: ... }` turns tools into actions (effect from `readOnlyHint`/`destructiveHint`, else `write`) and resources into sources; AI and the palette get them at once, and a jig plugin can add views on top |
+| **MCP bridge** | any MCP server (Atlassian, GitHub, GitLab, AWS, Terraform, ...) | `mcp: { command: ... }` turns tools into actions (effect from `readOnlyHint`/`destructiveHint`, else `write`) and resources into sources; AI and the palette get them at once, and a rig plugin can add views on top |
 
 Go SDK:
 
@@ -339,7 +339,7 @@ func main() {
 Python SDK:
 
 ```python
-from jig import Plugin
+from rig import Plugin
 p = Plugin("hello")
 
 @p.source("greetings")
@@ -389,10 +389,10 @@ The core-shipped v1 contracts are:
 A plugin may define a new contract (`contracts:`, for example `flags/1` for feature flags) together
 with its views. Ecosystems can then grow with no core release.
 
-### 6.5 Protocol `jig/1`
+### 6.5 Protocol `rig/1`
 
 - **Framing:** newline-delimited JSON-RPC 2.0 on stdin and stdout. stderr goes to
-  `~/.local/state/jig/logs/<plugin>.log` (`jig plugin logs <name>`).
+  `~/.local/state/rig/logs/<plugin>.log` (`rig plugin logs <name>`).
 - **Plugin methods** (all optional except `initialize`):
   - `initialize`: the host sends its version, protocol versions and **host capabilities** (widget kinds
     and versions, features). The plugin answers with what it provides.
@@ -432,17 +432,17 @@ results page with `next` cursors.
 - **Lazy start:** a plugin process starts on its first call, never at startup.
 - **Idle stop:** after 10 minutes with no calls, no open streams and no subscriptions. A runtime plugin
   stays up while a TUI is attached, because it serves the status poll.
-- **One binary, many processes:** `jig-std` holds every official Go plugin, and `jig-std <name>` serves
+- **One binary, many processes:** `rig-std` holds every official Go plugin, and `rig-std <name>` serves
   one. Pages of the binary are shared by the kernel, so each extra plugin costs only its heap (about
   5–10 MB). A crash affects one plugin, and the supervisor restarts it with backoff, at most 5 times per
   minute.
-- **Limits:** per-call deadlines from context, a memory watermark warning in `jig plugin ls`, and
+- **Limits:** per-call deadlines from context, a memory watermark warning in `rig plugin ls`, and
   `RLIMIT_AS` for script plugins.
 - **No startup cost for declarative plugins:** their YAML is merged into the catalog.
 
 ### 6.7 The compatibility contract (no breaking plugins)
 
-1. `jig/1` is **append-only**. Methods, fields and enum values are added, never removed, renamed or
+1. `rig/1` is **append-only**. Methods, fields and enum values are added, never removed, renamed or
    retyped. Unknown fields are ignored on both sides. A request to a plugin never gains a new required
    field.
 2. **Negotiate, do not compare versions.** Behaviour depends on the declared `capabilities`, never on
@@ -450,20 +450,20 @@ results page with `next` cursors.
 3. **Widgets are versioned on their own** (`table@1`, `chart@1`):
    - New properties are optional and have defaults.
    - Any node can carry a `fallback:` subtree.
-   - A widget unknown to an older host renders its fallback, or a one-line "needs jig ≥ x" notice.
+   - A widget unknown to an older host renders its fallback, or a one-line "needs rig ≥ x" notice.
      The view never fails.
 4. **Contracts are versioned on their own** (`metrics/1`, later `metrics/2`). The host keeps shims for
    the previous contract version for at least 12 months.
-5. **Manifests:** unknown keys produce warnings, not errors. `jig:` sets the minimum host version.
-6. **The SDK is generated** from `protocol/jig1.schema.json`, the single source of truth. It has no
+5. **Manifests:** unknown keys produce warnings, not errors. `rig:` sets the minimum host version.
+6. **The SDK is generated** from `protocol/rig1.schema.json`, the single source of truth. It has no
    dependencies outside the standard library. A plugin built with an old SDK keeps working on a new
    host because the protocol, not the SDK, is the contract.
 7. **Golden transcripts:** every official plugin records `testdata/*.jsonl` sessions. Core CI replays
    all of them against the host, and a core change that breaks one cannot merge.
 8. **Compat corpus:** a nightly job installs every plugin in the registry index and runs
-   `jig plugin test` against core `main`.
+   `rig plugin test` against core `main`.
 9. **Before 1.0, breaking changes are allowed** but listed in `docs/protocol.md#changes`. At 1.0 the
-   protocol freezes under these rules. A future `jig/2` would run side by side with `jig/1` for at
+   protocol freezes under these rules. A future `rig/2` would run side by side with `rig/1` for at
    least 12 months.
 
 ### 6.8 Adding a feature without breaking anyone
@@ -474,7 +474,7 @@ results page with `next` cursors.
 | a widget proven in a plugin | a plugin ships it through `widget.render` first; core adopts the same name and the plugin keeps it as a fallback |
 | a new kernel feature | a new optional method or field plus a capability flag |
 | a new domain | a plugin-defined contract, then promotion to `contracts/` once two implementations exist |
-| a contract change | `x/2` next to `x/1`, a shim, and a deprecation notice in `jig plugin doctor` |
+| a contract change | `x/2` next to `x/1`, a shim, and a deprecation notice in `rig plugin doctor` |
 
 ---
 
@@ -539,9 +539,9 @@ The host owns fetching:
 - Starts lazily the first time the view shows. `keep: true` keeps the process running while hidden.
   `R` restarts it after it exits.
 - With focus, every key goes to the process, and so does mouse input (SGR, translated to pane-local
-  coordinates). `ctrl+]` returns focus to jig, and the border shows that hint. Resizing sends
+  coordinates). `ctrl+]` returns focus to rig, and the border shows that hint. Resizing sends
   `pty.Setsize` (SIGWINCH).
-- Scrollback is 10k lines by default. Selection and copy work as everywhere else. A `jig.terminal@1`
+- Scrollback is 10k lines by default. Selection and copy work as everywhere else. A `rig.terminal@1`
   frame advertises truecolour and mouse support.
 - The same widget also hosts `exec` shells into services, ssh to hosts, `kubectl debug`, and any TUI
   program (lazygit, k9s, htop, vim, yazi, a game).
@@ -561,7 +561,7 @@ The host owns fetching:
   moves are debounced.
 - Content never sizes a box. A list row is one line, and full text opens behind a key.
 - Global keys win while a view is not typing. Plugin key conflicts are resolved at load: the global
-  key wins, the plugin's binding moves to the palette, and `jig doctor` reports it.
+  key wins, the plugin's binding moves to the palette, and `rig doctor` reports it.
 - The `batch()` helper stays until it is verified that `tea.Batch` no longer freezes keys in
   bubbletea v2.
 
@@ -573,7 +573,7 @@ The host owns fetching:
     tokens.
   - `terminal` maps to xterm.js over WebSocket.
   - `canvas` cells map to HTML.
-- A future `jig serve --web` adds only a renderer. No core or plugin changes.
+- A future `rig serve --web` adds only a renderer. No core or plugin changes.
 
 ---
 
@@ -582,11 +582,11 @@ The host owns fetching:
 ### 8.1 Grammar
 
 ```
-jig <verb> [targets] [flags]        daily verbs: jig up minimum · jig logs parser -f · jig restart session-*
-jig <name> <action> [args]          talk to a thing by its name: jig db query "SELECT 1" · jig jira create "Title"
-                                     · jig kind create · jig tf plan · jig redis GET key   (name = component, plugin or contract)
-jig <noun> <verb>                   management: jig plugin add gitlab · jig env ls · jig secret set X
-jig open <ref>                      jig open jira://PAY-12 · jig open svc://parser
+rig <verb> [targets] [flags]        daily verbs: rig up minimum · rig logs parser -f · rig restart session-*
+rig <name> <action> [args]          talk to a thing by its name: rig db query "SELECT 1" · rig jira create "Title"
+                                     · rig kind create · rig tf plan · rig redis GET key   (name = component, plugin or contract)
+rig <noun> <verb>                   management: rig plugin add gitlab · rig env ls · rig secret set X
+rig open <ref>                      rig open jira://PAY-12 · rig open svc://parser
 ```
 
 - Name resolution order: built-in verb, then component, then plugin, then contract. Ambiguity is an
@@ -623,7 +623,7 @@ Help:
 - Every command shows two or three examples.
 - Unknown commands get a "did you mean" suggestion.
 - Completion for bash, zsh and fish completes names, groups, refs, actions and plugin names dynamically.
-- `jig docs <words>` prints only the sections that hold those words (kept from rig).
+- `rig docs <words>` prints only the sections that hold those words (kept from rig).
 
 ### 8.4 TUI keys
 
@@ -648,7 +648,7 @@ state, and ask when policy says so. Symbols are global modes.
 - **Mouse:** everything is clickable, a double-click opens, right-click opens the context menu, the
   wheel scrolls, borders drag to resize, and dragging copies.
 - **`keys: rig` preset:** restores rig's bindings for anyone migrating. It is set in
-  `~/.config/jig/config.yaml` or `.jig/local.yaml`.
+  `~/.config/rig/config.yaml` or `.rig/local.yaml`.
 
 ---
 
@@ -695,11 +695,11 @@ small fixed set of **meta-tools**:
 | `ui(steps)` | drives the TUI that started it (rig's `rig_ui`, kept: open a view at a row, filter, press keys) |
 | `skill(name)` | loads a plugin's SKILL.md body (progressive disclosure: only names and descriptions are always in the prompt) |
 | `file(op, ...)` | project files, with deny lists (rig's `rig_file`, kept) |
-| `docs(words)` | jig and plugin docs |
+| `docs(words)` | rig and plugin docs |
 
 - The current view's actions and sources are pinned directly, so the common tools need no `find` round
   trip.
-- `jig mcp` exposes the same meta-tools to external agents. `--flat` lists every tool for clients that
+- `rig mcp` exposes the same meta-tools to external agents. `--flat` lists every tool for clients that
   want that.
 
 ### 10.3 Managing plugins
@@ -708,7 +708,7 @@ Sentry plugin? install it" works, with an approval step because these are writes
 
 ### 10.4 Skills
 - Every plugin's `skills/` are available to the built-in AI.
-- `jig skill install` exports the core skill plus every active plugin skill into `.claude/skills/` and
+- `rig skill install` exports the core skill plus every active plugin skill into `.claude/skills/` and
   `.agents/skills/` for external agents.
 
 ### 10.5 Agents and triggers
@@ -725,8 +725,8 @@ agents:
     instructions: Summarise last week's merged MRs per service and publish to Confluence.
 ```
 
-- Agents run wherever the engine runs: in a TUI session, or always-on under `jig serve`.
-- **The approval inbox** (`jig inbox`, the Inbox view and later the web) lists pending writes with
+- Agents run wherever the engine runs: in a TUI session, or always-on under `rig serve`.
+- **The approval inbox** (`rig inbox`, the Inbox view and later the web) lists pending writes with
   their `plan` diff. Each one can be approved, edited or rejected, and is audited with who approved it.
 
 ### 10.6 Guard rails (kept from rig and generalised)
@@ -738,7 +738,7 @@ agents:
   marked untrusted in the prompt. An instruction found inside data can never approve a write on its own.
 
 ### 10.7 Incident mode
-`jig why` is kept and works on contracts, not adapters: runtime, logs, traces, metrics, alerts and
+`rig why` is kept and works on contracts, not adapters: runtime, logs, traces, metrics, alerts and
 events. Deploys and MRs from `scm/1` are added to the evidence timeline.
 
 ### 10.8 Product-team work (through plugins, with human sign-off)
@@ -763,26 +763,26 @@ their skills.
 ## 11. Security
 
 1. **Workspace trust:**
-   - The first `jig` in a project lists the plugins it would install, with their permissions and
+   - The first `rig` in a project lists the plugins it would install, with their permissions and
      sources, and asks once (as VS Code workspace trust does).
-   - CI and agents use `--yes` or `JIG_TRUST=project`. Without trust, non-interactive runs fail with the
+   - CI and agents use `--yes` or `RIG_TRUST=project`. Without trust, non-interactive runs fail with the
      exact command to run.
 2. **Supply chain:**
-   - `jig.lock` pins version, source, sha256 per OS and architecture, and a hash of the granted
+   - `rig.lock` pins version, source, sha256 per OS and architecture, and a hash of the granted
      permissions.
-   - Official artifacts are signed (minisign; the public key is built into jig). Third-party publishers
+   - Official artifacts are signed (minisign; the public key is built into rig). Third-party publishers
      are trusted on first use, by key.
    - An update that adds permissions needs re-approval. Auto-install never goes past the lock.
 3. **Process isolation:**
    - Plugins get a scrubbed environment (PATH, HOME, LANG and declared variables only), their declared
      secrets only through `host/secret`, and only their own config.
-   - On Linux, plugins are launched through `jig __sandbox` (applies Landlock via `go-landlock`, then
+   - On Linux, plugins are launched through `rig __sandbox` (applies Landlock via `go-landlock`, then
      execs the plugin). The filesystem is limited to the project, the plugin's directory, temp
      directories and declared paths. On kernels with Landlock ABI v4 or later, TCP connect is limited to
      declared ports when `net` lists them.
-   - On macOS there is no sandbox. Permissions are advisory and audited, and `jig plugin info` says so.
+   - On macOS there is no sandbox. Permissions are advisory and audited, and `rig plugin info` says so.
 4. **Secrets:**
-   - The 0600 store under `~/.config/jig` is kept. `secrets/1` plugins can back it: Vault, 1Password,
+   - The 0600 store under `~/.config/rig` is kept. `secrets/1` plugins can back it: Vault, 1Password,
      SOPS, AWS Secrets Manager.
    - Values are masked in every view (`maskValue`, kept) and redacted for the AI.
 5. **Policy and RBAC** (enforced in `kernel/policy`, for every Engine API call from every client):
@@ -802,26 +802,26 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
      window: the "password protection"), `approve` (another person, four-eyes).
    - Local default: the local user gets everything except `readonly` and `protected` environments,
      which keep rig's behaviour.
-6. **Server mode (`jig serve`):**
+6. **Server mode (`rig serve`):**
    - One or more projects, cloned and kept in sync by the server, served over TLS.
    - Accounts: local users with argon2id passwords, optional TOTP, OIDC (Keycloak, GitLab, Google,
      Okta), and scoped, expiring API tokens.
-   - Remote TUI and CLI: `jig login https://jig.example.local`, then `jig -r work ...`.
+   - Remote TUI and CLI: `rig login https://rig.example.local`, then `rig -r work ...`.
    - Secrets never leave the server. Clients see masked values.
-   - **Environment leases** (`jig lock env loadtest2`) prevent two people deploying over each other.
+   - **Environment leases** (`rig lock env loadtest2`) prevent two people deploying over each other.
    - A central audit log, and rate limits.
 7. **Audit:**
-   - Append-only JSONL per environment: `.jig/<env>/audit.jsonl` locally, the server's store
+   - Append-only JSONL per environment: `.rig/<env>/audit.jsonl` locally, the server's store
      remotely.
    - Fields: time, subject (user, AI, agent or token), action, arguments with secrets redacted, effect,
      decision, approver and result.
-   - `jig admin audit` filters it.
+   - `rig admin audit` filters it.
 
 ---
 
 ## 12. Distribution and management
 
-- **Registry index:** `goxang/jig-plugins/registry/index.json`. Each entry has a name, description,
+- **Registry index:** `goxang/rig-plugins/registry/index.json`. Each entry has a name, description,
   publisher, versions, artifacts with sha256 and signature, `provides` (types, contracts, importers,
   schemes), `detect`, and the packs it belongs to. Community plugins are added by PR to the index; their
   code stays in their own repos.
@@ -830,40 +830,40 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
   - a git repo: `github.com/o/r[/sub]@v1.2.0`, `gitlab.example.local/grp/r@v1`, or `git+ssh://...`
     (uses the user's git credentials)
   - a tarball: `https://.../x.tar.gz#sha256=...`
-  - a local path: `./tools/jig-foo`
+  - a local path: `./tools/rig-foo`
 - **Mirrors and air-gapped installs:**
-  - `registry: https://nexus.example.local/repository/jig/` in the user config or a company pack
+  - `registry: https://nexus.example.local/repository/rig/` in the user config or a company pack
     rewrites every download.
-  - `jig plugin vendor` copies the locked artifacts into `.jig/vendor/` for offline machines.
+  - `rig plugin vendor` copies the locked artifacts into `.rig/vendor/` for offline machines.
 - **Scopes:**
-  - Project-local `.jig/plugins/*` load automatically under workspace trust.
-  - User plugins live in `~/.config/jig/plugins/*`.
-  - Installed artifacts go to a content-addressed store, `~/.local/share/jig/plugins/<name>/<version>/`,
+  - Project-local `.rig/plugins/*` load automatically under workspace trust.
+  - User plugins live in `~/.config/rig/plugins/*`.
+  - Installed artifacts go to a content-addressed store, `~/.local/share/rig/plugins/<name>/<version>/`,
     shared across projects.
 - **Packs (bundles):** a pack is a plugin with `requires:` plus optional policy, skills, tasks, keymap
   and AI instructions. Versions are resolved with minimal version selection, which is deterministic and
   needs no SAT solver.
   - Official packs: `std` (local, docker, kubernetes, kind, go, git), `observability`, `data`, `qa`,
     `gitlab`, `github`, `atlassian`, `product`, `cloud-aws`.
-  - Companies publish their own, for example `chm/jig-pack`.
-- **Auto-install:** any jig command in a project whose locked plugins are missing downloads them in
+  - Companies publish their own, for example `chm/rig-pack`.
+- **Auto-install:** any rig command in a project whose locked plugins are missing downloads them in
   parallel (after trust), verifies them and continues. A missing type with no pin is resolved through
-  the index and written to `jig.lock`.
-- **Suggestions:** `jig init` and `jig doctor` read `detect` from the index (".gitlab-ci.yml found: add
+  the index and written to `rig.lock`.
+- **Suggestions:** `rig init` and `rig doctor` read `detect` from the index (".gitlab-ci.yml found: add
   gitlab?"). The Plugins view shows installed plugins (on/off, permissions, logs, memory) and the
   registry (search, details, install).
 - **Commands:**
-  - `jig plugin ls|search|info|logs|trace`
-  - `jig plugin add|rm|up [--major]`
-  - `jig plugin on|off [--project]`: personal by default, written to `.jig/local.yaml`; `--project`
-    writes to `jig.yaml`
-  - `jig plugin gc|vendor`
+  - `rig plugin ls|search|info|logs|trace`
+  - `rig plugin add|rm|up [--major]`
+  - `rig plugin on|off [--project]`: personal by default, written to `.rig/local.yaml`; `--project`
+    writes to `rig.yaml`
+  - `rig plugin gc|vendor`
 - **Authoring:**
-  - `jig plugin new <name> --lang go|python|ts|bash|yaml` scaffolds the manifest, a sample source,
+  - `rig plugin new <name> --lang go|python|ts|bash|yaml` scaffolds the manifest, a sample source,
     action and view, a skill stub, tests, transcripts and a release workflow.
-  - `jig plugin dev` links the folder, rebuilds on change, hot-reloads views and shows the RPC trace in
+  - `rig plugin dev` links the folder, rebuilds on change, hot-reloads views and shows the RPC trace in
     a pane.
-  - `jig plugin test` validates the manifest, runs the conformance suites of the contracts it claims and
+  - `rig plugin test` validates the manifest, runs the conformance suites of the contracts it claims and
     replays its transcripts.
   - Publishing is a git tag: the template's workflow builds, signs and opens the index PR.
 
@@ -897,9 +897,9 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
     - an optional `ai:` summary section
   - Outputs: `md`, `html`, `json`, `junit`, `csv`.
   - `publish:` sends it through actions (a Confluence page, an MR comment, a Jira comment, Slack).
-  - `every:` schedules it (in a session, or always-on under `jig serve`).
-- **CI mode:** `jig test --ci -o junit` and `jig load run smoke --assert` exit with `3` on failure.
-  `jig report <name> --vs last` is designed for MR pipelines.
+  - `every:` schedules it (in a session, or always-on under `rig serve`).
+- **CI mode:** `rig test --ci -o junit` and `rig load run smoke --assert` exit with `3` on failure.
+  `rig report <name> --vs last` is designed for MR pipelines.
 
 ---
 
@@ -922,7 +922,7 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
 - **`terraform` (also covers OpenTofu) (`iac/1`):**
   - A stack component: `plan` (diff widget), `apply` (`danger`, confirm), `outputs` in the catalog
     (`${infra.outputs.db_url}` feeds services), a drift check in `doctor`, and a state browser.
-  - Environments map to workspaces, so `jig up -e staging` applies infra first, in dependency order.
+  - Environments map to workspaces, so `rig up -e staging` applies infra first, in dependency order.
 - **`aws`:**
   - Uses the `aws` CLI and the user's profiles and SSO.
   - Resource browsers (EC2, ECS, EKS, RDS, S3, Lambda).
@@ -932,7 +932,7 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
 
 ---
 
-## 15. Official plugins (`goxang/jig-plugins`)
+## 15. Official plugins (`goxang/rig-plugins`)
 
 | plugin | contracts / role | origin |
 |---|---|---|
@@ -968,31 +968,31 @@ environments: { loadtest2: { protected: true }, prod: { readonly: true } }
 ## 16. Repository layouts
 
 ```
-goxang/jig
-  cmd/jig/                 main (CLI, TUI, server, sandbox helper)
+goxang/rig
+  cmd/rig/                 main (CLI, TUI, server, sandbox helper)
   kernel/
     catalog/ config/ refs/ frames/ views/ actions/ jobs/ events/ policy/ audit/ cache/ search/ identity/
   engine/                  environments, ordering, lifecycle, svc:// resolution, shared infra, run state
   host/                    discovery, manifest, install, lock, trust, registry, supervisor, sandbox
-    transport/             declarative, script, rpc (jig/1), mcpbridge
+    transport/             declarative, script, rpc (rig/1), mcpbridge
   api/                     Engine interface, Local, Client, HTTP and WebSocket handlers
-  server/                  jig serve: auth (passwords, TOTP, OIDC, tokens), sessions, leases
+  server/                  rig serve: auth (passwords, TOTP, OIDC, tokens), sessions, leases
   ui/tui/                  renderer, keymap, palette, which-key, context menu, themes, sessions
   ui/widgets/              the widget library (renderer-neutral model plus TUI drawing)
   ai/                      backends, chat, router, redaction, agents, inbox, why
   cli/                     commands, thin over api.Engine
   contracts/<name>/v1/     spec.yaml, schemas, conformance tests, standard views
-  protocol/                jig1.schema.json (source of truth), generator
+  protocol/                rig1.schema.json (source of truth), generator
   sdk/                     separate module: Go SDK (generated types, Serve, testing helpers)
   sdk/python/ sdk/ts/      generated SDKs, published to PyPI and npm
-  skills/jig/ skills/jig-plugin/ skills/jig-dev/
+  skills/rig/ skills/rig-plugin/ skills/rig-dev/
   docs/                    config, cli, keys, plugins, protocol, contracts, widgets, security, migration, plan
   examples/                hello, python, shop, kind (kept), plus plugins/ (one of each kind)
 
-goxang/jig-plugins
-  cmd/jig-std/             the multiplexed binary
-  plugins/<name>/          jig-plugin.yaml, Go package or scripts, views, skills, testdata
-  packs/<name>/            jig-plugin.yaml (requires plus extras)
+goxang/rig-plugins
+  cmd/rig-std/             the multiplexed binary
+  plugins/<name>/          rig-plugin.yaml, Go package or scripts, views, skills, testdata
+  packs/<name>/            rig-plugin.yaml (requires plus extras)
   registry/index.json      generated by CI, plus community entries
   .github/workflows/       ci (lint, test, conformance), release (build, sign, index)
 ```
@@ -1008,14 +1008,14 @@ goxang/jig-plugins
 - one batched status call per runtime every 3 s
 - work done once per change and never per frame
 - debounced cursor requests
-- run state with the environment (a ConfigMap on Kubernetes, `.jig/<env>/state.json` elsewhere)
+- run state with the environment (a ConfigMap on Kubernetes, `.rig/<env>/state.json` elsewhere)
 - the daemonless Go builder (go-containerregistry) and the `scrape` adapter
 - long tasks survive quitting the TUI
 - Kubernetes never uses the current context
 
 **New mechanisms:**
 - lazy plugin start and idle stop
-- shared pages in `jig-std`
+- shared pages in `rig-std`
 - importer cache and a compiled schema
 - singleflight source cache
 - NDJSON batching with back-pressure
@@ -1025,13 +1025,13 @@ goxang/jig-plugins
 
 | measure | budget |
 |---|---|
-| `jig version` | < 20 ms |
+| `rig version` | < 20 ms |
 | config load, warm or cold | < 50 ms or < 300 ms |
-| `jig status` warm (local env) | ≤ rig's time + 10 % |
+| `rig status` warm (local env) | ≤ rig's time + 10 % |
 | TUI first paint | < 150 ms |
 | key to frame | p99 < 16 ms |
 | idle CPU, TUI open | < 1 % |
-| RSS: jig, each plugin, the switch session total | ≤ 45 MB, ≤ 15 MB, ≤ 110 MB |
+| RSS: rig, each plugin, the switch session total | ≤ 45 MB, ≤ 15 MB, ≤ 110 MB |
 | plugin round trip (local) | < 1 ms |
 | log stream | 10k lines/s with no key lag |
 | core binary | ≤ 30 MB (no technology code) |
@@ -1040,50 +1040,50 @@ goxang/jig-plugins
 
 ## 18. Migration from rig
 
-- **`jig migrate`** (reads `rig.yaml`, writes `jig.yaml`, never deletes rig files):
+- **`rig migrate`** (reads `rig.yaml`, writes `rig.yaml`, never deletes rig files):
   - Keys map one to one where the meaning is unchanged.
-  - Component `type`s map to plugins and are pinned in `jig.lock`.
+  - Component `type`s map to plugins and are pinned in `rig.lock`.
   - `flow:` is dropped with a notice.
   - `imports` are kept. New ones are suggested from detected files: compose, godev, just, make,
     Prometheus rules, Grafana JSON.
-  - `jig lint --redundant --fix` runs afterwards.
+  - `rig lint --redundant --fix` runs afterwards.
 - **Commands inside tasks** are rewritten from a tested mapping table, for example:
 
-  | rig | jig |
+  | rig | rig |
   |---|---|
-  | `rig do <c> <a>` | `jig <c> <a>` |
-  | `rig task x` | `jig run x` |
-  | `rig infra up` | `jig up infra` |
-  | `rig db query` | `jig db query` |
-  | `rig query` | `jig query` |
-  | `rig up --build` | `jig up --build` |
+  | `rig do <c> <a>` | `rig <c> <a>` |
+  | `rig task x` | `rig run x` |
+  | `rig infra up` | `rig up infra` |
+  | `rig db query` | `rig db query` |
+  | `rig query` | `rig query` |
+  | `rig up --build` | `rig up --build` |
 
   `$RIG_ENV` and the other `RIG_*` variables are still exported to task steps until the project sets
   `compat: { rig_env: false }`.
 - **State:**
-  - `.rig/<env>/` is copied to `.jig/<env>/` (state, AI audit, flow settings dropped).
-  - On Kubernetes, the state ConfigMap `rig-state` is read as a fallback and then copied to `jig-state`.
-  - `~/.config/rig` (themes, secrets, `ai.json`, sessions) is copied to `~/.config/jig`.
-- **The switch project** (on branch `jig` in `~/go/src/switch_v2_microservice`; `rig.yaml` stays until
+  - `.rig/<env>/` is copied to `.rig/<env>/` (state, AI audit, flow settings dropped).
+  - On Kubernetes, the state ConfigMap `rig-state` is read as a fallback and then copied to `rig-state`.
+  - `~/.config/rig` (themes, secrets, `ai.json`, sessions) is copied to `~/.config/rig`.
+- **The switch project** (on branch `rig` in `~/go/src/switch_v2_microservice`; `rig.yaml` stays until
   you sign off):
-  - `jig.yaml`: imports of `docker-compose.yml`, `.godev.yaml`, `justfile`, the Kubernetes folders,
+  - `rig.yaml`: imports of `docker-compose.yml`, `.godev.yaml`, `justfile`, the Kubernetes folders,
     `prometheus-rules.yml` and the node-exporter Grafana JSON; templates for the app services; the
     environments local, docker, kind, k8s and loadtest2 (loadtest2 `protected`).
-  - `.jig/plugins/switch/`: the switch-specific tasks rewritten for jig (bootstrap, ship, set-db,
+  - `.rig/plugins/switch/`: the switch-specific tasks rewritten for rig (bootstrap, ship, set-db,
     fresh-db, consul and kv-*, shaparak-link, nexus-prune through the `registry` plugin, loadtest-prep
     and loadtest-hints), the overview and service dashboards, queries, reports, AI instructions and
     `ai.deny`, the load-test skill, and a **Payments** view.
-  - `jig.lock`.
-  - **Measured outcome:** report the line counts (rig.yaml at 1942 lines, against jig.yaml plus the
+  - `rig.lock`.
+  - **Measured outcome:** report the line counts (rig.yaml at 1942 lines, against rig.yaml plus the
     switch plugin) and require zero `lint --redundant` hits. The target is total owned config at most
     60 % of rig.yaml. The actual number is reported, not assumed.
   - **Parity run:**
-    - `jig env`
-    - `jig doctor` for local, docker and kind
-    - `jig -e local up minimum`
+    - `rig env`
+    - `rig doctor` for local, docker and kind
+    - `rig -e local up minimum`
     - status, logs and the dashboards rendering
     - the KV screen on Consul; the Data screen on MSSQL and Redis
-    - `jig run test` on kind; load generators through kvload on kind; a report
+    - `rig run test` on kind; load generators through kvload on kind; a report
     - read-only browsing of `loadtest2`: **no write action against loadtest2 or k8s during
       acceptance**, because they are shared
 
@@ -1092,21 +1092,21 @@ goxang/jig-plugins
 ## 19. Build order (one continuous run)
 
 Every step ends green: gofmt, `go vet`, `go test -race`, staticcheck, the protocol and conformance
-suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 160 -y 40 'jig'`,
+suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 160 -y 40 'rig'`,
 `send-keys` with 0.3 s between keys). Commits are Conventional Commits pushed to `main`. CI publishes
 `v0.x` releases automatically during the run. **v1.0.0 is tagged only when section 20 passes.**
 
 1. **Fork and baseline:**
-   - Clone `goxang/rig` into `~/go/src/open-pkg/jig` with history.
-   - Rename the module, binary, paths, environment prefix and docs to jig.
+   - Clone `goxang/rig` into `~/go/src/open-pkg/rig` with history.
+   - Rename the module, binary, paths, environment prefix and docs to rig.
    - Delete Windows code (`proc_windows.go`, the Windows parts of `internal/sh`, Windows CI targets) and
      the Flow screen and `flow:`.
    - Go 1.26 toolchain directive. Upgrade to bubbletea v2 and lipgloss v2.
-   - CI on Linux and macOS. A new `AGENTS.md` and `skills/jig-dev`.
+   - CI on Linux and macOS. A new `AGENTS.md` and `skills/rig-dev`.
    - Copy this plan to `docs/plan.md`.
-   - **Gate:** jig behaves exactly like rig on every example.
+   - **Gate:** rig behaves exactly like rig on every example.
 2. **Protocol and SDK:**
-   - `protocol/jig1.schema.json`, the generator, the Go SDK module, and the Python and TypeScript SDKs.
+   - `protocol/rig1.schema.json`, the generator, the Go SDK module, and the Python and TypeScript SDKs.
    - The conformance harness, transcript record and replay, `docs/protocol.md`.
 3. **Kernel:**
    - catalog, refs, frames, actions and jobs (port rig's job and activity model), events and hooks,
@@ -1121,7 +1121,7 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
      limits), the scrubbed environment, the Landlock sandbox helper, permissions
    - lockfile, registry client, mirrors, vendor, workspace trust, auto-install, packs (minimal version
      selection)
-   - `jig plugin *`
+   - `rig plugin *`
 6. **Widgets and views:**
    - The renderer-neutral widget model and TUI drawing; port rig's grid, jsontree, chartview, logview,
      picker, markdown and viz into widgets.
@@ -1133,8 +1133,8 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
 7. **Contracts and standard views:** `contracts/*/v1` specs and conformance tests. Rebuild Services,
    Logs, Metrics, Traces, Data, Queries, KV, Load, Hosts, Tests, Profile and Activity as view specs over
    the contracts.
-8. **jig-plugins:**
-   - Create the repo and `jig-std`.
+8. **rig-plugins:**
+   - Create the repo and `rig-std`.
    - Port every rig adapter into an SDK plugin: runtimes (Manifests views go with kubernetes), builders,
      metrics, logs, traces, profilers, debugger, sql, redis, rabbitmq, kafka, consul, loadgens, ssh,
      http, gotest, otel, goland, and the importers compose, kubernetes, godev and rig.
@@ -1143,7 +1143,7 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
    - **Gate:** the core binary has no technology code, and every example passes through plugins.
 9. **AI:** port the chat, backends, redaction and guard rails onto policy, actions and audit. Build the
    meta-tool router, plugin skills, agents and triggers, the approval inbox, `why` over contracts, and
-   `jig mcp` with meta-tools and `--flat`.
+   `rig mcp` with meta-tools and `--flat`.
 10. **Quality:** `tests/1` runners (gotest, junit, pytest, jest, hurl); `load/1` profiles, assertions and
     baselines plus k6, vegeta and ghz; reports with templates, compare, publish, schedule and CI exit
     codes.
@@ -1151,7 +1151,7 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
     - HTTP and WebSocket transports for the Engine API
     - accounts (argon2id, TOTP, OIDC, tokens), RBAC policy server-side, re-auth, approvals, leases,
       central audit
-    - `jig login` and `--remote`
+    - `rig login` and `--remote`
     - a TLS-only default
 12. **Ecosystem plugins:**
     - git, gitlab, github, jira, confluence, markdown-docs, terraform, aws, helm, slack, registry,
@@ -1162,40 +1162,40 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
     - all packs, including `pack/product` with its agents
     - the registry index generator and signing
 13. **Developer experience:**
-    - `jig plugin new` templates for Go, Python, TypeScript, bash and YAML; `jig plugin dev` and `test`
-    - `skills/jig-plugin/SKILL.md`: the manifest, the four ways to implement, frames, actions, views and
+    - `rig plugin new` templates for Go, Python, TypeScript, bash and YAML; `rig plugin dev` and `test`
+    - `skills/rig-plugin/SKILL.md`: the manifest, the four ways to implement, frames, actions, views and
       slots, contracts, the compatibility rules, testing, publishing, and an end-to-end example
-    - `skills/jig/SKILL.md`
-    - every doc in `docs/`; `jig docs` from the binary
+    - `skills/rig/SKILL.md`
+    - every doc in `docs/`; `rig docs` from the binary
 14. **Migration:**
-    - `jig migrate` with the command mapping table (tested on all 120 `rig ` uses in the switch file)
+    - `rig migrate` with the command mapping table (tested on all 120 `rig ` uses in the switch file)
     - state and config copies
-    - on the examples, then the switch on branch `jig` (section 18)
+    - on the examples, then the switch on branch `rig` (section 18)
 15. **Release and install:**
-    - Release workflows for jig and jig-plugins (binaries for Linux and macOS on amd64 and arm64,
-      checksums, signatures, `install.sh`, `jig upgrade`).
-    - Install `jig` into `~/.local/bin` on this machine.
-    - The switch's plugins auto-install on its first `jig` run.
-    - `jig doctor` passes in the switch.
-16. **Acceptance:** section 20, then tag **jig v1.0.0** and **jig-plugins v1.0.0**, which freezes
-    `jig/1`.
+    - Release workflows for rig and rig-plugins (binaries for Linux and macOS on amd64 and arm64,
+      checksums, signatures, `install.sh`, `rig upgrade`).
+    - Install `rig` into `~/.local/bin` on this machine.
+    - The switch's plugins auto-install on its first `rig` run.
+    - `rig doctor` passes in the switch.
+16. **Acceptance:** section 20, then tag **rig v1.0.0** and **rig-plugins v1.0.0**, which freezes
+    `rig/1`.
 
 ---
 
 ## 20. Acceptance (definition of done)
 
 1. **Parity:**
-   - Every rig command except flow has a jig equivalent. A table in `docs/migration.md` lists each one
+   - Every rig command except flow has a rig equivalent. A table in `docs/migration.md` lists each one
      with a test.
    - Every screen and feature in rig's guide works: Services, Logs, Metrics, Traces, Queries, KV, Data,
      Load, Manifests, Hosts, Tests, sessions, themes, the AI chat, `@?`, `why`, MCP, GoLand.
 2. **Switch:** the parity run in section 18 passes, the line-count report is written, and the
    `loadtest2` checks were read-only.
 3. **Plugins:**
-   - Every official plugin passes `jig plugin test`.
+   - Every official plugin passes `rig plugin test`.
    - Golden transcripts replay in core CI.
    - A third-party-style plugin in each language (Go, Python, TypeScript, bash, YAML) built from
-     `jig plugin new` works end to end.
+     `rig plugin new` works end to end.
    - The arcade tab runs a game in a terminal pane, with keys and mouse.
 4. **Compatibility drill:**
    - Add a new widget (`timeline@1` already exists, so add a `calendar@1` behind a capability). A plugin
@@ -1215,11 +1215,11 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
    - The sandbox denies an undeclared path on Linux.
    - Secrets never appear in a plugin's environment, an AI prompt or audit arguments (tests grep for
      planted canaries).
-   - `jig serve` works with a password plus TOTP, OIDC (a mock IdP) and a token, and `reauth` and
+   - `rig serve` works with a password plus TOTP, OIDC (a mock IdP) and a token, and `reauth` and
      `approve` are enforced remotely.
 8. **Performance:** every budget in section 17 is met by the CI bench.
-9. **Docs and skills:** an agent given only `skills/jig-plugin/SKILL.md` and "write a plugin that shows
-   Sentry issues as a tab" produces one that passes `jig plugin test`. Run this as a scripted check with
+9. **Docs and skills:** an agent given only `skills/rig-plugin/SKILL.md` and "write a plugin that shows
+   Sentry issues as a tab" produces one that passes `rig plugin test`. Run this as a scripted check with
    the built-in AI.
 
 ---
@@ -1230,7 +1230,7 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
 |---|---|---|
 | **Scope**: everything in one run | the run stalls half-ported | the build order keeps the product working at every step; parity (steps 1–10) comes before ecosystem (12); the strangler refactor means no big-bang switch-over |
 | Declarative views cannot express rig's richest screens | parity gaps | the rich behaviour lives in Go widgets (chart zoom, log inspector, editable trees); dynamic views, `canvas` and `terminal` are escape hatches; Metrics and Data are ported first because they are hardest |
-| Freezing the protocol too early or wrong | breaking changes later | breaking changes are free until 1.0; the protocol is append-only with negotiation; golden transcripts and the compat corpus; `jig/2` side by side if ever needed |
+| Freezing the protocol too early or wrong | breaking changes later | breaking changes are free until 1.0; the protocol is append-only with negotiation; golden transcripts and the compat corpus; `rig/2` side by side if ever needed |
 | The process boundary costs speed | a slower UI than rig | batching, singleflight, visible-only refresh, one status call, shared binary pages; CI budgets block regressions |
 | Malicious or compromised plugins | code execution on developer machines and servers | workspace trust, lock hashes, signatures, a permission diff on update, a scrubbed environment, Landlock, audit; no auto-update past the lock |
 | Auto-install from a cloned repo | the repo author's code runs | trust prompt on first run; never silent unless trusted |
@@ -1240,9 +1240,9 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
 | Third-party API churn (Jira, GitLab, GitHub, MCP) | broken plugins | isolated inside plugins; core never depends on them; recorded fixtures in plugin CI |
 | bubbletea v2 or x/vt regressions | UI bugs | pinned versions; `batch()` kept until verified; x/vt pinned to a commit, vt10x fallback; terminal tests with vim, htop, lazygit and a game |
 | macOS has no sandbox | weaker isolation there | said plainly in `plugin info`; permissions still enforced at the host API level (secrets, `uses`, policy) |
-| rig and jig diverge while both live | double maintenance | rig goes to fixes only once jig passes acceptance; `jig migrate` keeps the move one command; the switch keeps `rig.yaml` until you sign off |
+| rig and rig diverge while both live | double maintenance | rig goes to fixes only once rig passes acceptance; `rig migrate` keeps the move one command; the switch keeps `rig.yaml` until you sign off |
 | The ecosystem does not come | few third-party plugins | strong official plugins, AI-writable plugins (the skill plus `plugin new`), the MCP bridge (instant breadth), company packs |
-| Name collision with other "jig" tools | confusion when installing | the goxang namespace; the binary is checked at install; `JIG_BIN` override |
+| Name collision with other "rig" tools | confusion when installing | the goxang namespace; the binary is checked at install; `RIG_BIN` override |
 
 ---
 
@@ -1255,16 +1255,16 @@ suites, and an example smoke test driven in tmux (`tmux new-session -d -s t -x 1
 - a general config language (CUE, Jsonnet, expressions)
 - embeddings or a vector DB for search
 - a web UI now (the API is ready: section 7.7)
-- a marketplace website (the index plus `jig plugin search` and the Plugins view is enough)
+- a marketplace website (the index plus `rig plugin search` and the Plugins view is enough)
 - third-party in-process Go plugins
 
 ---
 
 ## 23. What you need to provide
 
-1. **Create the GitHub repositories `goxang/jig` and `goxang/jig-plugins`.** The stored PAT is
+1. **Create the GitHub repositories `goxang/rig` and `goxang/rig-plugins`.** The stored PAT is
    read-only and SSH cannot create repos. Alternatively, provide a token that can create them.
-2. **Approve writes to the switch repo** on a new branch `jig`. Nothing is merged into its main
+2. **Approve writes to the switch repo** on a new branch `rig`. Nothing is merged into its main
    branch.
 3. **A minisign key pair for official plugin signing.** The private key goes into a GitHub secret.
 4. **Optional:** Jira, Confluence and GitLab test credentials, for live checks beyond the recorded

@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 // hostsTab is the infrastructure view: servers or cluster nodes, their load, and a shell on any of them.

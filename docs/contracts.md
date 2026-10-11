@@ -13,12 +13,12 @@ sources:
 What implementing one gets you:
 
 - **a component**: a contract with a kind (`metrics/1`, `runtime/1`, `logs/1`, ...) lets the plugin
-  stand in for an official one: `components: {m: {type: myplugin}}`. jig's screens, CLI and AI use
+  stand in for an official one: `components: {m: {type: myplugin}}`. rig's screens, CLI and AI use
   it like any other metrics store. The component's config reaches the plugin in `configure`.
 - **a standard view**: `scm`, `tracker`, `docs`, `iac`, `vcs`, `registry` and `secrets` come with a
   screen, added for every plugin that implements them and has no views of its own.
 
-`jig plugin check <name>` checks a plugin against its contracts: every source and action is there,
+`rig plugin check <name>` checks a plugin against its contracts: every source and action is there,
 streams stream, effects match, optional capabilities are whole, and the sources that need no
 arguments answer frames with the contract's fields.
 
@@ -32,7 +32,7 @@ those features only for plugins that provide the whole capability.
 
 Wire values follow the protocol: times are Unix seconds, durations are seconds, and `json` fields
 hold nested values. A `browse` frame named `leaf` holds rows, not further levels. `exec` and `shell`
-answer `outputs.argv` (with `env` and `dir`), which jig runs on the user's terminal.
+answer `outputs.argv` (with `env` and `dir`), which rig runs on the user's terminal.
 
 Go adapters can be served without writing these by hand: `contracts.Serve` exposes an in-process
-component as its kind's contract, which is how `jig-std` serves the official adapters.
+component as its kind's contract, which is how `rig-std` serves the official adapters.

@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/kernel/jobs"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/kernel/jobs"
 )
 
 func whyCommand() *cobra.Command {
@@ -22,19 +22,19 @@ func whyCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "why <service or symptom>",
 		Short: "incident mode: gather logs, traces, metrics, alerts and changes about a symptom, rank the likely causes, and have the AI find the root cause and propose a fix; answer \"fix\" to apply it",
-		Long: `jig why collects, without any AI: the state, restarts and health of the service the symptom names
+		Long: `rig why collects, without any AI: the state, restarts and health of the service the symptom names
 (every service when it names none) and everything it depends on, whether the components they host
 answer, error lines in their logs (and which services those lines name), failed and slow traces,
 the dashboards' metrics about them, firing alerts, and recent deploys and changes. It ranks the
-suspects by that evidence, then the assistant (secrets redacted, with jig's tools to look further)
+suspects by that evidence, then the assistant (secrets redacted, with rig's tools to look further)
 writes the root cause and a proposed fix. In a terminal the conversation goes on: answer "fix" to
 have it apply the fix (each change waits for your yes), ask a follow-up, or press enter to leave.
 --fix applies the fix without asking first. /why <service> in the UI's chat does the same.`,
-		Example: `  jig why api
-  jig why checkout is slow since the deploy   # a symptom: the service it names, else every service
-  jig why --fix api returns 502               # investigate, then fix
-  jig why api --since 1h --report             # also save a Markdown incident report
-  jig why api --no-ai --json                  # the evidence and ranking only`,
+		Example: `  rig why api
+  rig why checkout is slow since the deploy   # a symptom: the service it names, else every service
+  rig why --fix api returns 502               # investigate, then fix
+  rig why api --since 1h --report             # also save a Markdown incident report
+  rig why api --no-ai --json                  # the evidence and ranking only`,
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeServices,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
@@ -62,7 +62,7 @@ have it apply the fix (each change waits for your yes), ask a follow-up, or pres
 			var conv *conversation
 			if !noAI && !asJSON {
 				if conv, err = converse(a, ""); err != nil {
-					fmt.Fprintln(os.Stderr, amber("◆ no AI analysis ("+firstLineOf(err.Error())+"): jig's own ranking below"))
+					fmt.Fprintln(os.Stderr, amber("◆ no AI analysis ("+firstLineOf(err.Error())+"): rig's own ranking below"))
 				}
 			}
 			if conv == nil {
@@ -113,7 +113,7 @@ have it apply the fix (each change waits for your yes), ask a follow-up, or pres
 	c.Flags().DurationVar(&since, "since", 15*time.Minute, "how far back logs, traces, metrics and changes are read")
 	c.Flags().BoolVar(&report, "report", false, "also save a Markdown incident report under the project's data dir")
 	c.Flags().StringVarP(&out, "out", "o", "", "save the report to this file instead")
-	c.Flags().BoolVar(&noAI, "no-ai", false, "evidence and jig's ranking only")
+	c.Flags().BoolVar(&noAI, "no-ai", false, "evidence and rig's ranking only")
 	c.Flags().BoolVar(&asJSON, "json", false, "the incident as JSON")
 	c.Flags().BoolVar(&fix, "fix", false, "after the analysis, apply the proposed fix (each change still waits for your yes)")
 	return c

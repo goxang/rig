@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 // Test statuses; a test still going is TestRunning, one cut short by a stop TestStopped.
@@ -33,7 +33,7 @@ const (
 // maxOutput caps the lines kept per test; the newest stay.
 const maxOutput = 5000
 
-// TestOptions are the go test flags of one run; Suite fills them from jig.yaml and the caller changes them.
+// TestOptions are the go test flags of one run; Suite fills them from rig.yaml and the caller changes them.
 type TestOptions struct {
 	Packages  []string      `json:"packages,omitempty"`
 	Run       string        `json:"run,omitempty"`
@@ -335,7 +335,7 @@ func parseBench(pkg, line string) (Bench, bool) {
 	return b, len(b.Metrics) > 0
 }
 
-// Suite is a test suite of jig.yaml by name.
+// Suite is a test suite of rig.yaml by name.
 func (a *App) Suite(name string) (*spec.TestSuite, error) {
 	s, ok := a.Spec.Tests[name]
 	if !ok {
@@ -344,7 +344,7 @@ func (a *App) Suite(name string) (*spec.TestSuite, error) {
 	return s, nil
 }
 
-// SuiteNames are the test suites in jig.yaml's order.
+// SuiteNames are the test suites in rig.yaml's order.
 func (a *App) SuiteNames() []string {
 	if len(a.Spec.TestOrder) == len(a.Spec.Tests) {
 		return a.Spec.TestOrder
@@ -445,7 +445,7 @@ func (a *App) runJob(ctx context.Context, s *spec.TestSuite, run *TestRun, o Tes
 		if pattern == "" {
 			pattern = ".*"
 		}
-		return runCommand(ctx, s, run, dir, append(env, "JIG_RUN="+pattern))
+		return runCommand(ctx, s, run, dir, append(env, "RIG_RUN="+pattern))
 	}
 	if len(s.Exclude) > 0 {
 		pkgs, err := excluding(ctx, dir, o.Packages, s.Exclude)
@@ -618,7 +618,7 @@ func Only(base TestOptions, pkg string, names ...string) TestOptions {
 func (a *App) testDir() string {
 	dir, err := spec.DataDir(a.Spec.Dir)
 	if err != nil {
-		return filepath.Join(a.Spec.Dir, ".jig", "tests")
+		return filepath.Join(a.Spec.Dir, ".rig", "tests")
 	}
 	return filepath.Join(dir, "tests")
 }

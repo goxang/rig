@@ -8,11 +8,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 func TestUIWalk(t *testing.T) {
-	a, err := engine.Open("../../examples/shop/jig.yaml", "")
+	a, err := engine.Open("../../examples/shop/rig.yaml", "")
 	if err != nil {
 		t.Fatal(err)
 	}

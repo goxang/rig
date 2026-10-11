@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func TestTaskGroups(t *testing.T) {

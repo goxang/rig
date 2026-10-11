@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/kubectx"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/kubectx"
 )
 
 func kubeconfigCommand() *cobra.Command {
@@ -18,11 +18,11 @@ func kubeconfigCommand() *cobra.Command {
 	var insecure bool
 	c := &cobra.Command{
 		Use:   "kubeconfig [url | file | -]",
-		Short: "fetch the environment's kubeconfig and merge it into yours (~/.kube/config, the old one kept as .jig-backup)",
-		Example: `  jig -e loadtest2 kubeconfig                   # a Rancher server: asks for an API key ($RANCHER_TOKEN)
-  jig -e k8s kubeconfig https://host/kubeconfig  # downloads it (--token sends a bearer token)
-  jig -e k8s kubeconfig ~/Downloads/cluster.yaml
-  pbpaste | jig -e k8s kubeconfig -`,
+		Short: "fetch the environment's kubeconfig and merge it into yours (~/.kube/config, the old one kept as .rig-backup)",
+		Example: `  rig -e loadtest2 kubeconfig                   # a Rancher server: asks for an API key ($RANCHER_TOKEN)
+  rig -e k8s kubeconfig https://host/kubeconfig  # downloads it (--token sends a bearer token)
+  rig -e k8s kubeconfig ~/Downloads/cluster.yaml
+  pbpaste | rig -e k8s kubeconfig -`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			env, ctxName, server, err := engine.KubeTarget(g.file, g.env)

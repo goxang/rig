@@ -9,12 +9,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/goxang/jig/kernel/config"
+	"github.com/goxang/rig/kernel/config"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Importer turns another tool's service file into jig services; paths in them are relative to dir,
+// Importer turns another tool's service file into rig services; paths in them are relative to dir,
 // the project's directory.
 type Importer func(path, dir string) (map[string]*Service, error)
 
@@ -28,12 +28,12 @@ func Importers() []string { return keys(importers) }
 // so a checkout opens before its plugins are installed.
 var ErrNoImporter = errors.New("no installed plugin imports it")
 
-// PluginImport runs the installed plugin importer of that name on path, returning its jig.yaml
+// PluginImport runs the installed plugin importer of that name on path, returning its rig.yaml
 // fragment; the plugin host sets it.
 var PluginImport func(dir, name, path string) (map[string]any, error)
 
-// importFragment runs one `imports:` entry as a configuration layer below jig.yaml, so a service
-// jig.yaml also defines is the imported one with jig.yaml's keys over it. A workload a jig.yaml
+// importFragment runs one `imports:` entry as a configuration layer below rig.yaml, so a service
+// rig.yaml also defines is the imported one with rig.yaml's keys over it. A workload a rig.yaml
 // service already claims under another name is left out.
 func importFragment(kind, path, dir string, root *yaml.Node) (*config.Doc, error) {
 	path = os.ExpandEnv(path)

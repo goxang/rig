@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const LockFile = "jig.lock"
+const LockFile = "rig.lock"
 
 // Locked pins one plugin: where it came from and what it was, so every machine gets the same bytes.
 type Locked struct {
@@ -58,7 +58,7 @@ func (l *Lock) Write(dir string) error {
 	if err != nil {
 		return err
 	}
-	b = append([]byte("# written by jig plugin; commit it, do not edit it\n"), b...)
+	b = append([]byte("# written by rig plugin; commit it, do not edit it\n"), b...)
 	remember(dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

@@ -46,7 +46,7 @@ current-context: r
 	if strings.Contains(s, "oldtok") {
 		t.Errorf("old token kept:\n%s", s)
 	}
-	if b, _ := os.ReadFile(file + ".jig-backup"); string(b) != old {
+	if b, _ := os.ReadFile(file + ".rig-backup"); string(b) != old {
 		t.Error("no backup of the old kubeconfig")
 	}
 	if c, err := Resolve("", "https://rancher.x/k8s/clusters/local"); err != nil || c != "r" {

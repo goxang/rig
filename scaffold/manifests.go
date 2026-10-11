@@ -31,7 +31,7 @@ type workload struct {
 	} `yaml:"spec"`
 }
 
-// imageName keeps a templated image ($REGISTRY/app:$TAG) as the name jig builds and tags (app).
+// imageName keeps a templated image ($REGISTRY/app:$TAG) as the name rig builds and tags (app).
 func imageName(img string) string {
 	if !strings.Contains(img, "$") {
 		return img

@@ -1,11 +1,11 @@
-# yaml-language-server: $schema=../../spec/jig.schema.json
+# yaml-language-server: $schema=../../spec/rig.schema.json
 # A shop on docker: an api and a worker (one Go binary, ./app) over Postgres, Redis, RabbitMQ and
-# Zipkin. compose.yaml is the same stack for docker compose; `jig init` wrote the first version of
+# Zipkin. compose.yaml is the same stack for docker compose; `rig init` wrote the first version of
 # this file from it.
 #
-#   jig up         build the app and start everything, in dependency order
-#   jig            the control plane: watch orders flow through every screen
-#   jig load run   orders at 20/s from the terminal
+#   rig up         build the app and start everything, in dependency order
+#   rig            the control plane: watch orders flow through every screen
+#   rig load run   orders at 20/s from the terminal
 version: 1
 project: shop
 default: docker

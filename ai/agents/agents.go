@@ -1,4 +1,4 @@
-// Package agents fires jig.yaml agents on their events and schedules.
+// Package agents fires rig.yaml agents on their events and schedules.
 package agents
 
 import (
@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/cron"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/cron"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // Prompt is what an agent is told when it fires: its instructions, then the event, if any.

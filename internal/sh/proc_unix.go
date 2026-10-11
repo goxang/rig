@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// Detach starts cmd in a session of its own, so it outlives jig and a group signal reaches all of it.
+// Detach starts cmd in a session of its own, so it outlives rig and a group signal reaches all of it.
 func Detach(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 
 // Alive says whether a process with this pid exists.

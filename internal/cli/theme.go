@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/internal/tui"
+	"github.com/goxang/rig/internal/tui"
 )
 
 func themeCommand() *cobra.Command {
@@ -13,9 +13,9 @@ func themeCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "theme [name]",
 		Short: "list the UI's colour themes, pick one, or --save a copy to edit (ctrl+p in the UI)",
-		Long: "Themes are built in (default, nord, dracula, gruvbox, catppuccin, clay, ember, mono) or files in ~/.config/jig/themes/<name>.yaml\n" +
-			"that set base: and only the colours they change. $JIG_THEME overrides the choice for one run.\n" +
-			"Fonts and their size belong to the terminal; jig sets colours only.",
+		Long: "Themes are built in (default, nord, dracula, gruvbox, catppuccin, clay, ember, mono) or files in ~/.config/rig/themes/<name>.yaml\n" +
+			"that set base: and only the colours they change. $RIG_THEME overrides the choice for one run.\n" +
+			"Fonts and their size belong to the terminal; rig sets colours only.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if save != "" {
@@ -27,7 +27,7 @@ func themeCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("wrote %s from %s; edit it, then jig theme %s\n", f, from, save)
+				fmt.Printf("wrote %s from %s; edit it, then rig theme %s\n", f, from, save)
 				return nil
 			}
 			if len(args) == 1 {
@@ -48,6 +48,6 @@ func themeCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&save, "save", "", "write the theme (the current one, or the one named) to ~/.config/jig/themes/<save>.yaml to edit")
+	c.Flags().StringVar(&save, "save", "", "write the theme (the current one, or the one named) to ~/.config/rig/themes/<save>.yaml to edit")
 	return c
 }

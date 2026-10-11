@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// EnvAudit is where jig's MCP server appends what the assistant ran (AuditEntry lines).
-const EnvAudit = "JIG_AI_AUDIT"
+// EnvAudit is where rig's MCP server appends what the assistant ran (AuditEntry lines).
+const EnvAudit = "RIG_AI_AUDIT"
 
 // AuditEntry is one action the assistant ran, or tried to, on an environment.
 type AuditEntry struct {
@@ -19,7 +19,7 @@ type AuditEntry struct {
 	Env     string    `json:"env"`
 	Command string    `json:"command"`
 	Risk    string    `json:"risk"`
-	// Result is ok, failed, declined (by the user) or refused (by jig).
+	// Result is ok, failed, declined (by the user) or refused (by rig).
 	Result string `json:"result"`
 	By     string `json:"confirmed_by,omitempty"`
 	Output string `json:"output,omitempty"`

@@ -5,12 +5,12 @@ export type { P as protocol };
 type Awaitable<T> = T | Promise<T>;
 type Rows = Record<string, unknown>[] | P.Frame;
 
-export class JigError extends Error {
+export class RigError extends Error {
   constructor(code: number, message: string, hint?: string);
   code: number;
   hint: string;
 }
-export function unavailable(message: string, hint: string): JigError;
+export function unavailable(message: string, hint: string): RigError;
 /** A frame from an array of objects (fields from the first row's keys), or a frame as it is. */
 export function frame(rows: Rows): P.Frame;
 
@@ -66,6 +66,6 @@ export class Plugin {
   doctor(fn: (ctx: Ctx) => Awaitable<P.Check[]>): this;
   onEvent(fn: (ctx: Ctx, e: P.Event) => Awaitable<void>): this;
   onConfigure(fn: (ctx: Ctx, p: P.ConfigureParams) => Awaitable<void>): this;
-  /** Speak jig/1 on stdin and stdout until shutdown or EOF. Log to stderr. */
+  /** Speak rig/1 on stdin and stdout until shutdown or EOF. Log to stderr. */
   serve(): void;
 }

@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestCalendarCountsEvents(t *testing.T) {
@@ -28,7 +28,7 @@ func TestCalendarCountsEvents(t *testing.T) {
 	}
 }
 
-// A widget version this jig lacks renders the fallback a plugin gave.
+// A widget version this rig lacks renders the fallback a plugin gave.
 func TestNewerWidgetFallsBack(t *testing.T) {
 	tab := newViewTab("x", nil, "")
 	fb := protocol.Node{Widget: "text", Props: map[string]any{"text": "fallback here"}}

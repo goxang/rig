@@ -25,7 +25,7 @@ jobs:
       - name: archives
         run: |
           v=${GITHUB_REF_NAME#v}
-          sed -i "s/^version: .*/version: $v/" jig-plugin.yaml
+          sed -i "s/^version: .*/version: $v/" rig-plugin.yaml
           mkdir -p out
 {%- if eq .Lang "go"%}
           for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
@@ -46,7 +46,7 @@ jobs:
       # ponytail: the index entry is proposed by hand; sign with minisign once the registry asks for it
       - name: index entry
         run: |
-          echo '### index entry for goxang/jig-plugins registry/index.json' >> "$GITHUB_STEP_SUMMARY"
+          echo '### index entry for goxang/rig-plugins registry/index.json' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat out/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

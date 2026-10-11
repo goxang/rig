@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/protocol"
 )
 
 // parseOutput turns a script's stdout into a frame: json, ndjson, csv, tsv, yaml or lines, detected

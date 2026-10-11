@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from jig import Plugin
+from rig import Plugin
 
 p = Plugin("{%.Name%}", version="0.1.0")
 

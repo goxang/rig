@@ -1,5 +1,5 @@
 // hello: the example plugin each SDK implements the same way.
-import { ERRORS, JigError, Plugin } from "../index.js";
+import { ERRORS, RigError, Plugin } from "../index.js";
 
 const sleep = (ms, signal) => new Promise((r) => { const t = setTimeout(r, ms); signal.addEventListener("abort", () => { clearTimeout(t); r(); }); });
 
@@ -21,7 +21,7 @@ new Plugin("hello", "0.1.0")
   }, { description: "greet someone", keys: ["G"], args: { name: { type: "string", description: "who to greet" } }, required: ["name"] })
   .plan("greet", (ctx, a) => ({ changes: [{ op: "run", target: "hello://" + a.name }] }))
   .resolver(["hello"], (ctx, ref) => {
-    if (!ref.startsWith("hello://")) throw new JigError(ERRORS.NotFound, "not a hello ref: " + ref);
+    if (!ref.startsWith("hello://")) throw new RigError(ERRORS.NotFound, "not a hello ref: " + ref);
     return { ref, kind: "greeting", title: "hello " + ref.slice("hello://".length) };
   })
   .searcher((ctx, q) => ("world".includes(q.query) ? [{ ref: "hello://world", title: "hello world" }] : []))

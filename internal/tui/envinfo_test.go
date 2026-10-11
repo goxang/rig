@@ -8,11 +8,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 func TestEnvInfo(t *testing.T) {
-	a, err := engine.Open("../../examples/shop/jig.yaml", "")
+	a, err := engine.Open("../../examples/shop/rig.yaml", "")
 	if err != nil {
 		t.Fatal(err)
 	}

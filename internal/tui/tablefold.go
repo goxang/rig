@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
 )
 
 // tableFold is a table whose rows form a tree (fold: <parent field> on the widget, ids in the id

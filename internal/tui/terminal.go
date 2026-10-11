@@ -18,8 +18,8 @@ import (
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
 
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
 )
 
 // terminal runs a program on a PTY inside a pane, drawn through a VT emulator: shells, ssh,

@@ -17,12 +17,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/rpc"
-	"github.com/goxang/jig/protocol/transcript"
-	"github.com/goxang/jig/scaffold"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/rpc"
+	"github.com/goxang/rig/protocol/transcript"
+	"github.com/goxang/rig/scaffold"
+	"github.com/goxang/rig/spec"
 )
 
 func addPluginAuthoring(pc *cobra.Command) {
@@ -40,7 +40,7 @@ func addPluginAuthoring(pc *cobra.Command) {
 				return err
 			}
 			for _, f := range files {
-				if !strings.HasPrefix(f, "jig/") {
+				if !strings.HasPrefix(f, "rig/") {
 					fmt.Printf("  %s %s\n", green("+"), filepath.Join(dir, f))
 				}
 			}
@@ -50,7 +50,7 @@ func addPluginAuthoring(pc *cobra.Command) {
 					fmt.Println(amber("  go mod tidy failed, run it once the SDK is reachable: ") + lines[len(lines)-1])
 				}
 			}
-			fmt.Printf("next: cd %s && jig plugin test, then jig plugin dev %s from a project\n", dir, dir)
+			fmt.Printf("next: cd %s && rig plugin test, then rig plugin dev %s from a project\n", dir, dir)
 			return nil
 		},
 	}
@@ -130,7 +130,7 @@ func pluginTest(ctx context.Context, w io.Writer, dir string, record bool) error
 	}
 	if m.Kind() != "declarative" {
 		// the folder under test is trusted by asking to test it
-		os.Setenv("JIG_TRUST", "project")
+		os.Setenv("RIG_TRUST", "project")
 		proj := projectDir()
 		cfg := pluginConfig(proj)
 		if cfg == nil {
@@ -166,7 +166,7 @@ func pluginTest(ctx context.Context, w io.Writer, dir string, record bool) error
 			say(err == nil, "source "+n+errSuffix(err))
 		}
 		if unbound {
-			fmt.Fprintln(w, dim("· sources that serve a component skipped: add a component of type "+m.Name+" to jig.yaml to test them"))
+			fmt.Fprintln(w, dim("· sources that serve a component skipped: add a component of type "+m.Name+" to rig.yaml to test them"))
 			bad += checkContracts(ctx, w, nil, p)
 		} else {
 			bad += checkContracts(ctx, w, q, p)
@@ -248,7 +248,7 @@ func serverCmd(m *host.Manifest) *exec.Cmd {
 	}
 	c := exec.Command(args[0], args[1:]...)
 	c.Dir = m.Dir
-	c.Env = append(os.Environ(), "JIG_PLUGIN="+m.Name, "JIG_PLUGIN_DIR="+m.Dir, "JIG_PROTOCOL="+protocol.Version)
+	c.Env = append(os.Environ(), "RIG_PLUGIN="+m.Name, "RIG_PLUGIN_DIR="+m.Dir, "RIG_PROTOCOL="+protocol.Version)
 	return c
 }
 
@@ -260,7 +260,7 @@ func recordTranscript(ctx context.Context, m *host.Manifest, sources []string) e
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	err = p.Call(ctx, protocol.MethodInitialize, protocol.InitializeParams{Host: protocol.HostInfo{Name: "jig", Version: "1.0.0"}, Protocols: []string{protocol.Version}}, nil)
+	err = p.Call(ctx, protocol.MethodInitialize, protocol.InitializeParams{Host: protocol.HostInfo{Name: "rig", Version: "1.0.0"}, Protocols: []string{protocol.Version}}, nil)
 	for _, n := range sources {
 		if err == nil {
 			err = p.Call(ctx, protocol.MethodQuery, protocol.QueryParams{Source: n}, nil)
@@ -299,17 +299,17 @@ func pluginDev(ctx context.Context, w io.Writer, project, dir string) error {
 		return err
 	}
 	if filepath.Clean(project) == dir {
-		return fmt.Errorf("run jig plugin dev %s from the project to try it in", dir)
+		return fmt.Errorf("run rig plugin dev %s from the project to try it in", dir)
 	}
-	if err := spec.SetYAML(filepath.Join(project, ".jig", "local.yaml"), []string{"plugins", m.Name, "path"}, dir); err != nil {
+	if err := spec.SetYAML(filepath.Join(project, ".rig", "local.yaml"), []string{"plugins", m.Name, "path"}, dir); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%s %s linked into %s; delete plugins.%s in .jig/local.yaml to unlink\n", green("✓"), m.Name, project, m.Name)
+	fmt.Fprintf(w, "%s %s linked into %s; delete plugins.%s in .rig/local.yaml to unlink\n", green("✓"), m.Name, project, m.Name)
 	if !host.Trusted(project) {
-		fmt.Fprintln(w, amber("  this project is not trusted yet: jig trust"))
+		fmt.Fprintln(w, amber("  this project is not trusted yet: rig trust"))
 	}
-	fmt.Fprintln(w, dim("  a running jig reloads after each build and records the RPC trace below"))
-	stamp := filepath.Join(project, ".jig", host.DevStamp)
+	fmt.Fprintln(w, dim("  a running rig reloads after each build and records the RPC trace below"))
+	stamp := filepath.Join(project, ".rig", host.DevStamp)
 	rebuild := func() {
 		m, err := host.LoadManifest(dir)
 		if err == nil {
@@ -324,7 +324,7 @@ func pluginDev(ctx context.Context, w io.Writer, project, dir string) error {
 	}
 	rebuild()
 	go func() {
-		// the trace starts with the plugin's first call from a running jig
+		// the trace starts with the plugin's first call from a running rig
 		for tailFile(ctx, host.TraceFile(m.Name), true) != nil && ctx.Err() == nil {
 			time.Sleep(time.Second)
 		}

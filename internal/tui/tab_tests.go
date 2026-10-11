@@ -16,7 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 // Test list filters, in the order of the filter tabs.
@@ -42,7 +42,7 @@ type testsLoadedMsg struct {
 	prev  map[string]engine.Bench
 }
 
-// testsTab runs the suites of jig.yaml and browses their results: a tree of packages, tests and
+// testsTab runs the suites of rig.yaml and browses their results: a tree of packages, tests and
 // subtests with filters, the output of the selected one, benchmarks against the previous run,
 // coverage, saved runs, and reruns of the failures or of one test.
 type testsTab struct {
@@ -447,7 +447,7 @@ func (t *testsTab) writeReport(m *model) {
 	if r == nil {
 		return
 	}
-	dir := filepath.Join(os.TempDir(), "jig-tests")
+	dir := filepath.Join(os.TempDir(), "rig-tests")
 	base := filepath.Join(dir, r.ID)
 	var txt bytes.Buffer
 	r.WriteReport(&txt, false)

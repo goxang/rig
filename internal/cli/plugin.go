@@ -14,9 +14,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/contracts"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/contracts"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/spec"
 )
 
 // projectDir is where the project file is, or here when there is none.
@@ -33,14 +33,14 @@ func projectDir() string {
 }
 
 func installer(dir string) *host.Installer {
-	in := &host.Installer{Dir: dir, Registry: host.UserRegistry(), Yes: g.yes || os.Getenv("JIG_TRUST") == "project", Out: os.Stderr}
+	in := &host.Installer{Dir: dir, Registry: host.UserRegistry(), Yes: g.yes || os.Getenv("RIG_TRUST") == "project", Out: os.Stderr}
 	if !in.Yes && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
 		in.Ask = askYes
 	}
 	return in
 }
 
-// ensurePlugins installs what jig.lock pins and this machine lacks; true means the project must reload.
+// ensurePlugins installs what rig.lock pins and this machine lacks; true means the project must reload.
 func ensurePlugins(dir string) (bool, error) {
 	mine, err := installer(host.ConfigDir()).Ensure(context.Background())
 	if err != nil {
@@ -58,8 +58,8 @@ func ensurePlugins(dir string) (bool, error) {
 func pluginCommand() *cobra.Command {
 	pc := &cobra.Command{Use: "plugin", Aliases: []string{"plugins"}, Short: "list, find, add, upgrade and switch plugins"}
 	var major, project, follow, user bool
-	// scope is where add, rm and up pin: the project's jig.lock, or with --user the user's own
-	// (~/.config/jig/jig.lock), whose plugins every project shows and no repository carries
+	// scope is where add, rm and up pin: the project's rig.lock, or with --user the user's own
+	// (~/.config/rig/rig.lock), whose plugins every project shows and no repository carries
 	scope := func() string {
 		if user {
 			return host.ConfigDir()
@@ -67,7 +67,7 @@ func pluginCommand() *cobra.Command {
 		return projectDir()
 	}
 	userFlag := func(c *cobra.Command) *cobra.Command {
-		c.Flags().BoolVarP(&user, "user", "u", false, "for you in every project (~/.config/jig/jig.lock), not in this project's jig.lock")
+		c.Flags().BoolVarP(&user, "user", "u", false, "for you in every project (~/.config/rig/rig.lock), not in this project's rig.lock")
 		return c
 	}
 
@@ -154,7 +154,7 @@ func pluginCommand() *cobra.Command {
 				return fmt.Errorf("no plugin %s here or in the index", args[0])
 			}
 			v := e.Latest()
-			fmt.Printf("%s %s %s\n%s\n", bold(args[0]), v, dim("(not installed: jig plugin add "+args[0]+")"), e.Description)
+			fmt.Printf("%s %s %s\n%s\n", bold(args[0]), v, dim("(not installed: rig plugin add "+args[0]+")"), e.Description)
 			if vv := e.Versions[v]; vv != nil {
 				fmt.Printf("permissions: %s\n", vv.Permissions.String())
 			}
@@ -172,9 +172,9 @@ func pluginCommand() *cobra.Command {
 		return c
 	}
 	pc.AddCommand(logs("logs", "the plugin's stderr and host/log lines", host.LogFile))
-	pc.AddCommand(logs("trace", "the plugin's JSON-RPC exchange, recorded while JIG_TRACE names it (or is *)", host.TraceFile))
+	pc.AddCommand(logs("trace", "the plugin's JSON-RPC exchange, recorded while RIG_TRACE names it (or is *)", host.TraceFile))
 	pc.AddCommand(userFlag(&cobra.Command{
-		Use: "add <source>...", Short: "install plugins and pin them in jig.lock (--user: only for you): a name, pack/<name>, host/owner/repo[/sub]@ref, a .tar.gz URL or a path",
+		Use: "add <source>...", Short: "install plugins and pin them in rig.lock (--user: only for you): a name, pack/<name>, host/owner/repo[/sub]@ref, a .tar.gz URL or a path",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if user {
@@ -204,11 +204,11 @@ func pluginCommand() *cobra.Command {
 	for _, on := range []bool{true, false} {
 		verb := map[bool]string{true: "on", false: "off"}[on]
 		c := &cobra.Command{
-			Use: verb + " <name>...", Short: "turn plugins " + verb + " for you (.jig/local.yaml), or for everyone with --project",
+			Use: verb + " <name>...", Short: "turn plugins " + verb + " for you (.rig/local.yaml), or for everyone with --project",
 			Args: cobra.MinimumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				dir := projectDir()
-				file := filepath.Join(dir, ".jig", "local.yaml")
+				file := filepath.Join(dir, ".rig", "local.yaml")
 				if project {
 					f, err := spec.Find(dir)
 					if err != nil {
@@ -225,7 +225,7 @@ func pluginCommand() *cobra.Command {
 				return nil
 			},
 		}
-		c.Flags().BoolVar(&project, "project", false, "write jig.yaml instead of .jig/local.yaml")
+		c.Flags().BoolVar(&project, "project", false, "write rig.yaml instead of .rig/local.yaml")
 		pc.AddCommand(c)
 	}
 	pc.AddCommand(&cobra.Command{
@@ -239,7 +239,7 @@ func pluginCommand() *cobra.Command {
 		},
 	})
 	pc.AddCommand(&cobra.Command{
-		Use: "vendor", Short: "copy the locked plugins into .jig/vendor for offline installs",
+		Use: "vendor", Short: "copy the locked plugins into .rig/vendor for offline installs",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			files, err := installer(projectDir()).Vendor()
 			for _, f := range files {
@@ -267,7 +267,7 @@ func trustCommand() *cobra.Command {
 	}
 }
 
-// pluginConfig is plugins: from the project as loaded (jig.yaml under .jig/local.yaml), without opening it.
+// pluginConfig is plugins: from the project as loaded (rig.yaml under .rig/local.yaml), without opening it.
 func pluginConfig(dir string) map[string]*spec.Plugin {
 	f, err := spec.Find(dir)
 	if err != nil {

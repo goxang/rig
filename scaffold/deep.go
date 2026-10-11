@@ -22,7 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Candidate is something jig init --deep found that could go into jig.yaml: a service to run, a
+// Candidate is something rig init --deep found that could go into rig.yaml: a service to run, a
 // test suite, or a folder of manifests.
 type Candidate struct {
 	Kind      string // go, python, node, rust, java, dotnet, ruby, dockerfile, compose, manifest, helm, goland, container, tests
@@ -38,7 +38,7 @@ type Candidate struct {
 // deepSkip are folders no service lives in: dependencies, build output, caches, VCS.
 var deepSkip = map[string]bool{"node_modules": true, "vendor": true, "venv": true, ".venv": true, "__pycache__": true,
 	"dist": true, "target": true, "obj": true, ".git": true, ".hg": true, ".svn": true, ".idea": true, ".vscode": true,
-	".cache": true, ".next": true, ".nuxt": true, "coverage": true, ".gradle": true, ".terraform": true, ".jig": true,
+	".cache": true, ".next": true, ".nuxt": true, "coverage": true, ".gradle": true, ".terraform": true, ".rig": true,
 	".tox": true, ".mypy_cache": true, ".pytest_cache": true, ".ruff_cache": true, ".m2": true, ".npm": true, ".yarn": true, ".pnpm-store": true,
 	".angular": true, ".svelte-kit": true, ".turbo": true, ".parcel-cache": true, ".expo": true, ".dart_tool": true, ".bundle": true, ".claude": true}
 
@@ -146,7 +146,7 @@ func Deep(ctx context.Context, root string) ([]Candidate, error) {
 
 // liftManifestImports makes the manifest folders under one top folder (deploy/services/api,
 // deploy/services/worker) one import of the folder they share, so a later workload there is a
-// service without another jig init.
+// service without another rig init.
 func liftManifestImports(cs []Candidate) {
 	share := map[string]string{}
 	for _, c := range cs {
@@ -377,7 +377,7 @@ func goland(root string) []Candidate {
 	return out
 }
 
-// containers are the ones running on this machine; picking one adopts it, jig starts and stops it.
+// containers are the ones running on this machine; picking one adopts it, rig starts and stops it.
 // Each carries what recreates it: its compose service when compose made it, else its image,
 // command, environment and binds as docker inspect reports them.
 func containers(ctx context.Context, root string) []Candidate {
@@ -403,8 +403,8 @@ func containers(ctx context.Context, root string) []Candidate {
 	var out []Candidate
 	for _, c := range ins {
 		name := strings.TrimPrefix(c.Name, "/")
-		if c.Config.Labels["jig.project"] != "" {
-			continue // a jig project's own; its jig.yaml has it
+		if c.Config.Labels["rig.project"] != "" {
+			continue // a rig project's own; its rig.yaml has it
 		}
 		if s := fromComposeLabels(root, name, c.Config.Labels); s != nil {
 			out = append(out, Candidate{Kind: "container", Name: s.Name, Where: name + " (" + s.From + ")", Service: s})
@@ -443,7 +443,7 @@ func inspectImage(ctx context.Context, image string) *imageConfig {
 	return ic
 }
 
-// fromInspect keeps only what differs from the image, so the jig.yaml entry reads like a compose one.
+// fromInspect keeps only what differs from the image, so the rig.yaml entry reads like a compose one.
 func fromInspect(name string, c inspected, img *imageConfig) *Service {
 	s := &Service{Name: cleanName(name), Role: "infra", Image: c.Config.Image, Adopt: name, From: "running container " + name}
 	if kindOf(c.Config.Image) == "" {
@@ -574,7 +574,7 @@ func unique(cs []Candidate) []Candidate {
 	return out
 }
 
-// sectionOf names the Services screen section a candidate lands in; the user renames them in jig.yaml.
+// sectionOf names the Services screen section a candidate lands in; the user renames them in rig.yaml.
 var sectionOf = map[string]string{"go": "go", "goland": "go", "python": "python", "node": "node", "rust": "rust", "java": "java",
 	"dotnet": "dotnet", "ruby": "ruby", "dockerfile": "docker", "compose": "compose", "manifest": "kubernetes", "container": "containers"}
 

@@ -1,6 +1,6 @@
-// Package ai puts an assistant inside jig without being one: every turn runs the user's own
-// opencode or Claude Code, with jig's MCP server as its tools, the project directory as its only
-// workspace, and jig's guard rails between it and the environments.
+// Package ai puts an assistant inside rig without being one: every turn runs the user's own
+// opencode or Claude Code, with rig's MCP server as its tools, the project directory as its only
+// workspace, and rig's guard rails between it and the environments.
 package ai
 
 import (
@@ -52,7 +52,7 @@ func compatible(provider string) bool {
 
 const DefaultFreeModel = "opencode/big-pickle"
 
-// Config is the user's AI setup, kept in ~/.config/jig/ai.json (it may hold an API key: mode 0600).
+// Config is the user's AI setup, kept in ~/.config/rig/ai.json (it may hold an API key: mode 0600).
 type Config struct {
 	Backend   string `json:"backend,omitempty"`
 	Provider  string `json:"provider,omitempty"`
@@ -74,7 +74,7 @@ type Config struct {
 	Redact *bool `json:"redact,omitempty"`
 }
 
-// Keys are the settings `jig ai config key=value` takes, in the order it prints them.
+// Keys are the settings `rig ai config key=value` takes, in the order it prints them.
 var Keys = []string{"backend", "provider", "model", "effort", "fast_model", "fast_url", "fast_api_key", "url", "api_key", "proxy", "autocomplete", "disabled", "redact"}
 
 func ConfigFile() (string, error) {
@@ -82,10 +82,10 @@ func ConfigFile() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "jig", "ai.json"), nil
+	return filepath.Join(dir, "rig", "ai.json"), nil
 }
 
-// LoadConfig reads the saved setup; JIG_AI_* variables override it for one run.
+// LoadConfig reads the saved setup; RIG_AI_* variables override it for one run.
 func LoadConfig() (Config, error) {
 	c, err := readConfig()
 	if err != nil {
@@ -93,7 +93,7 @@ func LoadConfig() (Config, error) {
 	}
 	for k, p := range map[string]*string{"BACKEND": &c.Backend, "PROVIDER": &c.Provider, "MODEL": &c.Model, "EFFORT": &c.Effort,
 		"FAST_MODEL": &c.FastModel, "FAST_URL": &c.FastURL, "FAST_API_KEY": &c.FastAPIKey, "URL": &c.URL, "API_KEY": &c.APIKey, "PROXY": &c.Proxy} {
-		if v := os.Getenv("JIG_AI_" + k); v != "" {
+		if v := os.Getenv("RIG_AI_" + k); v != "" {
 			*p = v
 		}
 	}
@@ -119,7 +119,7 @@ func readConfig() (Config, error) {
 	return c, nil
 }
 
-// ChangeConfig sets one key in the saved setup, leaving JIG_AI_* overrides out of the file.
+// ChangeConfig sets one key in the saved setup, leaving RIG_AI_* overrides out of the file.
 func ChangeConfig(key, value string) error {
 	c, err := readConfig()
 	if err != nil {
@@ -308,7 +308,7 @@ func providerDefaults(s *Setup) {
 func Resolve(c Config) Setup {
 	s := Setup{Config: c}
 	if c.Disabled {
-		s.Why = "AI is disabled (jig ai config disabled=false)"
+		s.Why = "AI is disabled (rig ai config disabled=false)"
 		return s
 	}
 	switch {
@@ -352,11 +352,11 @@ func Resolve(c Config) Setup {
 	providerDefaults(&s)
 	switch {
 	case (s.Provider == "openai" || s.Provider == "anthropic") && s.URL == "":
-		s.Bin, s.Why = "", "provider "+s.Provider+" needs url (jig ai config url=https://…)"
+		s.Bin, s.Why = "", "provider "+s.Provider+" needs url (rig ai config url=https://…)"
 	case (s.Provider == "openai" || s.Provider == "9router" || LocalProviders[s.Provider] != "") && s.Model == "":
-		s.Bin, s.Why = "", "provider "+s.Provider+" needs model (jig ai config model=…; jig ai config lists what it serves)"
+		s.Bin, s.Why = "", "provider "+s.Provider+" needs model (rig ai config model=…; rig ai config lists what it serves)"
 	case (s.Provider == "deepseek" || s.Provider == "anthropic") && s.APIKey == "":
-		s.Bin, s.Why = "", "provider "+s.Provider+" needs api_key (jig ai config api_key=…)"
+		s.Bin, s.Why = "", "provider "+s.Provider+" needs api_key (rig ai config api_key=…)"
 	}
 	return s
 }
@@ -393,7 +393,7 @@ func opencodeHasModel() bool {
 	return false
 }
 
-// Describe is one line about the setup, for headers and `jig ai config`.
+// Describe is one line about the setup, for headers and `rig ai config`.
 func (s Setup) Describe() string {
 	if !s.Enabled() {
 		return "off: " + s.Why

@@ -6,21 +6,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 func TestPluginServesAKind(t *testing.T) {
-	t.Setenv("JIG_TRUST", "project")
+	t.Setenv("RIG_TRUST", "project")
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "pm"), 0o755)
-	os.WriteFile(filepath.Join(dir, "pm/jig-plugin.yaml"), []byte(`name: pm
+	os.WriteFile(filepath.Join(dir, "pm/rig-plugin.yaml"), []byte(`name: pm
 version: 0.1.0
 implements: [metrics/1]
 sources:
   metrics.instant: { run: "printf '[{\"series\":\"up\",\"labels\":{\"job\":\"api\"},\"value\":1}]'" }
   metrics.range: { run: "printf '[]'" }
 `), 0o644)
-	p := filepath.Join(dir, "jig.yaml")
+	p := filepath.Join(dir, "rig.yaml")
 	os.WriteFile(p, []byte(`project: t
 environments:
   test: { runtime: { type: fake } }

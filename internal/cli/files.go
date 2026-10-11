@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/spec"
 )
 
 const maxRead = 256 << 10
 
-// fileTool is jig_file: the project directory's files, and nothing outside it nor under the paths
-// kept from assistants (credentials, jig.yaml ai.deny, .git). Deleting asks the user first.
+// fileTool is rig_file: the project directory's files, and nothing outside it nor under the paths
+// kept from assistants (credentials, rig.yaml ai.deny, .git). Deleting asks the user first.
 func fileTool(args map[string]any) (string, bool) {
 	root, deny, err := projectRoot()
 	if err != nil {
@@ -176,7 +176,7 @@ func inProject(root string, deny []string, p string) (string, string, error) {
 		return "", "", fmt.Errorf("refused: %s is outside the project (%s)", p, root)
 	}
 	if rel != "." && (ai.DeniedPath(rel, deny) || strings.EqualFold(rel, ".git") || strings.HasPrefix(strings.ToLower(rel), ".git"+string(filepath.Separator))) {
-		return "", "", fmt.Errorf("refused: %s is kept from assistants (credentials, jig.yaml ai.deny, .git)", rel)
+		return "", "", fmt.Errorf("refused: %s is kept from assistants (credentials, rig.yaml ai.deny, .git)", rel)
 	}
 	return real, rel, nil
 }
@@ -229,7 +229,7 @@ func keptInside(root string, deny []string, dir string) string {
 	return kept
 }
 
-// deleteGoAhead is the user's yes to a delete: approved in the jig UI or terminal the assistant runs
+// deleteGoAhead is the user's yes to a delete: approved in the rig UI or terminal the assistant runs
 // in, quoted in user_request, or, for an agent of its own, confirm: true.
 func deleteGoAhead(args map[string]any, what string) error {
 	lock := os.Getenv(ai.EnvLock)

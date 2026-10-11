@@ -1,4 +1,4 @@
-// Package sdk writes jig plugins in Go: register sources, streams, actions and the rest, then Serve.
+// Package sdk writes rig plugins in Go: register sources, streams, actions and the rest, then Serve.
 // It has no dependencies outside the standard library; the protocol, not this package, is the contract.
 package sdk
 
@@ -295,7 +295,7 @@ func (p *Plugin) OnConfigure(fn func(*Ctx, ConfigureParams) error) *Plugin {
 	return p
 }
 
-// Serve speaks jig/1 on stdin and stdout until shutdown or EOF. Use stderr for logs.
+// Serve speaks rig/1 on stdin and stdout until shutdown or EOF. Use stderr for logs.
 func (p *Plugin) Serve() {
 	if err := p.ServeIO(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, p.info.Name+":", err)

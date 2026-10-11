@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/sdk"
+	"github.com/goxang/rig/sdk"
 )
 
 type greetArgs struct {
-	Name string `json:"name" desc:"who to greet" jig:"required"`
+	Name string `json:"name" desc:"who to greet" rig:"required"`
 }
 
 type greetingsArgs struct {

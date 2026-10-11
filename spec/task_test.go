@@ -12,11 +12,11 @@ func TestStepHelp(t *testing.T) {
 help: x
 steps:
   # wipe the history tables
-  - jig db query "TRUNCATE"
+  - rig db query "TRUNCATE"
   - |
     # restart every redis
-    for r in a b; do jig restart $r; done
-  - jig up
+    for r in a b; do rig restart $r; done
+  - rig up
 `
 	if err := yaml.Unmarshal([]byte(src), &task); err != nil {
 		t.Fatal(err)

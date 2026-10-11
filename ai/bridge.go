@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Request is what jig's MCP server asks the jig that started the assistant: a person's go-ahead
+// Request is what rig's MCP server asks the rig that started the assistant: a person's go-ahead
 // (op "approve") or an action in the UI (op "ui").
 type Request struct {
 	Op   string `json:"op"`
@@ -29,9 +29,9 @@ type Reply struct {
 	NoOne bool `json:"no_one,omitempty"`
 }
 
-// SocketPath is one per jig process: short, since unix socket paths are capped near 100 bytes.
+// SocketPath is one per rig process: short, since unix socket paths are capped near 100 bytes.
 func SocketPath() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("jig-ai-%d.sock", os.Getpid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("rig-ai-%d.sock", os.Getpid()))
 }
 
 // Serve answers requests on a unix socket until close is called; handle may block (a person deciding).

@@ -14,7 +14,7 @@ sources:
   hosts.actions:
     fields: {name: string, help: string, mutate: bool}
 actions:
-  # shell answers outputs.argv: the command jig runs on the user's terminal
+  # shell answers outputs.argv: the command rig runs on the user's terminal
   hosts.shell: {effect: write, args: {host: string!, command: json}, outputs: {argv: json}}
   hosts.run-action: {effect: write, args: {name: string!, args: json}}
 capabilities:

@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/kernel/view"
+	"github.com/goxang/rig/kernel/view"
 )
 
 func TestLTRKeepsWidth(t *testing.T) {

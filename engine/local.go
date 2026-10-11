@@ -10,20 +10,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/actions"
-	"github.com/goxang/jig/kernel/audit"
-	"github.com/goxang/jig/kernel/catalog"
-	"github.com/goxang/jig/kernel/events"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/kernel/refs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/actions"
+	"github.com/goxang/rig/kernel/audit"
+	"github.com/goxang/rig/kernel/catalog"
+	"github.com/goxang/rig/kernel/events"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/kernel/refs"
+	"github.com/goxang/rig/protocol"
 )
 
 type sourceFunc func(ctx context.Context, args protocol.Args) (*protocol.Frame, error)
@@ -199,7 +199,7 @@ func (l *Local) builtins() {
 		}
 		return frames.FromRows(fields, rows), nil
 	}
-	l.about["queries.run"] = protocol.SourceSpec{Description: "run a saved query from jig.yaml by name"}
+	l.about["queries.run"] = protocol.SourceSpec{Description: "run a saved query from rig.yaml by name"}
 	l.sources["queries.run"] = func(ctx context.Context, args protocol.Args) (*protocol.Frame, error) {
 		name, _ := args["name"].(string)
 		var t core.Table

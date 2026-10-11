@@ -14,7 +14,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/goxang/jig/examples/internal/demo"
+	"github.com/goxang/rig/examples/internal/demo"
 )
 
 func main() {

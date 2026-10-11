@@ -1,19 +1,19 @@
-# jig.yaml
+# rig.yaml
 
-jig looks for `jig.yaml` (or `jig.yml`, `.jig.yaml`) from the current directory up; `-f` or `$JIG_FILE`
+rig looks for `rig.yaml` (or `rig.yml`, `.rig.yaml`) from the current directory up; `-f` or `$RIG_FILE`
 names one. `${NAME}` and `${NAME:-default}` expand anywhere, from the process environment, then
-`jig secret set` values, then `secrets:` defaults, then `${env}` and `${project}`, then the environment's
+`rig secret set` values, then `secrets:` defaults, then `${env}` and `${project}`, then the environment's
 `vars`, then the project's `vars`. `$$` is a literal `$`.
 
-The file is composed from layers, lowest first: `include:` files, jig.yaml, then `.jig/local.yaml`
+The file is composed from layers, lowest first: `include:` files, rig.yaml, then `.rig/local.yaml`
 (your own overrides, kept out of git). A higher layer wins key by key; `key: null` drops what a lower
 one says. Then each entry gets its section's `defaults:` and its `templates:` (`extends`). Expansion
 of `${...}` comes after.
 
 Editors with yaml-language-server (VS Code's YAML extension, JetBrains, Neovim) complete and check keys
-from jig's JSON Schema when the file's first line names it, as `jig init` writes:
-`# yaml-language-server: $schema=https://raw.githubusercontent.com/goxang/jig/main/spec/jig.schema.json`.
-`jig schema` prints it. It is generated from the Go types (`go generate ./spec`); a test fails when it
+from rig's JSON Schema when the file's first line names it, as `rig init` writes:
+`# yaml-language-server: $schema=https://raw.githubusercontent.com/goxang/rig/main/spec/rig.schema.json`.
+`rig schema` prints it. It is generated from the Go types (`go generate ./spec`); a test fails when it
 is out of date.
 
 ## Top level
@@ -21,31 +21,30 @@ is out of date.
 | key | |
 |---|---|
 | `project` | name; also the docker network and container prefix |
-| `default` | environment used when neither `-e` nor `$JIG_ENV` is given |
+| `default` | environment used when neither `-e` nor `$RIG_ENV` is given |
 | `vars` | variables for `${...}` |
-| `imports` | services from the files that already define them, read on every load so they stay the only definition: `- compose: deploy/compose.yml` (image, build, command, ports, env, `env_file`, depends_on and project volumes, under the compose names; `${VARS}` from the environment, then the compose file's `.env`), `- kubernetes: deploy/k8s` (a service per Deployment, StatefulSet and DaemonSet, named after it, with its image and container ports; a Kubernetes runtime without `manifests:` deploys from these folders), `- godev: .godev.yaml`, `- rig: rig.yaml`. Each one is a plugin importer (official ones: `jig-std install`; any plugin can add more); fragments are cached in `.jig/cache/import` by the files' sha256. A service jig.yaml also defines is the imported one with jig.yaml's keys merged over it (`build: null` drops an imported key), so jig.yaml holds only what those files have no word for: a Go main to build, health, groups. A workload a jig.yaml service already claims through `k8s.workload` is not imported again under its own name |
-| `include` | globs of YAML files merged under jig.yaml, later files winning: `include: [jig.d/*.yaml]` |
+| `imports` | services from the files that already define them, read on every load so they stay the only definition: `- compose: deploy/compose.yml` (image, build, command, ports, env, `env_file`, depends_on and project volumes, under the compose names; `${VARS}` from the environment, then the compose file's `.env`), `- kubernetes: deploy/k8s` (a service per Deployment, StatefulSet and DaemonSet, named after it, with its image and container ports; a Kubernetes runtime without `manifests:` deploys from these folders), `- godev: .godev.yaml`, `- rig: rig.yaml`. Each one is a plugin importer (official ones: `rig-std install`; any plugin can add more); fragments are cached in `.rig/cache/import` by the files' sha256. A service rig.yaml also defines is the imported one with rig.yaml's keys merged over it (`build: null` drops an imported key), so rig.yaml holds only what those files have no word for: a Go main to build, health, groups. A workload a rig.yaml service already claims through `k8s.workload` is not imported again under its own name |
+| `include` | globs of YAML files merged under rig.yaml, later files winning: `include: [rig.d/*.yaml]` |
 | `templates` | partial entries a service, component, task, query, environment, agent or view starts from with `extends: name` (or a list, applied in order); `${name}` in a template is the entry's name |
 | `defaults` | `section: {keys}`: what every entry of that section starts from, below its templates |
-| `plugins` | `name: {path, version, off, ...config}`: a plugin from `path` instead of the installed store, a pinned `version`, `off: true` to disable it; every other key is the plugin's own config, checked against its schema. Plugins are found in the installed store, `~/.config/jig/plugins/*` and, once the workspace is trusted, `.jig/plugins/*`; the tasks, queries and other jig.yaml keys a plugin carries sit below jig.yaml |
+| `plugins` | `name: {path, version, off, ...config}`: a plugin from `path` instead of the installed store, a pinned `version`, `off: true` to disable it; every other key is the plugin's own config, checked against its schema. Plugins are found in the installed store, `~/.config/rig/plugins/*` and, once the workspace is trusted, `.rig/plugins/*`; the tasks, queries and other rig.yaml keys a plugin carries sit below rig.yaml |
 | `services` | below |
 | `environments` | below |
 | `components` | below; shared by every environment |
 | `dashboards` | `name: [panel, ...]` or `name: {help, vars, panels}` (see below) |
 | `views` | `name: {slot, title, key, file, <layout or widget>}`: a screen built from widgets. `slot` is `tab` (default), `service.section`, `panel` or `home`; the body is `{widget: table, source: db, query: ..., refresh: 10s, transform: [...]}` or a layout (`grid: [[a, b], [c]]`, `tabs: {Name: widget}`, `split`, `stack`, `box`, `scroll`); `file` keeps the body in its own YAML file. See docs/views.md |
-| `tests` | test suites for `jig test` and the Tests screen (see below) |
+| `tests` | test suites for `rig test` and the Tests screen (see below) |
 | `sections` | `name: {help, services: [names, groups or roles]}`: the Services screen's parts, in this order; services in none show under `other` |
-| `manifests` | folders `jig manifests` and the Manifests screen read (default: the runtime's `manifests`, else the `kubernetes` imports). The screen lists only the objects a service deploys; `u` shows the rest |
-| `tasks` | `name: [shell step, ...]` or `name: {help, steps}`, run in order by `jig task <name>` (see below) |
+| `manifests` | folders `rig manifests` and the Manifests screen read (default: the runtime's `manifests`, else the `kubernetes` imports). The screen lists only the objects a service deploys; `u` shows the rest |
+| `tasks` | `name: [shell step, ...]` or `name: {help, steps}`, run in order by `rig task <name>` (see below) |
 | `queries` | saved queries (see below) |
 | `secrets` | `NAME: {help, default}`: values kept out of the repo (see below) |
-| `alerts` | thresholds shown in the TUI header and by `jig alerts` (see below) |
-| `reports` | metrics, traces and queries a run is measured by, with tests, load results, compares, templates and publishing: `jig report start` and `stop`, `jig report`, a suite's `report:`, the Load screen's `W` (see below) |
-| `load` | named load runs: a generator, a profile, a rate, a duration and assertions for `jig load run` (see below) |
+| `alerts` | thresholds shown in the TUI header and by `rig alerts` (see below) |
+| `reports` | metrics, traces and queries a run is measured by, with tests, load results, compares, templates and publishing: `rig report start` and `stop`, `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
+| `load` | named load runs: a generator, a profile, a rate, a duration and assertions for `rig load run` (see below) |
 | `otel` | OpenTelemetry for every app and load service (see below) |
 | `ui` | `{tabs, mode, logs}`: the screens and their order (left out, every screen the project configures something for); `mode`: `detailed` (default), `simple` (fewer screens, columns and keys), `software` (dev screens and views for developers) or `product` (metrics and views tagged `modes: [product]`); `V` picks one; `logs` (see below) |
-| `keys` | the key preset: `jig` (the default) or `rig` (rig's keys). A personal choice, so usually in `.jig/local.yaml` or `~/.config/jig/config.yaml` |
-| `compat` | `{rig_env: true}`: task steps also get `RIG_ENV`, `RIG_FILE`, `RIG_YES`, `RIG_TASK` and `RIG_ARGS`, for scripts written for rig; `jig migrate` sets it |
+| `keys` | the key preset: `rig` (the default). A personal choice, so usually in `.rig/local.yaml` or `~/.config/rig/config.yaml` |
 | `agents` | `name: {on, instructions, tools, approve}`: assistants that run on an event or a schedule (see below) |
 | `policy` | `{roles, bind}`: who may run which actions where (see below) |
 | `ai` | `{deny: [globs], instructions: text, ideas: {screen: [questions]}}`: project paths the assistant never reads (on top of `.env`, keys and `secrets/`), notes it gets with every turn, and the questions tab offers in an empty chat per screen (`all` for every screen) |
@@ -54,9 +53,9 @@ is out of date.
 
 | key | |
 |---|---|
-| `role` | `app` (default), `infra`, or `load` (left out of `jig up`) |
+| `role` | `app` (default), `infra`, or `load` (left out of `rig up`) |
 | `extends` | templates this service starts from, in order |
-| `groups` | names to address several services at once: `jig up core` |
+| `groups` | names to address several services at once: `rig up core` |
 | `depends_on` | started first; `up` deploys in phases and waits for each, leaving dependencies that already run untouched |
 | `image` | image to run, or the repository name builds push to |
 | `build` | `go: ./cmd/api`, `dockerfile: path` (+ `context`, `args`), or `command: [...]` |
@@ -67,8 +66,8 @@ is out of date.
 | `replicas` | left out: keep the running count (or the manifest's); set (0 included) it wins everywhere |
 | `shared` | infrastructure one environment runs for others: see `environments.<name>.infra` |
 | `delay` | wait this long (`10s`) after the dependencies are ready before starting the service |
-| `manual` | started only when named or through a group or section, never by `all` or its role, so `jig infra up` skips it too (e.g. frontends, an optional Prometheus) |
-| `watch` | `{paths, ignore}`: what `jig watch` (`ctrl+w` in the UI) rebuilds and restarts the service on. Left out: the project packages a `build.go` main imports, else `build.context`, else `run.dir`; `.gitignore`d files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running |
+| `manual` | started only when named or through a group or section, never by `all` or its role, so `rig infra up` skips it too (e.g. frontends, an optional Prometheus) |
+| `watch` | `{paths, ignore}`: what `rig watch` (`ctrl+w` in the UI) rebuilds and restarts the service on. Left out: the project packages a `build.go` main imports, else `build.context`, else `run.dir`; `.gitignore`d files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running |
 | `health` | `{port, path}`: readiness for local and docker, a readiness probe in generated manifests |
 | `metrics` | `{port, path}`: scraped by the `scrape` metrics adapter |
 | `pprof` | `{port, path}`: where the `pprof` profiler connects (default: the metrics port) |
@@ -83,7 +82,7 @@ is out of date.
 | `runtime` | a component: `type` plus the runtime's options (below) |
 | `protected` | changes need `--yes` or the TUI's confirmation |
 | `readonly` | every change is refused, even with `--yes`: start, stop, deploy, exec, builds, data and KV writes, load; reads, logs, metrics, traces and read-only queries (SQL in a read-only transaction) still work |
-| `description` | shown by `jig env` and the TUI |
+| `description` | shown by `rig env` and the TUI |
 | `vars` | variables for this environment |
 | `only` | services and groups that exist here; dependencies on the rest are dropped |
 | `services` | patches merged into services here: `api: { replicas: 3 }` |
@@ -98,7 +97,7 @@ is out of date.
 | type | options |
 |---|---|
 | `local` | `env`, `stop_timeout` |
-| `docker` | `network`, `registry`, `env`, `publish` (default true), `host` (a remote daemon: `ssh://user@server`, `tcp://server:2376`) or `context` (a `docker context`): jig's docker calls use it without touching your shell, builds are copied over (`docker save \| load`) when there is no registry, and health checks and forwards reach an ssh daemon's containers through `ssh -L`. `compose: {project, files}` hands the services to that compose project: jig finds its containers by compose's labels and starts, stops, restarts, scales and deploys with `docker compose ... up -d --no-deps <svc>` (a deploy's image comes in as `$JIG_IMAGE`: write `image: ${JIG_IMAGE:-app:latest}`), so with `imports: [{compose: ...}]` the compose file stays the only definition |
+| `docker` | `network`, `registry`, `env`, `publish` (default true), `host` (a remote daemon: `ssh://user@server`, `tcp://server:2376`) or `context` (a `docker context`): rig's docker calls use it without touching your shell, builds are copied over (`docker save \| load`) when there is no registry, and health checks and forwards reach an ssh daemon's containers through `ssh -L`. `compose: {project, files}` hands the services to that compose project: rig finds its containers by compose's labels and starts, stops, restarts, scales and deploys with `docker compose ... up -d --no-deps <svc>` (a deploy's image comes in as `$RIG_IMAGE`: write `image: ${RIG_IMAGE:-app:latest}`), so with `imports: [{compose: ...}]` the compose file stays the only definition |
 | `kubernetes` | `context` (required), `namespace`, `registry`, `pull_registry` (the registry as nodes name it, when it differs from where builds push), `manifests`, `vars`, `env`, `create_namespace`, `state_configmap`, `node_shell_image`, `debug` (adds SYS_PTRACE to service containers, for dlv) |
 | `kind` | the kubernetes options plus `cluster`, `node_image`, `workers`, `registry_port`, `preload` |
 
@@ -118,7 +117,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `pprof` | `port`, `path`, `summary` |
 | `command` (profiler) | `kinds: {cpu: {command, where: service|host, fetch, format, ext}}`, `pid` |
 | `delve` | `dlv`, `port`, `pid` |
-| `sql` | `driver` (postgres, mssql, mysql), `addr`, `user`, `password`, `database`, `params`, `clear`, `seed: [{file, db} or {command}]` (run by `jig data seed`, and by `jig up` when it starts the database empty; a command gets `$JIG_DB_ADDR`, `$JIG_DB_NAME`). `jig data snapshot`/`restore` use pg_dump/pg_restore or mysqldump/mysql on this machine, else inside the database's container; SQL Server backs up to its container's disk |
+| `sql` | `driver` (postgres, mssql, mysql), `addr`, `user`, `password`, `database`, `params`, `clear`, `seed: [{file, db} or {command}]` (run by `rig data seed`, and by `rig up` when it starts the database empty; a command gets `$RIG_DB_ADDR`, `$RIG_DB_NAME`). `rig data snapshot`/`restore` use pg_dump/pg_restore or mysqldump/mysql on this machine, else inside the database's container; SQL Server backs up to its container's disk |
 | `redis` | `addr`, `password`, `db`, `unsafe` |
 | `rabbitmq` | `addr` (management API), `user`, `password`, `vhost` |
 | `kafka` | `addr` (brokers, comma separated), `user`, `password`, `sasl` (plain, scram-sha-256, scram-sha-512), `tls`; queries: `topics`, `groups`, `lag <group>`, `tail <topic> [n]` |
@@ -127,7 +126,7 @@ or `host:port`; HTTP adapters also take `user`, `password`, `token` and `headers
 | `kv` (loadgen) | `store`, `key`, `field` (dotted for nested JSON: `a.b`), `services`, `replicas`, `metrics: {source, sent, failed, latency_p99, per_instance}` (`per_instance`: a sent counter labelled `pod` or `instance`, charted per instance on the Load screen) |
 | `command` (loadgen) | `start`, `stop`, `rate` (with `{rate}`), `status` |
 | `ssh` | `defaults`, `hosts: [{name, addr, user, port, key, jump, roles, labels}]` |
-| `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure`, `debug` (no optimisation, symbols kept, a static dlv at /usr/local/bin/dlv: `jig debug` attaches in the pod), `dlv` (the dlv to put in, else built once) |
+| `go` (builder) | `base` (registry image, `docker://image`, or `scratch`), `platform`, `workdir`, `ldflags`, `tags`, `insecure`, `debug` (no optimisation, symbols kept, a static dlv at /usr/local/bin/dlv: `rig debug` attaches in the pod), `dlv` (the dlv to put in, else built once) |
 | `docker` (builder) | `platform`, `args` |
 | `http` (query) | `addr` |
 
@@ -147,7 +146,7 @@ queries:
     active: true                   # ...from the start (else switch it on with `a`)
 ```
 
-`jig query <name> n=5` runs one; `--every 5s` repeats it. Placeholders without a default must be given.
+`rig query <name> n=5` runs one; `--every 5s` repeats it. Placeholders without a default must be given.
 
 ## dashboards
 
@@ -220,25 +219,25 @@ integration suites excluded is "every unit test", new packages included. `report
 A suite runs `go test -json` in `dir` (default the project directory) with `run`, `skip`, `tags`,
 `race`, `cover`, `short`, `count`, `parallel`, `timeout`, `bench`, `benchtime`, `benchmem`, more
 `flags`, and `args` for the test binary. `bench` alone runs only benchmarks (`-run ^$`) unless `run`
-is set. Runs are kept (the last 50) for `jig test report`, reruns of failures and benchmark deltas.
+is set. Runs are kept (the last 50) for `rig test report`, reruns of failures and benchmark deltas.
 
-`jig test <suite>` takes the same flags (`--race --cover --run X --bench . --count 1 ...`), `--failed`
+`rig test <suite>` takes the same flags (`--race --cover --run X --bench . --count 1 ...`), `--failed`
 reruns the last run's failures, `--junit file` writes JUnit XML, `-o file` the full report;
-`jig test ./pkg/x/...` runs packages with no suite; `jig test report [run] [-o file]`, `jig test runs`.
+`rig test ./pkg/x/...` runs packages with no suite; `rig test report [run] [-o file]`, `rig test runs`.
 
 Other stacks run a `command` through `sh` in `dir`, with `env`, `needs` and `report` as above. JUnit XML
-written to `$JIG_JUNIT` becomes a row per test (a class or file per package); without it the suite passes
-or fails by its exit status. `$JIG_RUN` is a regex of the tests `--failed` reruns (`.*` otherwise):
+written to `$RIG_JUNIT` becomes a row per test (a class or file per package); without it the suite passes
+or fails by its exit status. `$RIG_RUN` is a regex of the tests `--failed` reruns (`.*` otherwise):
 
 ```yaml
 tests:
-  py:   { dir: api, command: 'pytest --junitxml=$JIG_JUNIT' }
-  web:  { dir: web, command: 'JEST_JUNIT_OUTPUT_FILE=$JIG_JUNIT npx jest --reporters=default --reporters=jest-junit -t "$JIG_RUN"' }
-  node: { command: 'node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=$JIG_JUNIT --test-name-pattern="$JIG_RUN"' }
-  jvm:  { dir: billing, command: 'mvn -q test && cat target/surefire-reports/*.xml > $JIG_JUNIT' }
+  py:   { dir: api, command: 'pytest --junitxml=$RIG_JUNIT' }
+  web:  { dir: web, command: 'JEST_JUNIT_OUTPUT_FILE=$RIG_JUNIT npx jest --reporters=default --reporters=jest-junit -t "$RIG_RUN"' }
+  node: { command: 'node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=$RIG_JUNIT --test-name-pattern="$RIG_RUN"' }
+  jvm:  { dir: billing, command: 'mvn -q test && cat target/surefire-reports/*.xml > $RIG_JUNIT' }
 ```
 
-Or name a `runner:`, a plugin implementing `tests/1` (`jig-std install` brings `pytest`, `jest`, `vitest`,
+Or name a `runner:`, a plugin implementing `tests/1` (`rig-std install` brings `pytest`, `jest`, `vitest`,
 `hurl`, `k6` and `junit`), with its options under `with:`:
 
 ```yaml
@@ -249,7 +248,7 @@ tests:
   jvm:   { dir: billing, runner: junit, with: { command: mvn -q test, reports: "target/surefire-reports/*.xml" } }
 ```
 
-`jig test <suite> --ci` prints plainly with every failure's output; `-o file.xml` writes JUnit. A failed
+`rig test <suite> --ci` prints plainly with every failure's output; `-o file.xml` writes JUnit. A failed
 test exits 3.
 
 ## load
@@ -264,7 +263,7 @@ load:
     assert: ["p95 < 200ms", "errors < 0.5%", "throughput >= 400/s"]
 ```
 
-`jig load run smoke` drives the generator, prints live numbers, then checks `assert` (`p50`, `p95`,
+`rig load run smoke` drives the generator, prints live numbers, then checks `assert` (`p50`, `p95`,
 `p99` against durations, `errors` in percent, `throughput` per second, `sent`, `failed`) and keeps the
 result. `--vs last` (or a run id) compares with an earlier run; `--rate`, `--for`, `--profile` and
 `--assert` override; a generator name runs ad hoc. A broken assertion exits 3.
@@ -293,7 +292,7 @@ A report can also carry `tests: <suite>` (its last run), `load: <load run>` (its
 `compare: last` (each metric's change against the last kept report), `ai: true` (a summary the
 assistant writes), `template:` (markdown with `{{.Rows}}`, `{{.Tests}}`, `{{.Load}}`, `{{.Compare}}` and
 `{{table "plugin.source" "key=value"}}`), `publish:` (actions run with it, `${report}` its markdown and
-`${file}` its file) and `schedule:` (cron, measured and published while `jig report watch` runs):
+`${file}` its file) and `schedule:` (cron, measured and published while `rig report watch` runs):
 
 ```yaml
 reports:
@@ -306,16 +305,16 @@ reports:
 ```
 
 Formats: `md`, `html`, `json`, `xml`, `csv` and `junit` (each load assertion and failed test a case). A
-failed test or broken assertion exits 3, so `jig report nightly --vs last` gates an MR pipeline.
+failed test or broken assertion exits 3, so `rig report nightly --vs last` gates an MR pipeline.
 
 Each metric is a range query over the window, summarised per series by `stats`: `avg`, `min`, `max`,
 `last`, `p50`, `p90`, `p95`, `p99` (default `avg, max, last`). A `traces:` entry counts the traces in the
 window with their errors, p50, p95, max and the slowest ones. A `queries:` entry runs once at the end of
 the window, `${from}` and `${to}` replaced by its bounds; a query that would change something is refused.
 
-`jig report load --since 20m` (or `--from 14:05 --to 14:35`, `--source other-prom`, `--verbosity full`,
+`rig report load --since 20m` (or `--from 14:05 --to 14:35`, `--source other-prom`, `--verbosity full`,
 `--format json`, `-o file.xml`) prints the report and saves it under the project's data directory.
-`jig report start load`, then the tests or the load, then `jig report stop load` measures exactly that
+`rig report start load`, then the tests or the load, then `rig report stop load` measures exactly that
 stretch. `W` on the Load and Tests screens does the same: start the reporter, `W` again stops it and
 saves the report, or measure a window until now.
 A rerun cuts each failed test back to its deepest parallel ancestor (an integration case's mode),
@@ -326,24 +325,24 @@ else its top-level test, so the steps before it run again too.
 ```yaml
 tasks:
   bootstrap:
-    - jig up infra
-    - jig do db seed schema.sql
+    - rig up infra
+    - rig do db seed schema.sql
     - ./scripts/seed-consul.sh svc://consul:8500
-    - jig up --build
+    - rig up --build
   reset-db:
     help: empty the app's tables (keeps the schema)
     steps:
       # empty every table but the migrations'
-      - jig do db seed truncate.sql
+      - rig do db seed truncate.sql
 ```
 
-A task is a list of steps, or `{help, steps}`: `help` is what `jig task` and the TUI's `T` show next to
+A task is a list of steps, or `{help, steps}`: `help` is what `rig task` and the TUI's `T` show next to
 its name (without it they show the steps). A `# comment` right above a step (or the first `#` lines of
 a multi-line step) says what the step does: a running task prints it instead of the command, and `T`
 shows it over the step's commands in the selected task's details.
 
-`jig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `jig down`
-with no targets leaves it running: `jig infra up|down|restart|status` changes it.
+`rig up` with no targets never redeploys infrastructure (`role: infra`) that already runs, and `rig down`
+with no targets leaves it running: `rig infra up|down|restart|status` changes it.
 
 Write every task so running it twice is safe: a task is retried after a failure, run again from
 history, or started by an assistant that cannot know what already ran. Create with `IF NOT EXISTS` /
@@ -353,21 +352,21 @@ result (poll until healthy, retry or fail loudly) instead of assuming a fixed `s
 
 Each step runs with `sh -c` from the project directory and the task stops at the first failure.
 `svc://service:port` in a step becomes a `host:port` reachable from here for the whole task. A nested
-`jig` uses the same project file, environment and `--yes` (through `$JIG_FILE`, `$JIG_ENV`, `$JIG_YES`).
-Write `$$` for a shell `$`, since `${...}` is jig's own expansion. `jig task ship parser load` passes
-the words after the name as `$1...` and `$JIG_ARGS`. A `NAME=value` word sets that env var for the
-task instead: `jig task ship BRANCH=feature-x TAG=v3` sets `$BRANCH` and `$TAG`, overriding a
+`rig` uses the same project file, environment and `--yes` (through `$RIG_FILE`, `$RIG_ENV`, `$RIG_YES`).
+Write `$$` for a shell `$`, since `${...}` is rig's own expansion. `rig task ship parser load` passes
+the words after the name as `$1...` and `$RIG_ARGS`. A `NAME=value` word sets that env var for the
+task instead: `rig task ship BRANCH=feature-x TAG=v3` sets `$BRANCH` and `$TAG`, overriding a
 manifest var or pre-set shell env of the same name, so a task never needs one pre-exported just to
 run it with different parameters.
 
 `args:` declares a task's inputs (`name`, `help`, `default`, `choices` or `from: services|branches|hosts`,
 `multi`): `from: branches` offers `(working tree)` (the checkout as it is: the arg is passed empty), then
-the git branches, newest first, local before `origin/` ones; on a terminal `jig task <name>` asks for each, and `name=value` presets one by name
-(`jig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
+the git branches, newest first, local before `origin/` ones; on a terminal `rig task <name>` asks for each, and `name=value` presets one by name
+(`rig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
 first step on any environment. Neither asks with `--yes` or without a terminal (agents, CI, a step
 of another task). A protected environment asks once on a terminal instead of refusing without
 `--yes`. A read-only environment runs only tasks marked `readonly: true`. Steps print how long they took; secret values in a step's title show as `${NAME}`.
-`jig completion zsh|bash|fish` completes tasks, their args, services, components and `-e`.
+`rig completion zsh|bash|fish` completes tasks, their args, services, components and `-e`.
 
 In the TUI, `T` runs any task, its picker in tabs: a task's `group:`, else the first word of its name
 when other tasks share it (`nexus-prune`, `nexus-restart`: nexus). The task runs in the background:
@@ -383,9 +382,9 @@ secrets:
   API_TOKEN: { help: staging API token }                   # no default: set it
 ```
 
-`jig secret` lists them and where each value comes from (environment, stored, default, unset), never
-the value. `jig secret set API_TOKEN` asks without echo (or reads stdin) and keeps it in
-`~/.config/jig/secrets/<project>.json`, mode 0600. Use them like any variable: `password: "${DB_PASSWORD}"`.
+`rig secret` lists them and where each value comes from (environment, stored, default, unset), never
+the value. `rig secret set API_TOKEN` asks without echo (or reads stdin) and keeps it in
+`~/.config/rig/secrets/<project>.json`, mode 0600. Use them like any variable: `password: "${DB_PASSWORD}"`.
 
 ## alerts
 
@@ -399,7 +398,7 @@ alerts:
 `source: hosts` checks every node's `cpu`, `memory` or `disk` (percent). Any other source is a component
 whose query returns rows: each row's first number is checked, its other cells name it. `below: true`
 fires under the thresholds. With no `alerts:`, nodes are watched for cpu and memory at 90% and 98%, disk at 97% and 98%.
-The TUI checks every 15s and shows the worst in its header (`A` lists all); `jig alerts` checks once and
+The TUI checks every 15s and shows the worst in its header (`A` lists all); `rig alerts` checks once and
 exits 2 when one is critical. Environments add their own `alerts:`.
 
 ## agents
@@ -410,14 +409,14 @@ agents:
     on: alert.firing                 # an event topic glob, or { schedule: "*/30 9-18 * * 1-5" } (cron, local time)
     instructions: Find why the alert fires and post a summary to the team channel.
     tools: ["*:read", notify.send]   # action and source globs, each name[:effect]; left out, reads only
-    approve: [runtime.*]             # these wait in jig inbox even where agents may write
+    approve: [runtime.*]             # these wait in rig inbox even where agents may write
 ```
 
-An agent is the assistant (`jig ai setup`) with a narrower reach: it reads project files but never edits
-them or runs a shell, and reaches jig only through `tools`. The event that fired it is in its prompt,
+An agent is the assistant (`rig ai setup`) with a narrower reach: it reads project files but never edits
+them or runs a shell, and reaches rig only through `tools`. The event that fired it is in its prompt,
 marked as data. It acts as `agent:<name>`: its writes run unless they are dangerous, hit a protected
-environment or match `approve`; those wait in `jig inbox` for a person. `jig agent ls` lists them,
-`jig agent run <name>` runs one now, `jig agent watch` runs them on their triggers until stopped.
+environment or match `approve`; those wait in `rig inbox` for a person. `rig agent ls` lists them,
+`rig agent run <name>` runs one now, `rig agent watch` runs them on their triggers until stopped.
 
 ## policy
 
@@ -433,9 +432,9 @@ policy:
 A rule is `action[:effect][@env/<name>]`, globs throughout. The most restrictive matching rule wins:
 deny, approve, reauth, confirm, then allow; an action no rule matches is denied. `ai` binds the
 assistant. Without `policy:` the local default applies: reads run, a `readonly` environment takes no
-writes, the assistant's writes wait in `jig inbox`, danger and protected environments ask first. With
-roles, an allowed write to a protected environment still asks to confirm. `jig serve` adds the roles
-`viewer`, `dev`, `operator`, `admin` and `ai` where the project does not define them (`jig admin roles`).
+writes, the assistant's writes wait in `rig inbox`, danger and protected environments ask first. With
+roles, an allowed write to a protected environment still asks to confirm. `rig serve` adds the roles
+`viewer`, `dev`, `operator`, `admin` and `ai` where the project does not define them (`rig admin roles`).
 
 ## otel
 
@@ -450,7 +449,7 @@ otel:
   attributes: { team: payments }
 ```
 
-jig sets the standard variables every OpenTelemetry SDK reads (Go, Java, Python, Node, .NET, ...) on each
+rig sets the standard variables every OpenTelemetry SDK reads (Go, Java, Python, Node, .NET, ...) on each
 app and load service: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (`service.namespace`,
 `deployment.environment`, then `attributes`), `OTEL_EXPORTER_OTLP_*ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`,
 `OTEL_{TRACES,METRICS,LOGS}_EXPORTER` (`none` for a signal with no address), the sampler and
@@ -479,10 +478,10 @@ copies a value), `w` wraps long lines.
 
 ## run state an environment keeps
 
-`jig vars set K=V` overrides a runtime `vars` entry (`$MAIN_DB` in manifests) and `jig setenv <service> K=V`
-adds env to a service; both live in the environment's state (a ConfigMap on Kubernetes, `.jig/<env>/`
+`rig vars set K=V` overrides a runtime `vars` entry (`$MAIN_DB` in manifests) and `rig setenv <service> K=V`
+adds env to a service; both live in the environment's state (a ConfigMap on Kubernetes, `.rig/<env>/`
 elsewhere), so every later deploy keeps them and teammates see them.
-Whatever jig keeps in the project lives under `.jig/`; in a git repository jig adds `.jig/` to
+Whatever rig keeps in the project lives under `.rig/`; in a git repository rig adds `.rig/` to
 `.gitignore` the first time it finds that folder unignored.
 
 On the local runtime, a service's `metrics` port that its process does not listen on stands for the

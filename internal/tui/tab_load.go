@@ -13,9 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 type loadTab struct {
@@ -303,7 +303,7 @@ func (t *loadTab) view(m *model, w, h int) string {
 		return t.full.view(m, 0, 0, w, h)
 	}
 	if len(t.names) == 0 {
-		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, sDim.Render(`no load generators — add one to jig.yaml:
+		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, sDim.Render(`no load generators — add one to rig.yaml:
 
 components:
   load-api:

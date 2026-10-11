@@ -9,28 +9,28 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/engine"
 )
 
 func doctorCommand() *cobra.Command {
 	var asJSON bool
 	c := &cobra.Command{
 		Use:   "doctor",
-		Short: "check this environment: jig.yaml, tools, cluster or daemon, ${VARS}, ports, components, AI",
+		Short: "check this environment: rig.yaml, tools, cluster or daemon, ${VARS}, ports, components, AI",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var checks []engine.Check
 			a, err := open()
 			if err != nil {
-				fix := "jig init writes one; jig schema validates it in your editor"
+				fix := "rig init writes one; rig schema validates it in your editor"
 				switch {
 				case strings.Contains(err.Error(), "is installed"):
 					fix = engine.InstallStd
 				case strings.Contains(err.Error(), "workspace trust"):
-					fix = "jig trust, once you have read what the project's plugins do (listed above)"
+					fix = "rig trust, once you have read what the project's plugins do (listed above)"
 				}
-				checks = append(checks, engine.Check{Name: "jig.yaml", Status: engine.CheckFail, Detail: err.Error(), Fix: fix})
+				checks = append(checks, engine.Check{Name: "rig.yaml", Status: engine.CheckFail, Detail: err.Error(), Fix: fix})
 			} else {
 				defer a.Close()
 				checks = a.Doctor(cmd.Context())
@@ -70,11 +70,11 @@ func doctorCommand() *cobra.Command {
 func aiCheck() engine.Check {
 	cfg, err := ai.LoadConfig()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return engine.Check{Name: "AI", Status: engine.CheckWarn, Detail: err.Error(), Fix: "jig ai config"}
+		return engine.Check{Name: "AI", Status: engine.CheckWarn, Detail: err.Error(), Fix: "rig ai config"}
 	}
 	s := ai.Resolve(cfg)
 	if !s.Enabled() {
-		return engine.Check{Name: "AI", Status: engine.CheckWarn, Detail: s.Why, Fix: "jig ai config (optional: jig works without it)"}
+		return engine.Check{Name: "AI", Status: engine.CheckWarn, Detail: s.Why, Fix: "rig ai config (optional: rig works without it)"}
 	}
 	return engine.Check{Name: "AI", Status: engine.CheckOK, Detail: s.Describe()}
 }

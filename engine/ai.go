@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/spec"
 )
 
 // AI is the assistant's runner for this project and environment; sock is the bridge that answers
@@ -40,12 +40,12 @@ func (a *App) AI(sock string) (*ai.Runner, error) {
 	return r, nil
 }
 
-// Agent is the runner for the jig.yaml agent name: the assistant's, as that agent and bounded to its
+// Agent is the runner for the rig.yaml agent name: the assistant's, as that agent and bounded to its
 // tools, which default to reading.
 func (a *App) Agent(name string) (*ai.Runner, *spec.Agent, error) {
 	ag, ok := a.Spec.Agents[name]
 	if !ok || ag == nil {
-		return nil, nil, fmt.Errorf("no agent %q in jig.yaml", name)
+		return nil, nil, fmt.Errorf("no agent %q in rig.yaml", name)
 	}
 	r, err := a.AI("")
 	if err != nil {
@@ -65,7 +65,7 @@ func (a *App) AuditFile() string { return filepath.Join(a.StateDir(), "ai-audit.
 // Redactor takes this project's secrets out of text bound for a model (ai.Redactor).
 func (a *App) Redactor() *ai.Redactor { return ai.NewRedactor(a.KnownSecrets()) }
 
-// KnownSecrets are the values jig knows to be secret, by name: secrets:, the ${NAME}s with a secret's
+// KnownSecrets are the values rig knows to be secret, by name: secrets:, the ${NAME}s with a secret's
 // name taken from the environment, and the env vars, variables and component fields named like one.
 func (a *App) KnownSecrets() map[string]string {
 	out := a.Spec.SecretValues()

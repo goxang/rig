@@ -1,4 +1,4 @@
-// Package rpc is the host's end of jig/1: newline-delimited JSON-RPC 2.0 to one plugin process.
+// Package rpc is the host's end of rig/1: newline-delimited JSON-RPC 2.0 to one plugin process.
 package rpc
 
 import (
@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 type Message struct {

@@ -21,13 +21,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/contracts"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/contracts"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
 )
 
 // viewTab is a screen drawn from a view spec: a widget tree whose bound widgets the host fetches,
@@ -707,7 +707,7 @@ func (t *viewTab) rowAction(m *model, wn *wnode, key string) (tea.Cmd, bool) {
 			}
 			label, line := fmt.Sprint(am["name"]), fmt.Sprint(expandRow(c, row))
 			if danger, _ := am["danger"].(bool); danger {
-				m.confirm = &confirm{text: label + ": jig " + line + "?", run: func() tea.Msg { return commandMsg(line) }}
+				m.confirm = &confirm{text: label + ": rig " + line + "?", run: func() tea.Msg { return commandMsg(line) }}
 				return nil, true
 			}
 			return m.commandAsking(label, line), true
@@ -1051,8 +1051,31 @@ func (t *viewTab) stackDraw(m *model, kids []*wnode, x, y, w, h int, vertical bo
 		total = w
 	}
 	sizes := shares(kids, total, vertical)
-	var parts []string
 	off := 0
+	for i := 1; i < len(kids); i++ {
+		off += sizes[i-1]
+		pair := sizes[i-1] + sizes[i]
+		minPane := 8
+		if vertical {
+			minPane = 3
+		}
+		if pair < 2*minPane {
+			continue
+		}
+		name := fmt.Sprintf("view.%s.%d", t.title, kids[i].id)
+		g := splitGeo{total: pair, minA: minPane, minB: minPane, down: vertical}
+		var first int
+		if vertical {
+			g.start = y + off - sizes[i-1]
+			first = m.paneSize(name, g, sizes[i-1], x, y+off-sizes[i-1], w)
+		} else {
+			g.start = x + off - sizes[i-1]
+			first = m.paneSize(name, g, sizes[i-1], x+off-sizes[i-1], y, h)
+		}
+		sizes[i-1], sizes[i] = first, pair-first
+	}
+	var parts []string
+	off = 0
 	for i, k := range kids {
 		if vertical {
 			parts = append(parts, t.draw(m, k, x, y+off, w, sizes[i]))
@@ -1361,7 +1384,7 @@ func served(root *protocol.Node, plugin string) {
 	})
 }
 
-// pluginsView lists the plugins in use; its keys run `jig plugin ...`.
+// pluginsView lists the plugins in use; its keys run `rig plugin ...`.
 var pluginsView = []byte(`
 title: Plugins
 widget: table

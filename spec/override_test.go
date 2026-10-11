@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoadWithOverridesBeatFileVars(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "jig.yaml")
+	f := filepath.Join(t.TempDir(), "rig.yaml")
 	os.WriteFile(f, []byte(`project: p
 environments:
   e:
@@ -32,7 +32,7 @@ queries:
 }
 
 func TestExpandedPluginYAML(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "jig.yaml")
+	f := filepath.Join(t.TempDir(), "rig.yaml")
 	os.WriteFile(f, []byte("project: p\nvars: { DB: main }\nenvironments:\n  e: { runtime: { type: local } }\n"), 0o644)
 	p, _, err := Load(f, "e")
 	if err != nil {

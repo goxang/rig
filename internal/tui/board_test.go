@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestBoardSortsAndScrolls(t *testing.T) {

@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 func TestProfView(t *testing.T) {

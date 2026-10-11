@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/spec"
 )
 
 // The shop's postgres password, in a log line on its way to a model, never reaches it.
 func TestSecretsNeverReachTheModel(t *testing.T) {
-	p, e, err := spec.Load("../examples/shop/jig.yaml", "docker")
+	p, e, err := spec.Load("../examples/shop/rig.yaml", "docker")
 	if err != nil {
 		t.Fatal(err)
 	}

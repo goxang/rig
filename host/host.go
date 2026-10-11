@@ -11,21 +11,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
-// Version is the jig version plugins see at initialize.
+// Version is the rig version plugins see at initialize.
 var Version = "dev"
 
 type Options struct {
-	// Dir is the project, File its jig.yaml; Env the environment calls run in.
+	// Dir is the project, File its rig.yaml; Env the environment calls run in.
 	Dir  string
 	File string
 	Env  string
-	// StateDir keeps host/state values, per plugin: the project's .jig/<env>.
+	// StateDir keeps host/state values, per plugin: the project's .rig/<env>.
 	StateDir string
 	// Engine serves host/query and host/run.
 	Engine api.Engine
@@ -230,7 +230,7 @@ func (h *Host) Stream(ctx context.Context, name string, args protocol.Args) (<-c
 	return out, nil
 }
 
-// Import runs a plugin importer, returning its jig.yaml fragment.
+// Import runs a plugin importer, returning its rig.yaml fragment.
 func (h *Host) Import(ctx context.Context, name string, files []string) (*protocol.ImportResult, error) {
 	p, local, err := h.owner(name)
 	if err != nil {
@@ -258,7 +258,7 @@ func (h *Host) secret(name string) (string, bool) {
 func (h *Host) stateFile(plugin string) string {
 	dir := h.StateDir
 	if dir == "" {
-		dir = filepath.Join(h.Dir, ".jig")
+		dir = filepath.Join(h.Dir, ".rig")
 	}
 	return filepath.Join(dir, "plugins", plugin+".json")
 }

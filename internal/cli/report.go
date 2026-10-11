@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/kernel/cron"
-	"github.com/goxang/jig/kernel/jobs"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/kernel/cron"
+	"github.com/goxang/rig/kernel/jobs"
 )
 
 func reportCommand() *cobra.Command {
@@ -30,10 +30,10 @@ func reportCommand() *cobra.Command {
 	}
 	c := &cobra.Command{
 		Use:   "report [name]",
-		Short: "measure a reports: entry of jig.yaml (metrics, traces, queries) over a time window and save it as markdown, json or xml; without a name, list them",
-		Example: `  jig report load --since 20m          # the last 20 minutes, saved under ~/.config/jig and printed
-  jig report load --from 14:05 --to 14:35 -o load-1000tps.json
-  jig report start load; jig test e2e; jig report stop load   # the window is the tests' run`,
+		Short: "measure a reports: entry of rig.yaml (metrics, traces, queries) over a time window and save it as markdown, json or xml; without a name, list them",
+		Example: `  rig report load --since 20m          # the last 20 minutes, saved under ~/.config/rig and printed
+  rig report load --from 14:05 --to 14:35 -o load-1000tps.json
+  rig report start load; rig test e2e; rig report stop load   # the window is the tests' run`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
@@ -77,21 +77,21 @@ func reportCommand() *cobra.Command {
 	c.Flags().StringVar(&from, "from", "", "window start: 15:04, 15:04:05 (today) or RFC 3339")
 	c.Flags().StringVar(&to, "to", "", "window end (default now)")
 	c.PersistentFlags().StringVar(&source, "source", "", "metrics component instead of the report's (local-prom, say)")
-	c.PersistentFlags().StringVarP(&out, "output", "o", "", "file to write; .json, .xml, .html or .csv picks the format (default under the project's jig data directory)")
+	c.PersistentFlags().StringVarP(&out, "output", "o", "", "file to write; .json, .xml, .html or .csv picks the format (default under the project's rig data directory)")
 	c.PersistentFlags().StringVar(&format, "format", "", "md, html, json, xml, csv or junit (default the report's format:, else md)")
 	c.PersistentFlags().StringVar(&verbosity, "verbosity", "", "brief, normal or full (default the report's)")
 	c.PersistentFlags().StringVar(&vs, "vs", "", "compare with a kept report: last, or its time (20261011-1504)")
 	c.PersistentFlags().BoolVar(&noPublish, "no-publish", false, "skip the report's publish: actions")
 	c.AddCommand(&cobra.Command{
 		Use:   "start <name>",
-		Short: "start a reporter: its window opens now and closes at jig report stop",
+		Short: "start a reporter: its window opens now and closes at rig report stop",
 		Args:  cobra.ExactArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			at, err := a.StartReporter(args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s started at %s; jig report stop %s measures it\n", args[0], at.Format("15:04:05"), args[0])
+			fmt.Printf("%s started at %s; rig report stop %s measures it\n", args[0], at.Format("15:04:05"), args[0])
 			return nil
 		}),
 	}, &cobra.Command{

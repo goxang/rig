@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 func loadRunCommand() *cobra.Command {
@@ -26,8 +26,8 @@ func loadRunCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "run <load run | generator>",
 		Short: "run a load: entry (or a generator) with live numbers, then check its assertions; Ctrl-C ends it early",
-		Example: `  jig load run smoke                          # a load: entry of jig.yaml
-  jig load run api-load --rate 500 --for 2m --profile ramp --assert "p95 < 200ms" --vs last`,
+		Example: `  rig load run smoke                          # a load: entry of rig.yaml
+  rig load run api-load --rate 500 --for 2m --profile ramp --assert "p95 < 200ms" --vs last`,
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			r, err := a.LoadRunNamed(args[0])

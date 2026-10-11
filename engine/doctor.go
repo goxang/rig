@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/internal/kubectx"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/internal/kubectx"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 type CheckStatus string
@@ -27,7 +27,7 @@ const (
 	CheckFail CheckStatus = "fail"
 )
 
-// Check is one line of `jig doctor`.
+// Check is one line of `rig doctor`.
 type Check struct {
 	Name   string      `json:"name"`
 	Status CheckStatus `json:"status"`
@@ -55,10 +55,10 @@ var toolFix = map[string]string{
 func (a *App) Doctor(ctx context.Context) []Check {
 	var out []Check
 	add := func(c Check) { out = append(out, c) }
-	add(Check{Name: "jig.yaml", Status: CheckOK, Detail: a.Spec.File})
+	add(Check{Name: "rig.yaml", Status: CheckOK, Detail: a.Spec.File})
 	if len(a.Spec.Unset) > 0 {
 		add(Check{Name: "variables", Status: CheckFail, Detail: "unset: " + strings.Join(a.Spec.Unset, ", "),
-			Fix: "export them, jig secret set NAME, or give them a default (${NAME:-value}, secrets:, vars:)"})
+			Fix: "export them, rig secret set NAME, or give them a default (${NAME:-value}, secrets:, vars:)"})
 	} else {
 		add(Check{Name: "variables", Status: CheckOK, Detail: "every ${NAME} is set"})
 	}
@@ -85,7 +85,7 @@ func (a *App) Doctor(ctx context.Context) []Check {
 	c, cancel := context.WithTimeout(ctx, 20*time.Second)
 	_, err := a.runtime.Discover(c)
 	cancel()
-	fix := "is it running? jig -e " + a.Env.Name + " up; else check its address in jig.yaml"
+	fix := "is it running? rig -e " + a.Env.Name + " up; else check its address in rig.yaml"
 	if err != nil {
 		add(Check{Name: "runtime " + typ, Status: CheckFail, Detail: firstLine(err), Fix: runtimeFix(typ)})
 		fix = "fix the runtime first: most components are reached through it"
@@ -96,15 +96,15 @@ func (a *App) Doctor(ctx context.Context) []Check {
 	return append(out, a.componentChecks(ctx, fix)...)
 }
 
-// InstallStd installs every official plugin, the runtimes and importers most jig.yaml files use.
-const InstallStd = "go install github.com/goxang/jig-plugins/cmd/jig-std@latest && jig-std install"
+// InstallStd installs every official plugin, the runtimes and importers most rig.yaml files use.
+const InstallStd = "go install github.com/goxang/rig-plugins/cmd/rig-std@latest && rig-std install"
 
 // PluginChecks are the plugins this project uses that need a credential nobody has given them yet.
 func (a *App) PluginChecks() []Check {
 	var out []Check
 	for _, kind := range a.Spec.NoImporter {
 		out = append(out, Check{Name: "import " + kind, Status: CheckWarn, Detail: "skipped: no installed plugin reads " + kind,
-			Fix: "jig plugin search " + kind + ", then jig plugin add the one that imports it; or all the official ones: " + InstallStd})
+			Fix: "rig plugin search " + kind + ", then rig plugin add the one that imports it; or all the official ones: " + InstallStd})
 	}
 	ms, _ := host.Discover(a.Spec.Dir, a.Spec.Plugins)
 	known := a.KnownSecrets()
@@ -140,7 +140,7 @@ func (a *App) PluginChecks() []Check {
 			continue
 		}
 		out = append(out, Check{Name: "plugin " + m.Name, Status: CheckWarn, Detail: "no " + strings.Join(secrets, " or ") + ": its screens stay empty",
-			Fix: "jig secret set " + secrets[0] + " (kept in your config directory, never in the repository); or jig plugin off " + m.Name})
+			Fix: "rig secret set " + secrets[0] + " (kept in your config directory, never in the repository); or rig plugin off " + m.Name})
 	}
 	return out
 }
@@ -150,9 +150,9 @@ func runtimeFix(typ string) string {
 	case "docker":
 		return "start the Docker daemon (Docker Desktop, or: sudo systemctl start docker)"
 	case "kind":
-		return "start Docker, then create the cluster: jig do runtime create"
+		return "start Docker, then create the cluster: rig do runtime create"
 	case "kubernetes":
-		return "check the cluster is up and your kubeconfig can reach it (kubectl --context <context> get ns); an expired one: jig kubeconfig"
+		return "check the cluster is up and your kubeconfig can reach it (kubectl --context <context> get ns); an expired one: rig kubeconfig"
 	}
 	return ""
 }
@@ -177,7 +177,7 @@ func (a *App) contextCheck(ctx context.Context) Check {
 	c, err := kubectx.Resolve(opt.Context, opt.Server)
 	if err != nil {
 		return Check{Name: "kube context", Status: CheckFail, Detail: firstLine(err),
-			Fix: "jig kubeconfig fetches the cluster's kubeconfig, or rename yours: kubectl config rename-context <yours> " + opt.Context}
+			Fix: "rig kubeconfig fetches the cluster's kubeconfig, or rename yours: kubectl config rename-context <yours> " + opt.Context}
 	}
 	return Check{Name: "kube context", Status: CheckOK, Detail: c}
 }
@@ -214,7 +214,7 @@ func (a *App) portChecks(ctx context.Context) []Check {
 	}
 	if len(busy) > 0 {
 		return []Check{{Name: "ports", Status: CheckWarn, Detail: "taken by something else: " + strings.Join(busy, ", "),
-			Fix: "stop what holds them (ss -ltnp | grep :<port>), or change the port in jig.yaml"}}
+			Fix: "stop what holds them (ss -ltnp | grep :<port>), or change the port in rig.yaml"}}
 	}
 	return []Check{{Name: "ports", Status: CheckOK, Detail: "free for every service not running"}}
 }
@@ -293,7 +293,7 @@ func (a *App) Reach(ctx context.Context, name string) error {
 	case core.Messaging:
 		_, err = c.Queues(ctx)
 	case core.KV:
-		_, _, err = c.Get(ctx, "jig-doctor")
+		_, _, err = c.Get(ctx, "rig-doctor")
 	case core.Tracing:
 		_, err = c.Services(ctx)
 	case core.Metrics:
@@ -320,7 +320,7 @@ func (a *App) diskCheck() Check {
 		return Check{Name: "disk", Status: CheckOK, Detail: "not measured"}
 	}
 	detail := fmt.Sprintf("%d MB free where the project lives", free>>20)
-	fix := "jig purge --days 0 empties logs and drops built binaries; jig purge --dry-run lists what goes"
+	fix := "rig purge --days 0 empties logs and drops built binaries; rig purge --dry-run lists what goes"
 	switch {
 	case free < 512<<20:
 		return Check{Name: "disk", Status: CheckFail, Detail: detail, Fix: fix}

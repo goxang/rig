@@ -68,7 +68,7 @@ func TestFromLive(t *testing.T) {
 	_ = os.WriteFile(f, []byte(twoDocs), 0o644)
 	set, _ := Scan(f)
 	live := `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web","namespace":"ns","uid":"u","resourceVersion":"9",
-"labels":{"app.kubernetes.io/managed-by":"jig"},
+"labels":{"app.kubernetes.io/managed-by":"rig"},
 "annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}"},
 "managedFields":[{"manager":"kubectl","operation":"Apply","fieldsV1":{"f:metadata":{"f:labels":{"f:app.kubernetes.io/managed-by":{}},"f:annotations":{".":{},"f:kubectl.kubernetes.io/last-applied-configuration":{}}},
 "f:spec":{"f:replicas":{},"f:template":{"f:spec":{"f:containers":{"k:{\"name\":\"web\"}":{".":{},"f:name":{},"f:image":{},"f:env":{"k:{\"name\":\"INJECTED\"}":{".":{},"f:name":{},"f:value":{}}},"f:resources":{"f:limits":{"f:cpu":{}}}}}}}}}},

@@ -14,11 +14,11 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/scaffold"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/scaffold"
+	"github.com/goxang/rig/spec"
 )
 
-// initDeep scans every folder, lets the user pick what to keep, and writes it to jig.yaml: a new
+// initDeep scans every folder, lets the user pick what to keep, and writes it to rig.yaml: a new
 // file, or the picks added to the services, tests and manifests of the one there.
 func initDeep(ctx context.Context, dry, all bool) error {
 	start := time.Now()
@@ -29,10 +29,10 @@ func initDeep(ctx context.Context, dry, all bool) error {
 	}
 	fmt.Fprintf(os.Stderr, "%d candidates in %s\n", len(cands), time.Since(start).Round(time.Millisecond))
 	if len(cands) == 0 {
-		fmt.Println("nothing runnable found: jig init writes a starting jig.yaml anyway")
+		fmt.Println("nothing runnable found: rig init writes a starting rig.yaml anyway")
 		return nil
 	}
-	existing, _ := os.ReadFile("jig.yaml")
+	existing, _ := os.ReadFile("rig.yaml")
 	have := haveNames(existing)
 	var fresh []scaffold.Candidate
 	for _, c := range cands {
@@ -41,17 +41,17 @@ func initDeep(ctx context.Context, dry, all bool) error {
 		}
 	}
 	if len(fresh) == 0 {
-		fmt.Println("jig.yaml already has everything found")
+		fmt.Println("rig.yaml already has everything found")
 		return nil
 	}
 	picked := fresh
 	if !all {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("jig init --deep picks on a terminal; --all takes every candidate")
+			return fmt.Errorf("rig init --deep picks on a terminal; --all takes every candidate")
 		}
 		if picked, err = pickCandidates(fresh); err != nil || len(picked) == 0 {
 			if err == nil {
-				fmt.Println("nothing picked, jig.yaml unchanged")
+				fmt.Println("nothing picked, rig.yaml unchanged")
 			}
 			return err
 		}
@@ -69,23 +69,23 @@ func initDeep(ctx context.Context, dry, all bool) error {
 		_, err := os.Stdout.Write(out)
 		return err
 	}
-	if err := os.WriteFile("jig.yaml", out, 0o644); err != nil {
+	if err := os.WriteFile("rig.yaml", out, 0o644); err != nil {
 		return err
 	}
 	verb := "wrote"
 	if existing != nil {
 		verb = "added to"
 	}
-	fmt.Printf("%s %s jig.yaml: %d services, %d test suites, %d imports, %d manifest folders\n", green("✓"), verb, len(p.Services), len(p.Suites), len(p.Imports), len(p.Manifests))
-	fmt.Println("  check ports, health checks and passwords; then: jig up, or jig for the control plane")
+	fmt.Printf("%s %s rig.yaml: %d services, %d test suites, %d imports, %d manifest folders\n", green("✓"), verb, len(p.Services), len(p.Suites), len(p.Imports), len(p.Manifests))
+	fmt.Println("  check ports, health checks and passwords; then: rig up, or rig for the control plane")
 	return nil
 }
 
-// haveNames are the service and suite names jig.yaml already has, its imports' services included.
+// haveNames are the service and suite names rig.yaml already has, its imports' services included.
 func haveNames(raw []byte) map[string]bool {
 	out := map[string]bool{}
 	if raw != nil {
-		if abs, err := filepath.Abs("jig.yaml"); err == nil {
+		if abs, err := filepath.Abs("rig.yaml"); err == nil {
 			if p, _, err := spec.LoadData(raw, abs, "", nil); err == nil {
 				for n := range p.Services {
 					out[n] = true
@@ -109,7 +109,7 @@ func haveNames(raw []byte) map[string]bool {
 	return out
 }
 
-// mergeInto adds the plan's services, suites and manifest folders to jig.yaml as text, at the end
+// mergeInto adds the plan's services, suites and manifest folders to rig.yaml as text, at the end
 // of each block, so the file's comments, anchors and layout stay as they are.
 func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
 	var doc struct {
@@ -118,7 +118,7 @@ func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
 	_ = yaml.Unmarshal(raw, &doc)
 	for _, s := range p.Services {
 		if _, taken := doc.Sections[s.Section]; taken {
-			s.Section = "" // jig.yaml's own section of that name stays as written
+			s.Section = "" // rig.yaml's own section of that name stays as written
 		}
 	}
 	gen, err := p.YAML()
@@ -138,16 +138,16 @@ func mergeInto(raw []byte, p *scaffold.Plan) ([]byte, error) {
 		text = appendToBlock(text, key, body)
 	}
 	if len(p.Manifests) > 0 {
-		text = strings.TrimRight(text, "\n") + "\n# found by jig init --deep: add them to manifests: above\n# manifests: [" + strings.Join(p.Manifests, ", ") + "]\n"
+		text = strings.TrimRight(text, "\n") + "\n# found by rig init --deep: add them to manifests: above\n# manifests: [" + strings.Join(p.Manifests, ", ") + "]\n"
 	}
 	var check yaml.Node
 	if err := yaml.Unmarshal([]byte(text), &check); err != nil {
-		return nil, fmt.Errorf("adding to jig.yaml would break it (%w); run jig init --deep --dry-run and paste by hand", err)
+		return nil, fmt.Errorf("adding to rig.yaml would break it (%w); run rig init --deep --dry-run and paste by hand", err)
 	}
 	return []byte(text), nil
 }
 
-// newImports keeps the lines of the generated imports: block that jig.yaml does not have yet.
+// newImports keeps the lines of the generated imports: block that rig.yaml does not have yet.
 func newImports(gen string, raw []byte) string {
 	var doc struct {
 		Imports []map[string]string `yaml:"imports"`
@@ -207,12 +207,12 @@ func appendToBlock(text, key, body string) string {
 			for end > at+1 && (strings.TrimSpace(lines[end-1]) == "" || strings.HasPrefix(lines[end-1], "#")) {
 				end--
 			}
-			return strings.Join(lines[:end], "") + "  # found by jig init --deep\n" + body + strings.Join(lines[end:], "")
+			return strings.Join(lines[:end], "") + "  # found by rig init --deep\n" + body + strings.Join(lines[end:], "")
 		}
 	}
 	if at >= 0 {
 		text = strings.Join(lines, "")
-		return strings.TrimRight(text, "\n") + "\n  # found by jig init --deep\n" + body
+		return strings.TrimRight(text, "\n") + "\n  # found by rig init --deep\n" + body
 	}
 	return strings.TrimRight(text, "\n") + "\n" + key + ":\n" + body
 }
@@ -340,7 +340,7 @@ func (p *candPicker) render() string {
 		}
 	}
 	var b bytes.Buffer
-	b.WriteString(pAccent.Render(" jig init --deep") + pDim.Render(fmt.Sprintf("  %d found · %d picked · space marks · a all · / filter · enter writes jig.yaml · esc quits", len(p.all), n)) + "\n")
+	b.WriteString(pAccent.Render(" rig init --deep") + pDim.Render(fmt.Sprintf("  %d found · %d picked · space marks · a all · / filter · enter writes rig.yaml · esc quits", len(p.all), n)) + "\n")
 	if p.typing || p.filter != "" {
 		b.WriteString(" filter: " + p.filter)
 		if p.typing {

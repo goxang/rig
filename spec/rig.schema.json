@@ -1,5 +1,5 @@
 {
-  "$id": "https://raw.githubusercontent.com/goxang/jig/main/spec/jig.schema.json",
+  "$id": "https://raw.githubusercontent.com/goxang/rig/main/spec/rig.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -28,7 +28,7 @@
             },
             "type": "array"
           },
-          "description": "The questions tab offers in an empty chat, by screen (services, logs, ...) or \"all\"; they come before jig's own.",
+          "description": "The questions tab offers in an empty chat, by screen (services, logs, ...) or \"all\"; they come before rig's own.",
           "type": "object"
         },
         "instructions": {
@@ -212,19 +212,6 @@
       },
       "type": "object"
     },
-    "Compat": {
-      "additionalProperties": false,
-      "properties": {
-        "rig_env": {
-          "description": "Also exports RIG_ENV, RIG_FILE, RIG_YES, RIG_TASK and RIG_ARGS to task steps.",
-          "type": [
-            "boolean",
-            "string"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "Component": {
       "oneOf": [
         {
@@ -379,7 +366,7 @@
           "type": "object"
         },
         "description": {
-          "description": "shown by jig env and the TUI",
+          "description": "shown by rig env and the TUI",
           "type": [
             "string",
             "number",
@@ -805,7 +792,7 @@
           ]
         },
         "version": {
-          "description": "The version or range to use, as jig plugin add writes it.",
+          "description": "The version or range to use, as rig plugin add writes it.",
           "type": [
             "string",
             "number",
@@ -953,7 +940,7 @@
           "type": "array"
         },
         "schedule": {
-          "description": "Measures and publishes it on a cron schedule (5 fields) while `jig report watch` runs, over the time since its last run.",
+          "description": "Measures and publishes it on a cron schedule (5 fields) while `rig report watch` runs, over the time since its last run.",
           "type": [
             "string",
             "number",
@@ -1318,7 +1305,7 @@
           "description": "templates this service starts from, in order"
         },
         "groups": {
-          "description": "names to address several services at once: jig up core",
+          "description": "names to address several services at once: rig up core",
           "items": {
             "type": [
               "string",
@@ -1345,7 +1332,7 @@
           ]
         },
         "manual": {
-          "description": "started only when named or through a group or section, never by all or its role, so jig infra up skips it too (e.g. frontends, an optional Prometheus)",
+          "description": "started only when named or through a group or section, never by all or its role, so rig infra up skips it too (e.g. frontends, an optional Prometheus)",
           "type": [
             "boolean",
             "string"
@@ -1385,7 +1372,7 @@
           ]
         },
         "role": {
-          "description": "app (default), infra, or load (left out of jig up)",
+          "description": "app (default), infra, or load (left out of rig up)",
           "type": [
             "string",
             "number",
@@ -1413,7 +1400,7 @@
               "$ref": "#/definitions/Watch"
             }
           ],
-          "description": "{paths, ignore}: what jig watch (ctrl+w in the UI) rebuilds and restarts the service on. Left out: the project packages a build.go main imports, else build.context, else run.dir; .gitignored files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running"
+          "description": "{paths, ignore}: what rig watch (ctrl+w in the UI) rebuilds and restarts the service on. Left out: the project packages a build.go main imports, else build.context, else run.dir; .gitignored files, tests and docs never count. Changes settle 0.5s before the rebuild; a failed build keeps the old one running"
         }
       },
       "type": "object"
@@ -1564,7 +1551,7 @@
           ]
         },
         "command": {
-          "description": "Runs the suite through sh instead of go test: pytest, jest, mvn test, cargo test, ... Writing JUnit XML to $JIG_JUNIT gives the screen one row per test; without it the suite passes or fails as a whole by its exit status.",
+          "description": "Runs the suite through sh instead of go test: pytest, jest, mvn test, cargo test, ... Writing JUnit XML to $RIG_JUNIT gives the screen one row per test; without it the suite passes or fails as a whole by its exit status.",
           "type": [
             "string",
             "number",
@@ -1824,19 +1811,11 @@
       "description": "{deny: [globs], instructions: text, ideas: {screen: [questions]}}: project paths the assistant never reads (on top of .env, keys and secrets/), notes it gets with every turn, and the questions tab offers in an empty chat per screen (all for every screen)"
     },
     "alerts": {
-      "description": "thresholds shown in the TUI header and by jig alerts",
+      "description": "thresholds shown in the TUI header and by rig alerts",
       "items": {
         "$ref": "#/definitions/Alert"
       },
       "type": "array"
-    },
-    "compat": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Compat"
-        }
-      ],
-      "description": "{rig_env: true}: task steps also get RIG_ENV, RIG_FILE, RIG_YES, RIG_TASK and RIG_ARGS, for scripts written for rig; jig migrate sets it"
     },
     "components": {
       "additionalProperties": {
@@ -1853,7 +1832,7 @@
       "type": "object"
     },
     "default": {
-      "description": "environment used when neither -e nor $JIG_ENV is given",
+      "description": "environment used when neither -e nor $RIG_ENV is given",
       "type": [
         "string",
         "number",
@@ -1872,7 +1851,7 @@
       "type": "object"
     },
     "help": {
-      "description": "Shown by `jig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `jig -h` shows only its own generic help.",
+      "description": "Shown by `rig -h` under the project name: this project's own quick-start for its main CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few example command lines; left out, `rig -h` shows only its own generic help.",
       "type": [
         "string",
         "number",
@@ -1880,7 +1859,7 @@
       ]
     },
     "imports": {
-      "description": "services from the files that already define them, read on every load so they stay the only definition: - compose: deploy/compose.yml (image, build, command, ports, env, env_file, depends_on and project volumes, under the compose names; ${VARS} from the environment, then the compose file's .env), - kubernetes: deploy/k8s (a service per Deployment, StatefulSet and DaemonSet, named after it, with its image and container ports; a Kubernetes runtime without manifests: deploys from these folders), - godev: .godev.yaml, - rig: rig.yaml. Each one is a plugin importer (official ones: jig-std install; any plugin can add more); fragments are cached in .jig/cache/import by the files' sha256. A service jig.yaml also defines is the imported one with jig.yaml's keys merged over it (build: null drops an imported key), so jig.yaml holds only what those files have no word for: a Go main to build, health, groups. A workload a jig.yaml service already claims through k8s.workload is not imported again under its own name",
+      "description": "services from the files that already define them, read on every load so they stay the only definition: - compose: deploy/compose.yml (image, build, command, ports, env, env_file, depends_on and project volumes, under the compose names; ${VARS} from the environment, then the compose file's .env), - kubernetes: deploy/k8s (a service per Deployment, StatefulSet and DaemonSet, named after it, with its image and container ports; a Kubernetes runtime without manifests: deploys from these folders), - godev: .godev.yaml, - rig: rig.yaml. Each one is a plugin importer (official ones: rig-std install; any plugin can add more); fragments are cached in .rig/cache/import by the files' sha256. A service rig.yaml also defines is the imported one with rig.yaml's keys merged over it (build: null drops an imported key), so rig.yaml holds only what those files have no word for: a Go main to build, health, groups. A workload a rig.yaml service already claims through k8s.workload is not imported again under its own name",
       "items": {
         "additionalProperties": {
           "type": [
@@ -1894,7 +1873,7 @@
       "type": "array"
     },
     "include": {
-      "description": "globs of YAML files merged under jig.yaml, later files winning: include: [jig.d/*.yaml]",
+      "description": "globs of YAML files merged under rig.yaml, later files winning: include: [rig.d/*.yaml]",
       "items": {
         "type": [
           "string",
@@ -1905,7 +1884,7 @@
       "type": "array"
     },
     "keys": {
-      "description": "the key preset: jig (the default) or rig (rig's keys). A personal choice, so usually in .jig/local.yaml or ~/.config/jig/config.yaml",
+      "description": "the key preset: rig (the default). A personal choice, so usually in .rig/local.yaml or ~/.config/rig/config.yaml",
       "type": [
         "string",
         "number",
@@ -1916,11 +1895,11 @@
       "additionalProperties": {
         "$ref": "#/definitions/LoadRun"
       },
-      "description": "named load runs: a generator, a profile, a rate, a duration and assertions for jig load run",
+      "description": "named load runs: a generator, a profile, a rate, a duration and assertions for rig load run",
       "type": "object"
     },
     "manifests": {
-      "description": "folders jig manifests and the Manifests screen read (default: the runtime's manifests, else the kubernetes imports). The screen lists only the objects a service deploys; u shows the rest",
+      "description": "folders rig manifests and the Manifests screen read (default: the runtime's manifests, else the kubernetes imports). The screen lists only the objects a service deploys; u shows the rest",
       "items": {
         "type": [
           "string",
@@ -1942,7 +1921,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/Plugin"
       },
-      "description": "name: {path, version, off, ...config}: a plugin from path instead of the installed store, a pinned version, off: true to disable it; every other key is the plugin's own config, checked against its schema. Plugins are found in the installed store, ~/.config/jig/plugins/* and, once the workspace is trusted, .jig/plugins/*; the tasks, queries and other jig.yaml keys a plugin carries sit below jig.yaml",
+      "description": "name: {path, version, off, ...config}: a plugin from path instead of the installed store, a pinned version, off: true to disable it; every other key is the plugin's own config, checked against its schema. Plugins are found in the installed store, ~/.config/rig/plugins/* and, once the workspace is trusted, .rig/plugins/*; the tasks, queries and other rig.yaml keys a plugin carries sit below rig.yaml",
       "type": "object"
     },
     "policy": {
@@ -1972,7 +1951,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/Report"
       },
-      "description": "metrics, traces and queries a run is measured by, with tests, load results, compares, templates and publishing: jig report start and stop, jig report, a suite's report:, the Load screen's W",
+      "description": "metrics, traces and queries a run is measured by, with tests, load results, compares, templates and publishing: rig report start and stop, rig report, a suite's report:, the Load screen's W",
       "type": "object"
     },
     "secrets": {
@@ -1999,7 +1978,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/Task"
       },
-      "description": "name: [shell step, ...] or name: {help, steps}, run in order by jig task \u003cname\u003e",
+      "description": "name: [shell step, ...] or name: {help, steps}, run in order by rig task \u003cname\u003e",
       "type": "object"
     },
     "templates": {
@@ -2011,7 +1990,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/TestSuite"
       },
-      "description": "test suites for jig test and the Tests screen",
+      "description": "test suites for rig test and the Tests screen",
       "type": "object"
     },
     "ui": {
@@ -2047,6 +2026,6 @@
       "type": "object"
     }
   },
-  "title": "jig.yaml",
+  "title": "rig.yaml",
   "type": "object"
 }

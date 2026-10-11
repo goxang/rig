@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 // Fetcher shares fetches: one request per distinct source and args however many widgets bind to

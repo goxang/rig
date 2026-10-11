@@ -11,12 +11,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/internal/kubectx"
-	"github.com/goxang/jig/internal/sh"
+	"github.com/goxang/rig/internal/kubectx"
+	"github.com/goxang/rig/internal/sh"
 )
 
 // NamespaceOverride, when set, replaces the namespace of a Kubernetes environment for this run
-// (jig -n); otherwise the one `jig ns` picked, kept in .jig/<env>/namespace, does.
+// (rig -n); otherwise the one `rig ns` picked, kept in .rig/<env>/namespace, does.
 var NamespaceOverride string
 
 func (a *App) namespaceFile() string { return filepath.Join(a.StateDir(), "namespace") }
@@ -73,7 +73,7 @@ func (a *App) Namespace() string {
 	return o.Namespace
 }
 
-// UseNamespace makes ns this environment's namespace from now on; "" goes back to jig.yaml's.
+// UseNamespace makes ns this environment's namespace from now on; "" goes back to rig.yaml's.
 func (a *App) UseNamespace(ns string) error {
 	if !a.onKubernetes() {
 		return fmt.Errorf("%s is not on Kubernetes", a.envName())
@@ -103,7 +103,7 @@ func (a *App) kubeContext() string {
 	_ = a.Env.Runtime.Decode(&o)
 	if o.Context == "" && a.Env.Runtime.Type == "kind" {
 		if o.Cluster == "" {
-			o.Cluster = "jig"
+			o.Cluster = "rig"
 		}
 		return "kind-" + o.Cluster
 	}

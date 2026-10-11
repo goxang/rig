@@ -10,18 +10,18 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goxang/jig/kernel/config"
+	"github.com/goxang/rig/kernel/config"
 
 	"gopkg.in/yaml.v3"
 )
 
-var FileNames = []string{"jig.yaml", "jig.yml", ".jig.yaml", ".jig.yml"}
+var FileNames = []string{"rig.yaml", "rig.yml", ".rig.yaml", ".rig.yml"}
 
-var ErrNotFound = errors.New("no jig.yaml found in this directory or any parent (run `jig init`)")
+var ErrNotFound = errors.New("no rig.yaml found in this directory or any parent (run `rig init`)")
 
-// Find walks up from dir to the first project file; $JIG_FILE wins when set.
+// Find walks up from dir to the first project file; $RIG_FILE wins when set.
 func Find(dir string) (string, error) {
-	if f := os.Getenv("JIG_FILE"); f != "" {
+	if f := os.Getenv("RIG_FILE"); f != "" {
 		return filepath.Abs(f)
 	}
 	dir, err := filepath.Abs(dir)
@@ -45,10 +45,10 @@ func Find(dir string) (string, error) {
 
 // Load reads the project and resolves it for one environment: variables expanded,
 // the environment's service patches merged, its components layered over the shared ones.
-// env "" picks $JIG_ENV, then the project's default, then the only environment.
+// env "" picks $RIG_ENV, then the project's default, then the only environment.
 func Load(file, env string) (*Project, *Environment, error) { return LoadWith(file, env, nil) }
 
-// LoadWith is Load with variable overrides (`jig vars set`): they win over jig.yaml's vars, not over the OS environment.
+// LoadWith is Load with variable overrides (`rig vars set`): they win over rig.yaml's vars, not over the OS environment.
 func LoadWith(file, env string, overrides map[string]string) (*Project, *Environment, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
@@ -57,11 +57,11 @@ func LoadWith(file, env string, overrides map[string]string) (*Project, *Environ
 	return LoadData(raw, file, env, overrides)
 }
 
-// PluginDefaults returns the jig.yaml fragments of the project's plugins, lowest layer first; the
+// PluginDefaults returns the rig.yaml fragments of the project's plugins, lowest layer first; the
 // plugin host sets it.
 var PluginDefaults func(dir string, plugins map[string]*Plugin) []*config.Doc
 
-// LoadData is LoadWith on a jig.yaml already read (or never written: an inferred one); file is
+// LoadData is LoadWith on a rig.yaml already read (or never written: an inferred one); file is
 // where it stands, for its directory and messages.
 func LoadData(raw []byte, file, env string, overrides map[string]string) (*Project, *Environment, error) {
 	dir := filepath.Dir(file)
@@ -309,8 +309,8 @@ func pickEnv(env, def string, have []string) string {
 	switch {
 	case env != "":
 		return env
-	case os.Getenv("JIG_ENV") != "":
-		return os.Getenv("JIG_ENV")
+	case os.Getenv("RIG_ENV") != "":
+		return os.Getenv("RIG_ENV")
 	case def != "":
 		return def
 	case len(have) == 1:
@@ -387,7 +387,7 @@ func expandNode(n *yaml.Node, lookup func(string) (string, bool), unset func(str
 	}
 }
 
-// Expanded is a copy of n with ${...} expanded as in jig.yaml, for YAML from plugins.
+// Expanded is a copy of n with ${...} expanded as in rig.yaml, for YAML from plugins.
 func (p *Project) Expanded(n *yaml.Node) *yaml.Node {
 	var c yaml.Node
 	if b, err := yaml.Marshal(n); err != nil || yaml.Unmarshal(b, &c) != nil {

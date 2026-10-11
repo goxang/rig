@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Installer adds, upgrades and restores a project's plugins, pinned in jig.lock.
+// Installer adds, upgrades and restores a project's plugins, pinned in rig.lock.
 type Installer struct {
 	Dir      string
 	Registry *Registry
@@ -141,7 +141,7 @@ func describePerms(p Permissions) string {
 	return strings.Join(out, "; ")
 }
 
-// Add installs plugins from their sources and pins them in jig.lock, with their packs' plugins.
+// Add installs plugins from their sources and pins them in rig.lock, with their packs' plugins.
 func (in *Installer) Add(ctx context.Context, srcs []string) error {
 	lock, err := ReadLock(in.Dir)
 	if err != nil {
@@ -198,7 +198,7 @@ func (in *Installer) resolve(ctx context.Context, lock *Lock, roots map[string]s
 	for n, v := range roots {
 		e := ix.Plugins[n]
 		if e == nil {
-			return fmt.Errorf("plugin %s is not in the index (jig plugin search %s)", n, n)
+			return fmt.Errorf("plugin %s is not in the index (rig plugin search %s)", n, n)
 		}
 		switch {
 		case v != "":
@@ -260,8 +260,8 @@ func (in *Installer) installRegistry(ctx context.Context, ix *Index, name, versi
 		return nil, nil, fmt.Errorf("plugin %s %s is not in the index", name, version)
 	}
 	vv := e.Versions[version]
-	if !HostSupports(vv.Jig) {
-		return nil, nil, fmt.Errorf("plugin %s %s needs jig %s; this is %s (jig upgrade)", name, version, vv.Jig, Version)
+	if !HostSupports(vv.Rig) {
+		return nil, nil, fmt.Errorf("plugin %s %s needs rig %s; this is %s (rig upgrade)", name, version, vv.Rig, Version)
 	}
 	plat := Platform()
 	art, ok := vv.Artifacts[plat]
@@ -285,11 +285,11 @@ func (in *Installer) installRegistry(ctx context.Context, ix *Index, name, versi
 		}
 	}
 	if locked != nil && locked.SHA256[plat] != "" && locked.SHA256[plat] != art.SHA256 {
-		return nil, nil, fmt.Errorf("plugin %s %s: the index's checksum differs from jig.lock; refusing", name, version)
+		return nil, nil, fmt.Errorf("plugin %s %s: the index's checksum differs from rig.lock; refusing", name, version)
 	}
 	for f, fa := range art.Files {
 		if locked != nil && locked.Files[plat][f] != "" && locked.Files[plat][f] != fa.SHA256 {
-			return nil, nil, fmt.Errorf("plugin %s %s: the index's checksum of %s differs from jig.lock; refusing", name, version, f)
+			return nil, nil, fmt.Errorf("plugin %s %s: the index's checksum of %s differs from rig.lock; refusing", name, version, f)
 		}
 	}
 	data, err := in.artifact(ctx, name, version, plat, in.Registry.artifactURL(name, version, art))
@@ -333,11 +333,11 @@ var blobMu sync.Mutex
 func blobPath(sha string) string { return filepath.Join(StoreDir(), ".blobs", sha) }
 
 func vendorBlob(dir, sha string) string {
-	return filepath.Join(dir, ".jig", "vendor", "blobs", sha+".gz")
+	return filepath.Join(dir, ".rig", "vendor", "blobs", sha+".gz")
 }
 
 // sharedFile puts a shared file at path f in the plugin at dir: a hard link to the store's one copy,
-// downloaded (or read from .jig/vendor), checked and unpacked the first time.
+// downloaded (or read from .rig/vendor), checked and unpacked the first time.
 func (in *Installer) sharedFile(ctx context.Context, key, f string, a Artifact, dir string) error {
 	if !sha256Hex.MatchString(a.SHA256) {
 		return fmt.Errorf("bad sha256 %q", a.SHA256)
@@ -425,7 +425,7 @@ func (in *Installer) artifact(ctx context.Context, name, version, plat, url stri
 }
 
 func vendorFile(dir, name, version, plat string) string {
-	return filepath.Join(dir, ".jig", "vendor", fmt.Sprintf("%s-%s-%s.tar.gz", name, version, strings.ReplaceAll(plat, "/", "-")))
+	return filepath.Join(dir, ".rig", "vendor", fmt.Sprintf("%s-%s-%s.tar.gz", name, version, strings.ReplaceAll(plat, "/", "-")))
 }
 
 func checkSum(data []byte, want string) error {
@@ -705,9 +705,9 @@ func (in *Installer) build(ctx context.Context, m *Manifest) error {
 }
 
 // ErrUntrusted stops a run nobody can answer the workspace trust question for.
-var ErrUntrusted = errors.New("this project's plugins need workspace trust: run jig trust (or pass --yes, or set JIG_TRUST=project)")
+var ErrUntrusted = errors.New("this project's plugins need workspace trust: run rig trust (or pass --yes, or set RIG_TRUST=project)")
 
-// Ensure installs what jig.lock pins and this machine lacks, after workspace trust; changed says the
+// Ensure installs what rig.lock pins and this machine lacks, after workspace trust; changed says the
 // project's plugins differ from before, so a loaded project is stale.
 func (in *Installer) Ensure(ctx context.Context) (changed bool, err error) {
 	lock, err := ReadLock(in.Dir)
@@ -721,7 +721,7 @@ func (in *Installer) Ensure(ctx context.Context) (changed bool, err error) {
 			missing = append(missing, n)
 		}
 	}
-	local := exists(filepath.Join(in.Dir, ".jig", "plugins"))
+	local := exists(filepath.Join(in.Dir, ".rig", "plugins"))
 	if Trusted(in.Dir) && len(missing) == 0 || len(lock.Plugins) == 0 && !local {
 		return false, nil
 	}
@@ -748,7 +748,7 @@ func (in *Installer) Ensure(ctx context.Context) (changed bool, err error) {
 				return err
 			}
 			if m.Permissions.Hash() != l.Permissions {
-				return fmt.Errorf("plugin %s %s asks for other permissions than jig.lock grants; jig plugin up %s to review", n, l.Version, n)
+				return fmt.Errorf("plugin %s %s asks for other permissions than rig.lock grants; rig plugin up %s to review", n, l.Version, n)
 			}
 			in.say("  installed %s %s", n, l.Version)
 			return nil
@@ -797,7 +797,7 @@ func (in *Installer) restore(ctx context.Context, name string, l *Locked, index 
 		m, _, err := in.gitInstall(ctx, src, l.Commit)
 		return m, err
 	}
-	return nil, fmt.Errorf("plugin %s: unknown source %q in jig.lock", name, l.Source)
+	return nil, fmt.Errorf("plugin %s: unknown source %q in rig.lock", name, l.Source)
 }
 
 // trust shows what the workspace would run and asks once; nobody to ask fails with the command to run.
@@ -812,7 +812,7 @@ func (in *Installer) trust(ctx context.Context, lock *Lock, missing []string) (b
 	})
 	for _, n := range lock.Names() {
 		l := lock.Plugins[n]
-		perms := "(permissions in jig.lock)"
+		perms := "(permissions in rig.lock)"
 		dir := storePath(n, l.Version)
 		if src := parseSource(l.Source); src.kind == "path" && filepath.IsAbs(src.path) {
 			dir = src.path
@@ -826,17 +826,17 @@ func (in *Installer) trust(ctx context.Context, lock *Lock, missing []string) (b
 		}
 		in.say("  %s %s from %s: %s", n, l.Version, l.Source, perms)
 	}
-	ents, _ := os.ReadDir(filepath.Join(in.Dir, ".jig", "plugins"))
+	ents, _ := os.ReadDir(filepath.Join(in.Dir, ".rig", "plugins"))
 	for _, e := range ents {
-		if m, err := LoadManifest(filepath.Join(in.Dir, ".jig", "plugins", e.Name())); err == nil {
-			in.say("  %s (in .jig/plugins): %s", m.Name, describePerms(m.Permissions))
+		if m, err := LoadManifest(filepath.Join(in.Dir, ".rig", "plugins", e.Name())); err == nil {
+			in.say("  %s (in .rig/plugins): %s", m.Name, describePerms(m.Permissions))
 		}
 	}
 	switch {
 	case in.Yes:
 	case in.Ask != nil:
 		if !in.Ask("Trust this workspace" + map[bool]string{true: " and install them", false: ""}[len(missing) > 0] + "?") {
-			in.say("Plugins stay off; jig trust turns them on.")
+			in.say("Plugins stay off; rig trust turns them on.")
 			return false, nil
 		}
 	default:
@@ -856,7 +856,7 @@ func (in *Installer) Remove(names []string) error {
 			n = "pack-" + p
 		}
 		if lock.Plugins[n] == nil {
-			return fmt.Errorf("plugin %s is not in jig.lock", n)
+			return fmt.Errorf("plugin %s is not in rig.lock", n)
 		}
 		delete(lock.Plugins, n)
 		in.say("- %s", n)
@@ -884,7 +884,7 @@ func (in *Installer) Up(ctx context.Context, names []string, major bool) error {
 	for _, n := range names {
 		l := lock.Plugins[n]
 		if l == nil {
-			return fmt.Errorf("plugin %s is not in jig.lock", n)
+			return fmt.Errorf("plugin %s is not in rig.lock", n)
 		}
 		switch src := parseSource(l.Source); src.kind {
 		case "registry":
@@ -909,7 +909,7 @@ func (in *Installer) Up(ctx context.Context, names []string, major bool) error {
 	return lock.Write(in.Dir)
 }
 
-// Vendor copies the locked plugins into .jig/vendor so an offline machine installs from the repo.
+// Vendor copies the locked plugins into .rig/vendor so an offline machine installs from the repo.
 func (in *Installer) Vendor() ([]string, error) {
 	lock, err := ReadLock(in.Dir)
 	if err != nil {
@@ -928,7 +928,7 @@ func (in *Installer) Vendor() ([]string, error) {
 		data, err := os.ReadFile(storePath(n, l.Version) + ".tar.gz")
 		if err != nil || l.Source != "registry" {
 			if data, err = tarDir(storePath(n, l.Version)); err != nil {
-				return out, fmt.Errorf("vendor %s: %w (jig plugin up first?)", n, err)
+				return out, fmt.Errorf("vendor %s: %w (rig plugin up first?)", n, err)
 			}
 			plat = "any"
 		}
@@ -943,7 +943,7 @@ func (in *Installer) Vendor() ([]string, error) {
 		for _, sha := range l.Files[plat] {
 			b, err := os.ReadFile(blobPath(sha) + ".gz")
 			if err != nil {
-				return out, fmt.Errorf("vendor %s: %w (jig plugin up first?)", n, err)
+				return out, fmt.Errorf("vendor %s: %w (rig plugin up first?)", n, err)
 			}
 			vf := vendorBlob(in.Dir, sha)
 			if err := os.MkdirAll(filepath.Dir(vf), 0o755); err != nil {

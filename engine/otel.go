@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 // otel is the project's otel: with the environment's on top, nil when neither has one.

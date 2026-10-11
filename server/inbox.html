@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jig inbox</title>
+<title>rig inbox</title>
 <style>
 :root { --bg:#fff; --fg:#1d1d1f; --dim:#6e6e73; --line:#e3e3e8; --ok:#1a7f37; --bad:#c62828; }
 @media (prefers-color-scheme: dark) { :root { --bg:#16161a; --fg:#e8e8ed; --dim:#9a9aa3; --line:#2c2c33; --ok:#4ac26b; --bad:#ff6b6b; } }
@@ -14,7 +14,7 @@ pre { white-space:pre-wrap; margin:0; font-size:13px; } .ok { color:var(--ok); }
 </style>
 </head>
 <body>
-<h1>jig inbox <span id="who" class="dim"></span></h1>
+<h1>rig inbox <span id="who" class="dim"></span></h1>
 <form id="login" hidden>
   <input name="user" placeholder="user" autocomplete="username" required>
   <input name="password" type="password" placeholder="password" autocomplete="current-password" required>
@@ -28,9 +28,9 @@ pre { white-space:pre-wrap; margin:0; font-size:13px; } .ok { color:var(--ok); }
 </div>
 <script>
 const $ = s => document.querySelector(s);
-let token = sessionStorage.getItem('jig-token') || '';
+let token = sessionStorage.getItem('rig-token') || '';
 async function call(path, body, env) {
-  const r = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-Jig-Env': env || ''}, body: body === undefined ? undefined : JSON.stringify(body)});
+  const r = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'X-Rig-Env': env || ''}, body: body === undefined ? undefined : JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error((j.error && j.error.message) || r.statusText); e.status = r.status; e.hint = j.error && j.error.data && j.error.data.hint; throw e; }
   return j;
@@ -44,7 +44,7 @@ async function show() {
     $('#items').innerHTML = items.map(i => `<tr><td>${text(i.id)}</td><td>${text(i.subject.kind + ':' + i.subject.name)}</td><td>${text(i.action)}<pre class="dim">${text(JSON.stringify(i.args || {}))}</pre></td><td>${text(i.why || '')}<pre>${text((i.plan && i.plan.message) || '')}</pre></td><td><button data-id="${text(i.id)}" data-ok="1">Approve</button><button data-id="${text(i.id)}">Reject</button></td></tr>`).join('') || '<tr><td colspan="5" class="dim">nothing waits for approval</td></tr>';
     $('#login').hidden = true; $('#main').hidden = false;
   } catch (e) {
-    if (e.status === 401) { token = ''; sessionStorage.removeItem('jig-token'); $('#login').hidden = false; $('#main').hidden = true; } else $('#msg').innerHTML = `<span class="bad">${text(e.message)}</span>`;
+    if (e.status === 401) { token = ''; sessionStorage.removeItem('rig-token'); $('#login').hidden = false; $('#main').hidden = true; } else $('#msg').innerHTML = `<span class="bad">${text(e.message)}</span>`;
   }
 }
 async function decide(id, approve) {
@@ -64,15 +64,15 @@ async function decide(id, approve) {
 $('#login').onsubmit = async ev => {
   ev.preventDefault();
   const f = new FormData(ev.target);
-  try { token = (await call('/v1/login', Object.fromEntries(f))).token; sessionStorage.setItem('jig-token', token); init(); }
+  try { token = (await call('/v1/login', Object.fromEntries(f))).token; sessionStorage.setItem('rig-token', token); init(); }
   catch (e) { alert(e.message); }
 };
 $('#items').onclick = ev => { const b = ev.target.closest('button'); if (b) decide(b.dataset.id, !!b.dataset.ok); };
 $('#refresh').onclick = show; $('#env').onchange = show;
-$('#out').onclick = async () => { try { await call('/v1/logout', {}); } catch {} token = ''; sessionStorage.removeItem('jig-token'); show(); };
+$('#out').onclick = async () => { try { await call('/v1/logout', {}); } catch {} token = ''; sessionStorage.removeItem('rig-token'); show(); };
 async function init() {
   const info = await (await fetch('/v1/info')).json();
-  document.title = 'jig inbox · ' + info.project;
+  document.title = 'rig inbox · ' + info.project;
   $('#env').innerHTML = (info.envs || []).map(e => `<option ${e === info.env ? 'selected' : ''}>${text(e)}</option>`).join('');
   show();
 }

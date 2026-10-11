@@ -1,6 +1,6 @@
 ---
 name: {%.Name%}
-description: Use the {%.Name%} jig plugin. Say when an agent should reach for it.
+description: Use the {%.Name%} rig plugin. Say when an agent should reach for it.
 ---
 
 # {%.Name%}

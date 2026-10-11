@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/protocol"
 )
 
 func openLocal(t *testing.T, env string) *Local {
 	t.Helper()
 	dir := t.TempDir()
-	file := filepath.Join(dir, "jig.yaml")
+	file := filepath.Join(dir, "rig.yaml")
 	os.WriteFile(file, []byte(`project: l
 default: dev
 environments:
@@ -92,8 +92,8 @@ func TestLocalPlugins(t *testing.T) {
 		t.Setenv(k, t.TempDir())
 	}
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".jig/plugins/demo"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".jig/plugins/demo/jig-plugin.yaml"), []byte(`name: demo
+	os.MkdirAll(filepath.Join(dir, ".rig/plugins/demo"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".rig/plugins/demo/rig-plugin.yaml"), []byte(`name: demo
 version: 0.1.0
 tasks:
   plug: [echo from-plugin]
@@ -103,7 +103,7 @@ sources:
 actions:
   poke: { run: "echo poked", effect: write }
 `), 0o644)
-	file := filepath.Join(dir, "jig.yaml")
+	file := filepath.Join(dir, "rig.yaml")
 	os.WriteFile(file, []byte("project: p\ndefault: dev\nenvironments: { dev: { runtime: fake } }\ntasks: { hi: [echo mine] }\n"), 0o644)
 
 	a, err := Open(file, "dev")
@@ -115,7 +115,7 @@ actions:
 	}
 	a.Close()
 
-	t.Setenv("JIG_TRUST", "project")
+	t.Setenv("RIG_TRUST", "project")
 	a, err = Open(file, "dev")
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ actions:
 	}
 	j, _, err := l.Run(ctx, "task.hi", nil, api.RunOpts{})
 	if err != nil || !strings.Contains(strings.Join(j.Output(), "\n"), "mine") {
-		t.Fatalf("jig.yaml should win over a plugin: %v %v", err, j.Output())
+		t.Fatalf("rig.yaml should win over a plugin: %v %v", err, j.Output())
 	}
 	f, err := l.Query(ctx, "demo.nums", nil)
 	if err != nil || len(f.Columns) != 1 || len(f.Columns[0]) != 2 {

@@ -15,7 +15,7 @@ import (
 )
 
 // The Python and TypeScript SDKs are copied into each plugin, so a new plugin needs no package registry.
-//go:generate sh -c "rm -rf plugin/python/jig plugin/ts/jig && mkdir -p plugin/python/jig plugin/ts/jig && cp ../sdk/python/jig/__init__.py ../sdk/python/jig/protocol.py plugin/python/jig/ && cp ../sdk/typescript/index.js ../sdk/typescript/index.d.ts ../sdk/typescript/protocol.js ../sdk/typescript/protocol.d.ts plugin/ts/jig/"
+//go:generate sh -c "rm -rf plugin/python/rig plugin/ts/rig && mkdir -p plugin/python/rig plugin/ts/rig && cp ../sdk/python/rig/__init__.py ../sdk/python/rig/protocol.py plugin/python/rig/ && cp ../sdk/typescript/index.js ../sdk/typescript/index.d.ts ../sdk/typescript/protocol.js ../sdk/typescript/protocol.d.ts plugin/ts/rig/"
 
 //go:embed all:plugin
 var pluginFS embed.FS
@@ -44,13 +44,13 @@ func NewPlugin(dir, name, lang string) ([]string, error) {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			// .tmpl keeps go.mod and main.go out of jig's own build
+			// .tmpl keeps go.mod and main.go out of rig's own build
 			rel := strings.TrimSuffix(strings.ReplaceAll(strings.TrimPrefix(p, root+"/"), "NAME", name), ".tmpl")
 			b, err := pluginFS.ReadFile(p)
 			if err != nil {
 				return err
 			}
-			if !strings.HasPrefix(rel, "jig/") {
+			if !strings.HasPrefix(rel, "rig/") {
 				t, err := template.New(rel).Delims("{%", "%}").Parse(string(b))
 				if err != nil {
 					return err

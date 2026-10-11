@@ -19,11 +19,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
 )
 
 // tokenColor is a theme token: the only colours views and plugins name.
@@ -70,7 +70,7 @@ func (t *viewTab) leaf(m *model, wn *wnode, x, y, w, h int, focused bool) string
 			fb := &wnode{n: *n.Fallback, frame: f, err: wn.err, id: wn.id}
 			return t.leaf(m, fb, x, y, w, h, focused)
 		}
-		return sDim.Render("no widget " + n.Widget + " in this jig")
+		return sDim.Render("no widget " + n.Widget + " in this rig")
 	}
 	switch view.Kind(n) {
 	case "table":

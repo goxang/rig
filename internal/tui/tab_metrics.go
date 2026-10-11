@@ -20,10 +20,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/spec"
 )
 
 var (
@@ -93,7 +93,7 @@ type metricsTab struct {
 	varErr    string
 	pending   string // a service to select once the dashboard's variables are known
 	collapsed map[string]bool
-	// only, per dashboard, is the panel titles jig_ui narrowed it to; + shows them all again
+	// only, per dashboard, is the panel titles rig_ui narrowed it to; + shows them all again
 	only     map[string]map[string]bool
 	series   map[string]*seriesState
 	stack    map[string]bool
@@ -1228,7 +1228,7 @@ func (t *metricsTab) view(m *model, w, h int) string {
 	items, ps := t.items(m)
 	if len(ps) == 0 {
 		return head + "\n" + lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center,
-			sDim.Render("no dashboards in jig.yaml — press a to chart a query\n\ndashboards:\n  main:\n    - { title: requests/s, query: 'sum(rate(http_requests_total[1m]))', unit: /s }"))
+			sDim.Render("no dashboards in rig.yaml — press a to chart a query\n\ndashboards:\n  main:\n    - { title: requests/s, query: 'sum(rate(http_requests_total[1m]))', unit: /s }"))
 	}
 	t.focus = min(t.focus, len(ps)-1)
 	if t.zoom {
@@ -1702,7 +1702,7 @@ func findInstance(sts []core.Status, aliases map[string]string, labels map[strin
 	return "", ""
 }
 
-// serviceAliases maps what an app's metrics may call it (its image, SERVICE_NAME) to the jig.yaml name.
+// serviceAliases maps what an app's metrics may call it (its image, SERVICE_NAME) to the rig.yaml name.
 func serviceAliases(p *spec.Project) map[string]string {
 	out := map[string]string{}
 	for n, s := range p.Services {

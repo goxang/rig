@@ -32,7 +32,7 @@ func TestComposeLayers(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "conf/a.yaml"), "services:\n  api:\n    port: 1\n    cmd: a\n")
 	write(t, filepath.Join(dir, "conf/b.yaml"), "services:\n  api:\n    port: 2\n")
-	write(t, filepath.Join(dir, ".jig/local.yaml"), "services:\n  api:\n    cmd: mine\n")
+	write(t, filepath.Join(dir, ".rig/local.yaml"), "services:\n  api:\n    cmd: mine\n")
 	root := `include: [conf/*.yaml]
 imports:
   - compose: docker-compose.yml
@@ -53,7 +53,7 @@ services:
   worker:
     image: null
 `
-	file := filepath.Join(dir, "jig.yaml")
+	file := filepath.Join(dir, "rig.yaml")
 	imp := func(kind, path string, _ *yaml.Node) (*Doc, error) {
 		return Parse([]byte("services:\n  worker:\n    image: w:1\n    port: 9\n  db:\n    image: pg\n"), path, "import "+kind)
 	}
@@ -90,7 +90,7 @@ services:
 }
 
 func TestTemplateName(t *testing.T) {
-	d, err := Compose([]byte("templates:\n  t:\n    dir: ./cmd/${name}\nservices:\n  api:\n    extends: t\n"), "/x/jig.yaml", Options{NoLocal: true})
+	d, err := Compose([]byte("templates:\n  t:\n    dir: ./cmd/${name}\nservices:\n  api:\n    extends: t\n"), "/x/rig.yaml", Options{NoLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestTemplateName(t *testing.T) {
 }
 
 func TestTemplateLoop(t *testing.T) {
-	_, err := Compose([]byte("templates:\n  a: {extends: b}\n  b: {extends: a}\nservices:\n  x: {extends: a}\n"), "/x/jig.yaml", Options{NoLocal: true})
+	_, err := Compose([]byte("templates:\n  a: {extends: b}\n  b: {extends: a}\nservices:\n  x: {extends: a}\n"), "/x/rig.yaml", Options{NoLocal: true})
 	if err == nil || !strings.Contains(err.Error(), "loop") {
 		t.Fatalf("want a loop error, got %v", err)
 	}
@@ -108,7 +108,7 @@ func TestTemplateLoop(t *testing.T) {
 
 func TestDefaultsAreLowest(t *testing.T) {
 	plugin, _ := Parse([]byte("ui:\n  theme: dark\n  refresh: 5s\n"), "plugin:x", "plugin")
-	d, err := Compose([]byte("ui:\n  theme: light\n"), "/x/jig.yaml", Options{Defaults: []*Doc{plugin}, NoLocal: true})
+	d, err := Compose([]byte("ui:\n  theme: light\n"), "/x/rig.yaml", Options{Defaults: []*Doc{plugin}, NoLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestCache(t *testing.T) {
 }
 
 func TestLoneNullStays(t *testing.T) {
-	d, err := Compose([]byte("services:\n  redis:\n"), "/x/jig.yaml", Options{NoLocal: true})
+	d, err := Compose([]byte("services:\n  redis:\n"), "/x/rig.yaml", Options{NoLocal: true})
 	if err != nil {
 		t.Fatal(err)
 	}

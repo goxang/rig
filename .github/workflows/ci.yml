@@ -2,7 +2,7 @@ name: ci
 
 # Every push to main that passes gets the next version: feat commits bump the minor version,
 # anything else the patch. The release carries the binaries the build jobs made, checksums signed with
-# the JIG_SIGNING_KEY secret, and install.sh.
+# the RIG_SIGNING_KEY secret, and install.sh.
 on:
   push:
     branches: [main]
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: JIG_BENCH=1 go test -count=1 -v -run 'Budget' ./internal/bench ./host
+      - run: RIG_BENCH=1 go test -count=1 -v -run 'Budget' ./internal/bench ./host
 
 
   plugins:
@@ -59,19 +59,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          path: jig
+          path: rig
       - uses: actions/checkout@v5
         with:
-          repository: goxang/jig-plugins
-          path: jig-plugins
+          repository: goxang/rig-plugins
+          path: rig-plugins
       - uses: actions/setup-go@v6
         with:
-          go-version-file: jig/go.mod
-      - working-directory: jig-plugins
+          go-version-file: rig/go.mod
+      - working-directory: rig-plugins
         run: |
-          go mod edit -replace github.com/goxang/jig=../jig -replace github.com/goxang/jig/sdk=../jig/sdk
+          go mod edit -replace github.com/goxang/rig=../rig -replace github.com/goxang/rig/sdk=../rig/sdk
           go mod tidy
-          go test -count=1 -run 'Transcripts|ProductFlow' ./cmd/jig-std ./internal/acceptance
+          go test -count=1 -run 'Transcripts|ProductFlow' ./cmd/rig-std ./internal/acceptance
 
   version:
     runs-on: ubuntu-latest
@@ -127,13 +127,13 @@ jobs:
           TARGET: ${{ matrix.target }}
           TAG: ${{ needs.version.outputs.tag }}
         run: |
-          os=${TARGET%/*} arch=${TARGET#*/} bin=jig
+          os=${TARGET%/*} arch=${TARGET#*/} bin=rig
           dir=$(mktemp -d)
-          GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$dir/$bin" ./cmd/jig
+          GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o "$dir/$bin" ./cmd/rig
           cp README.md "$dir/"
           mkdir -p dist
-          tar -C "$dir" -czf "dist/jig_${os}_${arch}.tar.gz" "$bin" README.md
-          echo "ASSET=jig_${os}_${arch}" >> "$GITHUB_ENV"
+          tar -C "$dir" -czf "dist/rig_${os}_${arch}.tar.gz" "$bin" README.md
+          echo "ASSET=rig_${os}_${arch}" >> "$GITHUB_ENV"
       - if: needs.version.outputs.skip != '1'
         uses: actions/upload-artifact@v4
         with:
@@ -160,11 +160,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
-          JIG_SIGNING_KEY: ${{ secrets.JIG_SIGNING_KEY }}
+          RIG_SIGNING_KEY: ${{ secrets.RIG_SIGNING_KEY }}
         run: |
           cp install.sh dist/
           (cd dist && sha256sum * > checksums.txt)
           go run ./internal/sign dist/checksums.txt
           git tag "$TAG" "$GITHUB_SHA"
           for i in 1 2 3; do git push origin "$TAG" && break; sleep $((i * 10)); done
-          for i in 1 2 3; do gh release create "$TAG" dist/* --title "jig $TAG" --generate-notes && break; sleep $((i * 10)); done
+          for i in 1 2 3; do gh release create "$TAG" dist/* --title "rig $TAG" --generate-notes && break; sleep $((i * 10)); done

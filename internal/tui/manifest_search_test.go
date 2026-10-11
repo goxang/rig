@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goxang/jig/manifest"
+	"github.com/goxang/rig/manifest"
 )
 
 func TestManifestHits(t *testing.T) {

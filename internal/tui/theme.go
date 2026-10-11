@@ -79,7 +79,7 @@ func themeDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "jig", "themes")
+	return filepath.Join(dir, "rig", "themes")
 }
 
 func themeChoiceFile() string {
@@ -89,7 +89,7 @@ func themeChoiceFile() string {
 	return ""
 }
 
-// ThemeNames are the built-in themes and the files in ~/.config/jig/themes (name.yaml), sorted.
+// ThemeNames are the built-in themes and the files in ~/.config/rig/themes (name.yaml), sorted.
 func ThemeNames() []string {
 	seen := map[string]bool{}
 	for n := range themes {
@@ -181,9 +181,9 @@ func overlay(base, t Theme) Theme {
 	return out
 }
 
-// CurrentTheme is $JIG_THEME, else what `jig theme <name>` chose, else "default".
+// CurrentTheme is $RIG_THEME, else what `rig theme <name>` chose, else "default".
 func CurrentTheme() string {
-	if n := os.Getenv("JIG_THEME"); n != "" {
+	if n := os.Getenv("RIG_THEME"); n != "" {
 		return n
 	}
 	if f := themeChoiceFile(); f != "" {
@@ -194,7 +194,7 @@ func CurrentTheme() string {
 	return "default"
 }
 
-// UseTheme makes name the theme jig opens with from now on.
+// UseTheme makes name the theme rig opens with from now on.
 func UseTheme(name string) error {
 	if _, err := LoadTheme(name); err != nil {
 		return err
@@ -223,7 +223,7 @@ func SaveThemeFile(name, from string) (string, error) {
 		return "", err
 	}
 	f := filepath.Join(themeDir(), name+".yaml")
-	head := "# jig theme: colours as #RRGGBB. Keep only what you change and set base: to start from another theme.\n# Text, dim, panel, bar and the backgrounds are for dark terminals; light: holds light-terminal values.\n"
+	head := "# rig theme: colours as #RRGGBB. Keep only what you change and set base: to start from another theme.\n# Text, dim, panel, bar and the backgrounds are for dark terminals; light: holds light-terminal values.\n"
 	return f, os.WriteFile(f, append([]byte(head), raw...), 0o644)
 }
 

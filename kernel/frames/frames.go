@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/goxang/jig/kernel/refs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/refs"
+	"github.com/goxang/rig/protocol"
 )
 
 func Len(f *protocol.Frame) int {

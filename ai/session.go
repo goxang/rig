@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Session is one conversation: jig keeps the transcript to show and resume it, the backend keeps
+// Session is one conversation: rig keeps the transcript to show and resume it, the backend keeps
 // its own (BackendID) so a resumed turn carries the whole context.
 type Session struct {
 	ID        string    `json:"id"`

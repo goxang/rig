@@ -85,7 +85,7 @@ func splitsFile() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "jig", "panes.json")
+	return filepath.Join(dir, "rig", "panes.json")
 }
 
 func loadSplits() map[string]float64 {

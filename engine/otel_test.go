@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func TestOTelEnv(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-// SandboxExe is the jig binary that runs `jig __sandbox`; empty starts plugins directly.
+// SandboxExe is the rig binary that runs `rig __sandbox`; empty starts plugins directly.
 var SandboxExe string
 
 type sandboxSpec struct {
@@ -43,7 +43,7 @@ type listFlag []string
 func (l *listFlag) String() string     { return fmt.Sprint(*l) }
 func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 
-// Sandbox is `jig __sandbox [--ro dir] [--rw dir] [--port n] -- command...`: it confines itself, then
+// Sandbox is `rig __sandbox [--ro dir] [--rw dir] [--port n] -- command...`: it confines itself, then
 // becomes the command.
 func Sandbox(args []string) error {
 	fs := flag.NewFlagSet("__sandbox", flag.ContinueOnError)

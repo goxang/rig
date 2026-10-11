@@ -1,7 +1,7 @@
 {
-  "name": "@goxang/jig",
+  "name": "@goxang/rig",
   "version": "0.1.0",
-  "description": "Write jig plugins in TypeScript or JavaScript",
+  "description": "Write rig plugins in TypeScript or JavaScript",
   "type": "module",
   "main": "index.js",
   "types": "index.d.ts",

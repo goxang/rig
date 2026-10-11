@@ -1,6 +1,6 @@
-// Package contracts holds jig's contracts: the named sources and actions a plugin provides to stand
+// Package contracts holds rig's contracts: the named sources and actions a plugin provides to stand
 // in for a kind of tool (metrics/1, scm/1, ...), with their arguments and frame fields, a conformance
-// check, bridges that let a plugin serve jig's built-in screens, and standard views.
+// check, bridges that let a plugin serve rig's built-in screens, and standard views.
 package contracts
 
 import (
@@ -16,7 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 //go:embed */v1.yaml */view.yaml

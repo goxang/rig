@@ -100,7 +100,7 @@ func sameDocs(before, after *Set, o *Object) bool {
 // should say: only the fields someone set (its managedFields, not the server's defaults or status),
 // none of the server's bookkeeping, keys in the file's order, and the file's $VAR templates kept
 // where the file has them. drop names env vars to leave out unless the file already has them
-// (what a deploy injects from jig.yaml).
+// (what a deploy injects from rig.yaml).
 func FromLive(file *Object, live []byte, drop map[string]bool) ([]byte, error) {
 	var meta struct {
 		Metadata struct {

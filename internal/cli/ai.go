@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/engine"
 )
 
 // AIChat opens the terminal UI with the assistant's chat open on session id ("" a new one). Set by main.
@@ -31,20 +31,20 @@ func aiCommand() *cobra.Command {
 	var cont bool
 	c := &cobra.Command{
 		Use:   "ai [question]",
-		Short: "the assistant: your opencode or Claude Code over jig's tools, bound to this environment; without a question, the UI with its chat open",
-		Long: `jig ai runs your own opencode or Claude Code with jig as its only tools, the project directory as its
-only workspace, and bound to one environment. Set it up once with jig ai config (opencode's free
+		Short: "the assistant: your opencode or Claude Code over rig's tools, bound to this environment; without a question, the UI with its chat open",
+		Long: `rig ai runs your own opencode or Claude Code with rig as its only tools, the project directory as its
+only workspace, and bound to one environment. Set it up once with rig ai config (opencode's free
 models work with no setup; an existing opencode or Claude Code login is used as it is).
 
-  jig ai                         the UI with the chat open (@ in the UI opens it on any screen)
-  jig ai why is parsersvc failing?
-  jig ai -c "and restart it"     continue the last conversation
-  jig ai config provider=deepseek api_key=sk-… proxy=localhost:10808
-  jig resume                     pick a conversation (or a saved UI session) to continue or close
+  rig ai                         the UI with the chat open (@ in the UI opens it on any screen)
+  rig ai why is parsersvc failing?
+  rig ai -c "and restart it"     continue the last conversation
+  rig ai config provider=deepseek api_key=sk-… proxy=localhost:10808
+  rig resume                     pick a conversation (or a saved UI session) to continue or close
 
 Changes are checked before they run: other environments are out of reach, reads run at once, and
 every change shows its command and waits for your yes (or "always" for that command, this session).
-jig ai log lists what the assistant ran, who confirmed it and how it went.`,
+rig ai log lists what the assistant ran, who confirmed it and how it went.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if cont && session == "" {
@@ -123,7 +123,7 @@ func aiConnectCommand() *cobra.Command {
 				return err
 			}
 			c, _ := ai.LoadConfig()
-			fmt.Println(green("● ") + ai.Resolve(c).Describe() + dim("  (jig ai check tests it)"))
+			fmt.Println(green("● ") + ai.Resolve(c).Describe() + dim("  (rig ai check tests it)"))
 			return nil
 		},
 	}
@@ -132,12 +132,12 @@ func aiConnectCommand() *cobra.Command {
 func aiConfigCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "config [key=value ...]",
-		Short: "show or change the AI setup (~/.config/jig/ai.json): backend, provider, model, effort, fast_model, fast_url, url, api_key, proxy, autocomplete, disabled",
+		Short: "show or change the AI setup (~/.config/rig/ai.json): backend, provider, model, effort, fast_model, fast_url, url, api_key, proxy, autocomplete, disabled",
 		Long: `Without arguments, prints the setup and what it resolves to on this machine. key= clears a setting.
 
   backend       opencode | claude (default: opencode when installed, else claude)
   provider      own | opencode | openai | 9router | deepseek | anthropic | ollama | lmstudio
-                ollama, lmstudio: a model on this machine, no key (jig ai config lists what they serve)
+                ollama, lmstudio: a model on this machine, no key (rig ai config lists what they serve)
                 own: your opencode config or Claude Code login as they are (default when opencode has a model set)
                 opencode: opencode's free models (default otherwise)
   model         e.g. opencode/big-pickle, deepseek-chat, sonnet
@@ -152,7 +152,7 @@ func aiConfigCommand() *cobra.Command {
   disabled      true turns the assistant off
 
 In the UI: /model, /effort, /fast and /autocomplete in the chat (@), ctrl+t in a query prompt.
-JIG_AI_<KEY> (JIG_AI_MODEL, JIG_AI_FAST_URL, ...) overrides a setting for one run.`,
+RIG_AI_<KEY> (RIG_AI_MODEL, RIG_AI_FAST_URL, ...) overrides a setting for one run.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := ai.LoadConfig()
 			if err != nil {
@@ -185,7 +185,7 @@ JIG_AI_<KEY> (JIG_AI_MODEL, JIG_AI_FAST_URL, ...) overrides a setting for one ru
 			}
 			fmt.Println("\n" + line + "\n" + dim(f))
 			for _, f := range ai.Detect() {
-				fmt.Printf("\n%s %s\n  %s\n", green("◆"), f.Describe(), dim("use it: jig ai connect "+f.Backend))
+				fmt.Printf("\n%s %s\n  %s\n", green("◆"), f.Describe(), dim("use it: rig ai connect "+f.Backend))
 			}
 			for _, l := range ai.DetectLocal(cmd.Context()) {
 				if len(l.Models) == 0 {
@@ -193,7 +193,7 @@ JIG_AI_<KEY> (JIG_AI_MODEL, JIG_AI_FAST_URL, ...) overrides a setting for one ru
 					continue
 				}
 				fmt.Printf("\n%s %s at %s serves: %s\n  %s\n", green("◆"), l.Provider, l.URL, strings.Join(l.Models, ", "),
-					dim("use it: jig ai config provider="+l.Provider+" model="+l.Models[0]))
+					dim("use it: rig ai config provider="+l.Provider+" model="+l.Models[0]))
 			}
 			return nil
 		},
@@ -212,7 +212,7 @@ func askOnce(ctx context.Context, a *engine.App, question, session string) error
 	return err
 }
 
-// conversation is a terminal conversation with the assistant over jig's tools: each change it
+// conversation is a terminal conversation with the assistant over rig's tools: each change it
 // wants waits for a yes typed here.
 type conversation struct {
 	r     *ai.Runner
@@ -234,7 +234,7 @@ func converse(a *engine.App, session string) (*conversation, error) {
 			return ai.Reply{OK: true}
 		case "approve":
 		default:
-			return ai.Reply{Text: "no jig UI here: run `jig ai` without a question for the UI"}
+			return ai.Reply{Text: "no rig UI here: run `rig ai` without a question for the UI"}
 		}
 		if !c.tty {
 			return ai.Reply{NoOne: true, Text: "no terminal to ask on"}
@@ -274,7 +274,7 @@ func converse(a *engine.App, session string) (*conversation, error) {
 		}
 		if c.s.Env != a.Env.Name {
 			stop()
-			return nil, fmt.Errorf("session %s is bound to environment %s: jig -e %s ai -s %s", c.s.ID, c.s.Env, c.s.Env, c.s.ID)
+			return nil, fmt.Errorf("session %s is bound to environment %s: rig -e %s ai -s %s", c.s.ID, c.s.Env, c.s.Env, c.s.ID)
 		}
 	} else {
 		c.s = ai.NewSession(a.AIDir(), c.r.Setup.Backend, a.Env.Name)
@@ -311,7 +311,7 @@ func (c *conversation) ask(prompt string) (string, bool) {
 }
 
 func (c *conversation) hint() {
-	fmt.Fprintln(os.Stderr, dim("continue: jig ai -s "+c.s.ID+" \"…\"  ·  jig resume "+c.s.ID))
+	fmt.Fprintln(os.Stderr, dim("continue: rig ai -s "+c.s.ID+" \"…\"  ·  rig resume "+c.s.ID))
 }
 
 func aiLogCommand() *cobra.Command {

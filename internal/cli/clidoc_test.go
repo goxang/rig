@@ -14,7 +14,7 @@ var update = stdflag.Bool("update", false, "rewrite docs/cli.md")
 // TestCLIDoc keeps docs/cli.md the command tree; go test ./internal/cli -run CLIDoc -update rewrites it.
 func TestCLIDoc(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("# CLI\n\nEvery command; `jig <command> --help` has its flags. Generated from the code.\n\n| command | what it does |\n|---|---|\n")
+	b.WriteString("# CLI\n\nEvery command; `rig <command> --help` has its flags. Generated from the code.\n\n| command | what it does |\n|---|---|\n")
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
 		for _, s := range c.Commands() {
@@ -22,7 +22,7 @@ func TestCLIDoc(t *testing.T) {
 				continue
 			}
 			if s.Runnable() {
-				use := strings.TrimSpace(strings.TrimPrefix(s.UseLine(), "jig "))
+				use := strings.TrimSpace(strings.TrimPrefix(s.UseLine(), "rig "))
 				use = strings.TrimSuffix(strings.TrimSpace(strings.TrimSuffix(use, "[flags]")), " ")
 				b.WriteString("| `" + strings.ReplaceAll(use, "|", `\|`) + "` | " + strings.ReplaceAll(s.Short, "|", `\|`) + " |\n")
 			}

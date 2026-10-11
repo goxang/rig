@@ -51,7 +51,7 @@ actions:
   runtime.restart: {effect: write, args: {service: string!}}
   runtime.scale: {effect: write, args: {service: string!, replicas: int!}}
   runtime.deploy: {effect: danger, args: {service: string!, image: string, env: json, replicas: int}}
-  # exec answers outputs.argv: the command jig runs on the user's terminal (kubectl exec -it ..., ssh -t ...)
+  # exec answers outputs.argv: the command rig runs on the user's terminal (kubectl exec -it ..., ssh -t ...)
   runtime.exec: {effect: write, args: {service: string!, instance: string, command: json, tty: bool}, outputs: {argv: json}}
   runtime.run-action: {effect: write, args: {name: string!, args: json}}
   runtime.save-state: {effect: write, args: {state: json!}}

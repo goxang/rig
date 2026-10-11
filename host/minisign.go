@@ -59,7 +59,7 @@ func verifyMinisign(pubkey, sig string, data []byte) error {
 }
 
 // publisherKey is the key artifacts of publisher must be signed with: goxang's built in, any other
-// trusted on first use and pinned in ~/.config/jig/keys.json.
+// trusted on first use and pinned in ~/.config/rig/keys.json.
 func publisherKey(publisher, offered string) (string, error) {
 	if publisher == "goxang" {
 		return OfficialKey, nil
@@ -112,7 +112,7 @@ func Sign(secret, file string, data []byte) (string, error) {
 	sig := ed25519.Sign(sk, h[:])
 	trusted := fmt.Sprintf("timestamp:%d\tfile:%s\thashed", time.Now().Unix(), file)
 	global := ed25519.Sign(sk, slices.Concat(sig, []byte(trusted)))
-	return "untrusted comment: signature from jig secret key\n" +
+	return "untrusted comment: signature from rig secret key\n" +
 		base64.StdEncoding.EncodeToString(slices.Concat([]byte("ED"), id, sig)) + "\n" +
 		"trusted comment: " + trusted + "\n" +
 		base64.StdEncoding.EncodeToString(global) + "\n", nil

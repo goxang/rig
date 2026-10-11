@@ -3,12 +3,12 @@ package tui
 import (
 	"context"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
-// stillRuntime stands in for the docker runtime the examples name; adapters live in jig-plugins.
+// stillRuntime stands in for the docker runtime the examples name; adapters live in rig-plugins.
 type stillRuntime struct{}
 
 func init() {

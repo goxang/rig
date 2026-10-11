@@ -1,5 +1,5 @@
 // Package bench checks docs/plan.md section 17's process budgets on a release build; CI's bench job
-// runs it with JIG_BENCH=1.
+// runs it with RIG_BENCH=1.
 package bench
 
 import (
@@ -15,15 +15,15 @@ import (
 // ponytail: status against rig, TUI paint, key to frame and idle CPU are measured by hand on switch
 // (docs/plan.md section 17); add them here once CI has a runtime and a pty to drive.
 func TestBudgets(t *testing.T) {
-	if os.Getenv("JIG_BENCH") == "" {
-		t.Skip("JIG_BENCH unset")
+	if os.Getenv("RIG_BENCH") == "" {
+		t.Skip("RIG_BENCH unset")
 	}
 	tmp := t.TempDir()
 	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		t.Setenv(k, filepath.Join(tmp, k))
 	}
-	bin := filepath.Join(tmp, "jig")
-	build := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/jig")
+	bin := filepath.Join(tmp, "rig")
+	build := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", bin, "./cmd/rig")
 	build.Dir = "../.."
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -43,7 +43,7 @@ func TestBudgets(t *testing.T) {
 		c.Dir = shop
 		start := time.Now()
 		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("jig %v: %v\n%s", args, err, out)
+			t.Fatalf("rig %v: %v\n%s", args, err, out)
 		}
 		return time.Since(start), c.ProcessState.SysUsage().(*syscall.Rusage).Maxrss
 	}
@@ -68,12 +68,12 @@ func TestBudgets(t *testing.T) {
 		budget time.Duration
 	}{{[]string{"version"}, 20 * time.Millisecond}, {[]string{"lint"}, 50 * time.Millisecond}} {
 		d, rss := median(b.args...)
-		t.Logf("jig %v: median %v, RSS %d kB", b.args, d, rss)
+		t.Logf("rig %v: median %v, RSS %d kB", b.args, d, rss)
 		if d > b.budget {
-			t.Errorf("jig %v: median %v, budget %v", b.args, d, b.budget)
+			t.Errorf("rig %v: median %v, budget %v", b.args, d, b.budget)
 		}
 		if rss > 45<<10 {
-			t.Errorf("jig %v: RSS %d kB, budget 45 MB", b.args, rss)
+			t.Errorf("rig %v: RSS %d kB, budget 45 MB", b.args, rss)
 		}
 	}
 }

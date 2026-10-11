@@ -8,5 +8,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["plugin.ts", "jig"]
+  "include": ["plugin.ts", "rig"]
 }

@@ -13,16 +13,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 func observeCommands() []*cobra.Command {
 	var source string
 	var since time.Duration
 	metrics := &cobra.Command{
-		Use: "metrics [dashboard | -- query]", Short: "dashboard panels as charts, or one query: jig metrics -- 'sum(rate(x[1m]))'",
+		Use: "metrics [dashboard | -- query]", Short: "dashboard panels as charts, or one query: rig metrics -- 'sum(rate(x[1m]))'",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			m, name, err := engine.Get[core.Metrics](a, core.KindMetrics, source)
 			if err != nil {
@@ -55,7 +55,7 @@ func observeCommands() []*cobra.Command {
 				}
 			}
 			if len(panels) == 0 {
-				return fmt.Errorf("no dashboards in jig.yaml; give a query: jig metrics -- 'up'")
+				return fmt.Errorf("no dashboards in rig.yaml; give a query: rig metrics -- 'up'")
 			}
 			end := time.Now()
 			start := end.Add(-since)
@@ -183,7 +183,7 @@ func observeCommands() []*cobra.Command {
 	profile.Flags().StringVarP(&pr.Kind, "kind", "k", "cpu", "profile kind (see the profiler)")
 	profile.Flags().DurationVarP(&pr.Duration, "duration", "d", 15*time.Second, "for sampled profiles")
 	profile.Flags().StringVarP(&pr.Instance, "instance", "i", "", "instance")
-	profile.Flags().StringVarP(&pr.OutDir, "out", "o", "", "directory (default .jig/<env>/profiles)")
+	profile.Flags().StringVarP(&pr.OutDir, "out", "o", "", "directory (default .rig/<env>/profiles)")
 	profile.Flags().StringVar(&profiler, "profiler", "", "profiler component")
 
 	var dinst string
@@ -234,13 +234,13 @@ func observeCommands() []*cobra.Command {
 		}),
 	}
 	debug.Flags().StringVarP(&dinst, "instance", "i", "", "instance")
-	debug.Flags().BoolVar(&detach, "detach", false, "keep the debugger in the background and return once it listens on the service's stable port (jig ide's configs run this); a running one is kept")
+	debug.Flags().BoolVar(&detach, "detach", false, "keep the debugger in the background and return once it listens on the service's stable port (rig ide's configs run this); a running one is kept")
 	debug.Flags().BoolVar(&dstart, "start", false, "start the service first when it is down")
 	debug.Flags().BoolVar(&dstop, "stop", false, "stop a debugger --detach left running")
 
 	alerts := &cobra.Command{
 		Use:   "alerts",
-		Short: "check the alerts once (jig.yaml alerts:, default: node cpu/memory/disk at 90%/98%); exit 2 when one is critical",
+		Short: "check the alerts once (rig.yaml alerts:, default: node cpu/memory/disk at 90%/98%); exit 2 when one is critical",
 		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
 			firing, errs := a.CheckAlerts(ctx)
 			for _, e := range errs {

@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-var update = flag.Bool("update", false, "rewrite jig.schema.json from the types")
+var update = flag.Bool("update", false, "rewrite rig.schema.json from the types")
 
 // docTables maps docs/config.md's headings to the type whose keys their tables list.
 var docTables = map[string]string{"Top level": "Project", "services.<name>": "Service", "environments.<name>": "Environment", "ui.logs": "LogsUI"}
@@ -112,12 +112,12 @@ func TestSchemaUpToDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if *update {
-		if err := os.WriteFile("jig.schema.json", got, 0o644); err != nil {
+		if err := os.WriteFile("rig.schema.json", got, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
 	if !bytes.Equal(got, SchemaJSON) {
-		t.Fatal("spec/jig.schema.json is out of date with the types: go generate ./spec")
+		t.Fatal("spec/rig.schema.json is out of date with the types: go generate ./spec")
 	}
 }

@@ -1,4 +1,4 @@
-// Package docs carries jig's reference into the binary: jig docs, and the jig_docs MCP tool.
+// Package docs carries rig's reference into the binary: rig docs, and the rig_docs MCP tool.
 package docs
 
 import (

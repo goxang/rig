@@ -14,12 +14,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/docs"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/docs"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/protocol"
 )
 
 type Tool struct {
@@ -62,7 +62,7 @@ func (r *Router) Tools() []Tool {
 	out := []Tool{
 		{"find", "find actions, sources, skills and project resources by what they do (ranked); returns their names, effects and argument schemas. Use it before call or query when the name is unknown.",
 			obj(map[string]any{"query": str("words describing what you want, e.g. \"restart service\" or \"slow sql\"")}, "query")},
-		{"call", "run an action by name with its arguments. Writes go through policy: they may need the user's approval, and then wait in the inbox (jig inbox).",
+		{"call", "run an action by name with its arguments. Writes go through policy: they may need the user's approval, and then wait in the inbox (rig inbox).",
 			obj(map[string]any{"action": str("action name from find, e.g. runtime.restart"), "args": map[string]any{"type": "object"},
 				"user_request": str("for a write: the user's own words asking for it, verbatim")}, "action")},
 		{"read", "read a source as a table: as table (default, truncated), csv or stats (per column counts, min, max, mean).",
@@ -71,7 +71,7 @@ func (r *Router) Tools() []Tool {
 			obj(map[string]any{"ref": str("the ref")}, "ref")},
 		{"skill", "load a skill's instructions. Skills: " + strings.Join(skills, "; "),
 			obj(map[string]any{"name": str("skill name")}, "name")},
-		{"docs", "jig's reference (every jig.yaml key, CLI, screens, contracts): the sections holding all the words.",
+		{"docs", "rig's reference (every rig.yaml key, CLI, screens, contracts): the sections holding all the words.",
 			obj(map[string]any{"words": str("words to look for, e.g. \"tasks steps\"")}, "words")},
 	}
 	if r.File != nil {
@@ -81,7 +81,7 @@ func (r *Router) Tools() []Tool {
 				"old": str("edit: exact text"), "new": str("edit: replacement"), "all": map[string]any{"type": "boolean"}, "recursive": map[string]any{"type": "boolean"}}, "action")})
 	}
 	if r.UI != nil {
-		out = append(out, Tool{"ui", "act in the jig UI the user has open: open (screen, select, filter, path), keys (keys), logs (services, grep), panels, add_query, schedule, unschedule, state; steps runs several in one call. Answers with the screen once it settles.",
+		out = append(out, Tool{"ui", "act in the rig UI the user has open: open (screen, select, filter, path), keys (keys), logs (services, grep), panels, add_query, schedule, unschedule, state; steps runs several in one call. Answers with the screen once it settles.",
 			obj(map[string]any{"action": str("open, keys, logs, panels, add_query, schedule, unschedule or state"), "steps": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
 				"screen": str("screen to open"), "select": str("row to land on"), "filter": str("narrows the list"), "keys": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}})})
 	}
@@ -118,7 +118,7 @@ func (r *Router) Call(ctx context.Context, name string, args map[string]any) (te
 		if r.UI != nil {
 			return r.UI(args)
 		}
-		err = errors.New("no jig UI is attached: use read")
+		err = errors.New("no rig UI is attached: use read")
 	default:
 		err = fmt.Errorf("no tool %q; tools: find, call, read, open, skill, docs", name)
 	}
@@ -178,7 +178,7 @@ func (r *Router) call(ctx context.Context, action string, args protocol.Args, ra
 }
 
 func inboxID(msg string) string {
-	_, id, ok := strings.Cut(msg, "jig inbox approve ")
+	_, id, ok := strings.Cut(msg, "rig inbox approve ")
 	if !ok {
 		return ""
 	}

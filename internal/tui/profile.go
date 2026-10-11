@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 )
 
 // profileKinds say what each profile answers; the picker shows them as its hints.

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
 )
 
 func TestDataBackKeepsRow(t *testing.T) {

@@ -1,9 +1,9 @@
-// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.
+// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.
 
 package protocol
 
 // Version is the protocol this package speaks.
-const Version = "jig/1"
+const Version = "rig/1"
 
 const (
 	MethodInitialize     = "initialize"
@@ -117,7 +117,7 @@ type HostInfo struct {
 
 type InitializeParams struct {
 	Host HostInfo `json:"host"`
-	// Protocol versions the host speaks, such as jig/1.
+	// Protocol versions the host speaks, such as rig/1.
 	Protocols    []string          `json:"protocols"`
 	Capabilities *HostCapabilities `json:"capabilities,omitempty"`
 }
@@ -293,7 +293,7 @@ type ImportParams struct {
 }
 
 type ImportResult struct {
-	// A jig.yaml fragment.
+	// A rig.yaml fragment.
 	Fragment Args `json:"fragment"`
 	// Files whose change re-runs the import.
 	Watch    []string `json:"watch,omitempty"`

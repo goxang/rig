@@ -8,22 +8,22 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/goxang/jig/kernel/config"
+	"github.com/goxang/rig/kernel/config"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Redundancy is a jig.yaml value that its imports, includes or plugins already give.
+// Redundancy is a rig.yaml value that its imports, includes or plugins already give.
 type Redundancy struct {
 	Path string
 	Line int
 	From config.Origin
 }
 
-// layering are the top-level keys that pull in the layers below jig.yaml.
+// layering are the top-level keys that pull in the layers below rig.yaml.
 var layering = []string{"version", "project", "imports", "include", "plugins"}
 
-// Redundant lists jig.yaml's values equal to what the layers below it give, and jig.yaml without them.
+// Redundant lists rig.yaml's values equal to what the layers below it give, and rig.yaml without them.
 func Redundant(file string) ([]Redundancy, []byte, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {

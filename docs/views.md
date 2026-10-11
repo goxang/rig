@@ -1,6 +1,6 @@
 # Views
 
-A view is a screen built from widgets bound to sources. Views live under `views:` in jig.yaml, in a
+A view is a screen built from widgets bound to sources. Views live under `views:` in rig.yaml, in a
 plugin's manifest, or in their own file (`file: views/board.yaml`).
 
 ```yaml
@@ -26,8 +26,8 @@ views:
 `modes: [software, product]` shows a view only in those UI modes (`V`); a view without `modes:` shows in
 every mode but `product`.
 
-A plugin installed for the user (`~/.config/jig/plugins`) shows its views in a project only when
-jig.yaml configures it under `plugins:`, its `detect:` matches (`files` globs, `git_remote` in
+A plugin installed for the user (`~/.config/rig/plugins`) shows its views in a project only when
+rig.yaml configures it under `plugins:`, its `detect:` matches (`files` globs, `git_remote` in
 `.git/config`), or it has neither `detect:` nor a config schema. A contract's default view shows only
 for a plugin without views of its own. Screens come first, then the views of plugins serving vcs,
 scm, tracker and docs, then the project's own, then the ones a user installed for themselves.
@@ -67,7 +67,7 @@ off up to a minute and keep the last frame. `r` refetches.
 | `terminal` | `command` (string or list; default `$SHELL`), `dir` (default the project; relative to the view's own folder), `env`, `keep` (runs while hidden). Keys, and clicks when the program asks for the mouse, go to the program; esc (or ctrl+]) leaves |
 | `canvas` | drawn by `plugin` through `widget.render` |
 
-`widget: calendar@2` asks for a version; a jig without it, or without the widget, renders `fallback:`
+`widget: calendar@2` asks for a version; a rig without it, or without the widget, renders `fallback:`
 (another widget) instead. Plugins get the host's widget versions at `initialize`.
 
 Colours are theme tokens: `ok`, `warn`, `err`, `info`, `accent`, `muted`, `border`, `fg`, `series1`…
@@ -94,7 +94,7 @@ binding with a `query` arg gets `Q` to edit it.
 
 ## Keys
 
-The `jig` preset: `:` palette (`:restart parser`, `:kv get key`, `:open Logs`), `ctrl+k` search,
+The `rig` preset: `:` palette (`:restart parser`, `:kv get key`, `:open Logs`), `ctrl+k` search,
 shift+←→ switch screens, `:plugins` the plugins in use, `.` or right-click a menu of the screen's keys, `ctrl+e` environment, `T` tasks.
-`keys: rig` in `.jig/local.yaml` or `~/.config/jig/config.yaml` restores rig's keys (`E`, `N`, `S`,
+`keys: rig` in `.rig/local.yaml` or `~/.config/rig/config.yaml` restores rig's keys (`E`, `N`, `S`,
 `ctrl+k` kubeconfig, `ctrl+e` environment details).

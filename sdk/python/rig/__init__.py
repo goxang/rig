@@ -1,6 +1,6 @@
-"""Write jig plugins in Python: register sources, streams, actions and the rest, then serve().
+"""Write rig plugins in Python: register sources, streams, actions and the rest, then serve().
 
-Standard library only. The protocol (jig/1), not this module, is the contract.
+Standard library only. The protocol (rig/1), not this module, is the contract.
 """
 from __future__ import annotations
 
@@ -363,7 +363,7 @@ class Plugin:
         return slot[1] or {}
 
     def serve(self) -> None:
-        """Speak jig/1 on stdin and stdout until shutdown or EOF. Log to stderr."""
+        """Speak rig/1 on stdin and stdout until shutdown or EOF. Log to stderr."""
         threads: list[threading.Thread] = []
         for raw in sys.stdin.buffer:
             if not raw.strip():

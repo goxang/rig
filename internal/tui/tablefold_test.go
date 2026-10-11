@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestTableFoldAndNameSearch(t *testing.T) {
@@ -25,7 +25,7 @@ func TestTableFoldAndNameSearch(t *testing.T) {
 	if d, _ := fo.depthOf("c"); d != 2 {
 		t.Fatalf("depth %d", d)
 	}
-	hits := searchNames([]string{"cmd/jig/main.go", "docs/plan.md"}, "plan")
+	hits := searchNames([]string{"cmd/rig/main.go", "docs/plan.md"}, "plan")
 	if len(hits) != 1 || hits[0].path != "docs/plan.md" {
 		t.Fatalf("hits %v", hits)
 	}

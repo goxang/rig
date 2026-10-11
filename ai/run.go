@@ -20,25 +20,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/internal/sh"
+	"github.com/goxang/rig/internal/sh"
 )
 
-// What jig's MCP server reads to know it serves an assistant, and with which bounds.
+// What rig's MCP server reads to know it serves an assistant, and with which bounds.
 const (
-	EnvLock      = "JIG_AI_ENV"
-	EnvDir       = "JIG_AI_DIR"
-	EnvSock      = "JIG_AI_SOCK"
-	EnvProtected = "JIG_AI_PROTECTED"
-	EnvKube      = "JIG_AI_KUBE"
-	// EnvBareTools has the MCP server list its tools without the jig_ prefix (opencode adds the server's name)
-	EnvBareTools = "JIG_MCP_BARE"
-	// EnvAgent names the jig.yaml agent the server acts as; EnvTools and EnvApprove are its globs, comma-separated.
-	EnvAgent   = "JIG_AI_AGENT"
-	EnvTools   = "JIG_AI_TOOLS"
-	EnvApprove = "JIG_AI_APPROVE"
+	EnvLock      = "RIG_AI_ENV"
+	EnvDir       = "RIG_AI_DIR"
+	EnvSock      = "RIG_AI_SOCK"
+	EnvProtected = "RIG_AI_PROTECTED"
+	EnvKube      = "RIG_AI_KUBE"
+	// EnvBareTools has the MCP server list its tools without the rig_ prefix (opencode adds the server's name)
+	EnvBareTools = "RIG_MCP_BARE"
+	// EnvAgent names the rig.yaml agent the server acts as; EnvTools and EnvApprove are its globs, comma-separated.
+	EnvAgent   = "RIG_AI_AGENT"
+	EnvTools   = "RIG_AI_TOOLS"
+	EnvApprove = "RIG_AI_APPROVE"
 )
 
-// Agent is a jig.yaml agent: it reads files but never edits or runs a shell, and reaches jig only
+// Agent is a rig.yaml agent: it reads files but never edits or runs a shell, and reaches rig only
 // through the tools its globs allow, as itself.
 type Agent struct {
 	Name           string
@@ -56,7 +56,7 @@ type Event struct {
 type Runner struct {
 	Setup Setup
 	Scope Scope
-	// Self is this jig binary, which the backend starts as its MCP server.
+	// Self is this rig binary, which the backend starts as its MCP server.
 	Self string
 	// Sock is the bridge for approvals and UI actions; empty when nothing can answer.
 	Sock string
@@ -217,7 +217,7 @@ func tail(s string, n int) string {
 	return s
 }
 
-// mcpServer is how the backend starts jig as its tools: pinned to the session's environment, with
+// mcpServer is how the backend starts rig as its tools: pinned to the session's environment, with
 // the proxy the assistant uses taken away again (clusters and databases are reached directly).
 func (r *Runner) mcpServer(s *Session) ([]string, map[string]string) {
 	argv := []string{r.Self, "-f", r.Scope.File, "-e", r.Scope.Env, "mcp"}
@@ -247,7 +247,7 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 	var cmd *exec.Cmd
 	env := r.env()
 	if r.Setup.Backend == BackendClaude {
-		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"jig": map[string]any{"command": argv[0], "args": argv[1:], "env": mcpEnv}}})
+		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"rig": map[string]any{"command": argv[0], "args": argv[1:], "env": mcpEnv}}})
 		var deny []string
 		for _, p := range r.Scope.denied() {
 			for _, tool := range []string{"Read", "Edit", "Write"} {
@@ -260,7 +260,7 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 			tools = "Read,Grep,Glob"
 		}
 		args := []string{"-p", "--output-format", "stream-json", "--verbose", "--tools", tools,
-			"--strict-mcp-config", "--mcp-config", string(mcp), "--allowedTools", "mcp__jig," + tools,
+			"--strict-mcp-config", "--mcp-config", string(mcp), "--allowedTools", "mcp__rig," + tools,
 			"--permission-mode", "dontAsk", "--setting-sources", "", "--settings", string(settings), "--append-system-prompt", prompt}
 		if r.Setup.Model != "" {
 			args = append(args, "--model", r.Setup.Model)
@@ -286,7 +286,7 @@ func (r *Runner) command(ctx context.Context, s *Session, msg string) (*exec.Cmd
 		if s.BackendID != "" {
 			args = append(args, "--session", s.BackendID)
 		} else {
-			args = append(args, "--title", "jig: "+s.Title)
+			args = append(args, "--title", "rig: "+s.Title)
 		}
 		cmd = exec.CommandContext(ctx, r.Setup.Bin, append(args, "--", msg)...)
 	}
@@ -316,7 +316,7 @@ func (r *Runner) userMCPs() []string {
 			return
 		}
 		for name := range c.MCP {
-			if name != "jig" {
+			if name != "rig" {
 				userMCPs.names = append(userMCPs.names, name)
 			}
 		}
@@ -347,8 +347,8 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 		for k, v := range mcpEnv {
 			env[k] = v
 		}
-		// jig render, builds and kubectl through tools take longer than opencode's default 5s
-		mcp["jig"] = map[string]any{"type": "local", "command": mcpArgv, "environment": env, "enabled": true, "timeout": 300000}
+		// rig render, builds and kubectl through tools take longer than opencode's default 5s
+		mcp["rig"] = map[string]any{"type": "local", "command": mcpArgv, "environment": env, "enabled": true, "timeout": 300000}
 	}
 	cfg["mcp"] = mcp
 	model := r.Setup.Model
@@ -357,18 +357,18 @@ func (r *Runner) opencodeConfig(rules string, mcpArgv []string, mcpEnv map[strin
 		if key == "" {
 			key = r.Setup.Provider // a local server takes any key, the SDK wants one
 		}
-		cfg["provider"] = map[string]any{"jig": map[string]any{
+		cfg["provider"] = map[string]any{"rig": map[string]any{
 			"npm":     "@ai-sdk/openai-compatible",
-			"name":    "jig " + r.Setup.Provider,
+			"name":    "rig " + r.Setup.Provider,
 			"options": map[string]any{"baseURL": r.Setup.URL, "apiKey": key},
 			"models":  map[string]any{r.Setup.Model: map[string]any{"name": r.Setup.Model}},
 		}}
-		model = "jig/" + r.Setup.Model
+		model = "rig/" + r.Setup.Model
 	}
 	return cfg, model
 }
 
-// env is jig's environment with the AI proxy in place of any other.
+// env is rig's environment with the AI proxy in place of any other.
 func (r *Runner) env() []string {
 	var out []string
 	for _, kv := range os.Environ() {
@@ -409,9 +409,9 @@ func (r *Runner) proxyURL() string {
 }
 
 func toolName(n string) string {
-	n = strings.TrimPrefix(n, "mcp__jig__")
-	if strings.HasPrefix(n, "jig_jig") {
-		n = strings.TrimPrefix(n, "jig_")
+	n = strings.TrimPrefix(n, "mcp__rig__")
+	if strings.HasPrefix(n, "rig_rig") {
+		n = strings.TrimPrefix(n, "rig_")
 	}
 	return n
 }

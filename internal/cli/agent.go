@@ -10,17 +10,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/ai/agents"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/ai/agents"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
 func agentCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "agent",
-		Short: "the jig.yaml agents: list them, run one now, or watch their events and schedules",
+		Short: "the rig.yaml agents: list them, run one now, or watch their events and schedules",
 	}
 	c.AddCommand(&cobra.Command{
 		Use:   "ls",
@@ -37,7 +37,7 @@ func agentCommand() *cobra.Command {
 				rows = append(rows, []string{n, on, strings.Join(ag.Tools, ","), strings.Join(ag.Approve, ",")})
 			}
 			if len(rows) == 0 {
-				fmt.Println(dim("no agents: add an agents: section to jig.yaml"))
+				fmt.Println(dim("no agents: add an agents: section to rig.yaml"))
 				return nil
 			}
 			printTable(os.Stdout, []string{"AGENT", "ON", "TOOLS", "APPROVE"}, rows)
@@ -59,7 +59,7 @@ func agentCommand() *cobra.Command {
 		RunE: withApp(func(ctx context.Context, a *engine.App, _ []string) error {
 			e := engine.NewLocal(a, &jobs.Manager{})
 			defer e.Close()
-			fmt.Println(dim(fmt.Sprintf("watching %d agents; writes they need approved wait in jig inbox", len(a.Spec.Agents))))
+			fmt.Println(dim(fmt.Sprintf("watching %d agents; writes they need approved wait in rig inbox", len(a.Spec.Agents))))
 			return watchAgents(ctx, a, e)
 		}),
 	})

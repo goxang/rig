@@ -13,7 +13,7 @@ type Ctx struct {
 	context.Context
 	// Call is who called and where: project, env, user, scope.
 	Call Context
-	// Component is the jig.yaml component the call is for, if any.
+	// Component is the rig.yaml component the call is for, if any.
 	Component string
 	// Cursor is the page a query asks for, from a previous frame's meta.next.
 	Cursor string

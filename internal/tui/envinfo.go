@@ -13,7 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 type envInfoMsg struct {
@@ -35,7 +35,7 @@ func maskValue(name, value string) string {
 var urlPassword = regexp.MustCompile(`(://[^:/@\s]+:)[^@\s]+@`)
 
 // envLine is one line of the ctrl+e box; key is set when the line is a manifest/task variable
-// (`jig vars set`'s own write path), which e/enter edits in place.
+// (`rig vars set`'s own write path), which e/enter edits in place.
 type envLine struct {
 	text string
 	key  string
@@ -156,7 +156,7 @@ func (b *envBox) view(h int) string {
 	if len(b.lines) > 0 && b.lines[b.sel].key != "" {
 		footer = "↑↓ select · e/enter edits · / search · y copies · esc closes"
 	}
-	title := sTitle.Render("jig — " + b.env)
+	title := sTitle.Render("rig — " + b.env)
 	switch {
 	case b.typing:
 		title += sDim.Render("  search ") + sAmber.Render(b.filter+"▏")
@@ -168,7 +168,7 @@ func (b *envBox) view(h int) string {
 }
 
 // fetchEnvInfo builds the ctrl+e box: the environment, the variables tasks and manifests get (with
-// `jig vars set` overrides, read from the environment's state), and where each component points.
+// `rig vars set` overrides, read from the environment's state), and where each component points.
 func (m *model) fetchEnvInfo() tea.Cmd {
 	a, gen, ctx := m.app, m.gen, m.ctx
 	m.setStatus("reading "+a.Env.Name+"…", false)
@@ -222,7 +222,7 @@ func envInfoBox(ctx context.Context, a *engine.App) *envBox {
 		project[k] = v
 	}
 	if len(project) > 0 {
-		section("jig.yaml variables (${NAME})")
+		section("rig.yaml variables (${NAME})")
 		for _, k := range engine.SortedKeys(project) {
 			from := ""
 			if _, ok := env.Vars[k]; ok {
@@ -261,7 +261,7 @@ func envInfoBox(ctx context.Context, a *engine.App) *envBox {
 	return box
 }
 
-// editEnvVar opens the prompt to change the selected variable's value, the same `jig vars set` write
+// editEnvVar opens the prompt to change the selected variable's value, the same `rig vars set` write
 // path the CLI uses (environment state, key "var.<name>").
 func (m *model) editEnvVar(box *envBox) tea.Cmd {
 	if box.sel < 0 || box.sel >= len(box.lines) {

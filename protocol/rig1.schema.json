@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/goxang/jig/protocol/jig1.schema.json",
-  "title": "jig/1",
-  "description": "The jig plugin protocol: newline-delimited JSON-RPC 2.0 over stdio. Append-only: never remove, rename or retype anything here.",
+  "$id": "https://github.com/goxang/rig/protocol/rig1.schema.json",
+  "title": "rig/1",
+  "description": "The rig plugin protocol: newline-delimited JSON-RPC 2.0 over stdio. Append-only: never remove, rename or retype anything here.",
   "methods": {
     "initialize": { "from": "host", "params": "InitializeParams", "result": "InitializeResult" },
     "configure": { "from": "host", "params": "ConfigureParams", "result": "Empty" },
@@ -122,7 +122,7 @@
       "required": ["host", "protocols"],
       "properties": {
         "host": { "$ref": "#/$defs/HostInfo" },
-        "protocols": { "type": "array", "items": { "type": "string" }, "description": "Protocol versions the host speaks, such as jig/1." },
+        "protocols": { "type": "array", "items": { "type": "string" }, "description": "Protocol versions the host speaks, such as rig/1." },
         "capabilities": { "$ref": "#/$defs/HostCapabilities" }
       }
     },
@@ -339,7 +339,7 @@
       "type": "object",
       "required": ["fragment"],
       "properties": {
-        "fragment": { "$ref": "#/$defs/Args", "description": "A jig.yaml fragment." },
+        "fragment": { "$ref": "#/$defs/Args", "description": "A rig.yaml fragment." },
         "watch": { "type": "array", "items": { "type": "string" }, "description": "Files whose change re-runs the import." },
         "warnings": { "type": "array", "items": { "type": "string" } }
       }

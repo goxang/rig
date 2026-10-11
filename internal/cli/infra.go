@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/engine"
 )
 
 // infraCommand manages infrastructure where it runs: in the environment named by `infra:` when the
@@ -18,7 +18,7 @@ func infraCommand() *cobra.Command {
 		Short: "infrastructure (databases, brokers, ...): up once, shared by local, docker and kind",
 		Long: `Infrastructure is every service with role: infra. An environment with infra: <env> borrows
 the shared ones from that environment, so one SQL Server serves local processes, docker and kind.
-jig up never redeploys infrastructure that already runs; these commands are how it changes.`,
+rig up never redeploys infrastructure that already runs; these commands are how it changes.`,
 	}
 	// borrowed is set when the current environment takes its shared services from another one
 	var borrowed []string
@@ -50,7 +50,7 @@ jig up never redeploys infrastructure that already runs; these commands are how 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s on %s\n", bold("jig infra up"), envLabel(ia))
+		fmt.Printf("%s on %s\n", bold("rig infra up"), envLabel(ia))
 		return ia.Up(ctx, targets(args), engine.UpOptions{NoDeps: true, Out: os.Stdout})
 	})}
 	down := &cobra.Command{Use: "down [service...]", Short: "stop infrastructure (data stays in its volumes)", RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {

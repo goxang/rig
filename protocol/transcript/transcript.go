@@ -1,4 +1,4 @@
-// Package transcript records and replays jig/1 sessions as JSONL: one {"dir":">","msg":{...}} per
+// Package transcript records and replays rig/1 sessions as JSONL: one {"dir":">","msg":{...}} per
 // message, ">" from the host to the plugin and "<" back. A replay sends the host's messages and checks
 // the plugin answers with the recorded ones. Record sessions that do not depend on time: a stream's
 // batching follows the clock.

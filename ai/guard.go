@@ -19,7 +19,7 @@ func (r Risk) String() string {
 	return [...]string{"read", "change", "dangerous change", "refused"}[r]
 }
 
-// Classify rates a jig command line an assistant wants to run. Unknown commands count as changes,
+// Classify rates a rig command line an assistant wants to run. Unknown commands count as changes,
 // anything that runs arbitrary commands or reaches secrets as dangerous or refused.
 func Classify(argv []string) Risk {
 	if len(argv) == 0 {

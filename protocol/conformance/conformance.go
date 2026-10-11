@@ -1,5 +1,5 @@
-// Package conformance checks a plugin speaks jig/1: what every plugin must do, and what each
-// capability it declares promises. `jig plugin test` and the SDKs' tests run it.
+// Package conformance checks a plugin speaks rig/1: what every plugin must do, and what each
+// capability it declares promises. `rig plugin test` and the SDKs' tests run it.
 package conformance
 
 import (
@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/rpc"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/rpc"
 )
 
 type Result struct {
@@ -117,8 +117,8 @@ func Run(cmd *exec.Cmd, opts Options) ([]Result, error) {
 	var info protocol.InitializeResult
 	r.check("initialize", func() error {
 		params := map[string]any{
-			"host":         protocol.HostInfo{Name: "jig-conformance", Version: "0"},
-			"protocols":    []string{"jig/0", protocol.Version},
+			"host":         protocol.HostInfo{Name: "rig-conformance", Version: "0"},
+			"protocols":    []string{"rig/0", protocol.Version},
 			"capabilities": map[string]any{"widgets": map[string]int{"table": 1}, "x-future": true},
 			"x-future":     "unknown fields are ignored",
 		}

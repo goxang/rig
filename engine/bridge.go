@@ -6,12 +6,12 @@ import (
 	"os"
 	"sync"
 
-	"github.com/goxang/jig/contracts"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/contracts"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 type pluginHost struct {
@@ -39,7 +39,7 @@ func (a *App) Host() *host.Host {
 	return a.plugins.h
 }
 
-// componentsOf are the components of type plugin, each as its jig.yaml keys.
+// componentsOf are the components of type plugin, each as its rig.yaml keys.
 func (a *App) componentsOf(plugin string) map[string]protocol.Args {
 	out := map[string]protocol.Args{}
 	for n, c := range a.Spec.Components {

@@ -1,4 +1,4 @@
-// Package catalog lists what a project has, as typed resources: core kinds from jig.yaml and
+// Package catalog lists what a project has, as typed resources: core kinds from rig.yaml and
 // kinds plugins add, such as terraform.stack.
 package catalog
 
@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/goxang/jig/kernel/config"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/kernel/config"
+	"github.com/goxang/rig/spec"
 )
 
 type Resource struct {

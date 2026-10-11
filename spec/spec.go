@@ -1,4 +1,4 @@
-// Package spec is the jig.yaml schema: services, environments and the components that serve them.
+// Package spec is the rig.yaml schema: services, environments and the components that serve them.
 package spec
 
 import (
@@ -9,9 +9,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/kernel/config"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/kernel/view"
+	"github.com/goxang/rig/kernel/config"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/kernel/view"
 )
 
 const (
@@ -24,17 +24,12 @@ const (
 type Plugin struct {
 	// Path loads the plugin from a directory instead of the installed store.
 	Path string `yaml:"path,omitempty"`
-	// Version is the version or range to use, as jig plugin add writes it.
+	// Version is the version or range to use, as rig plugin add writes it.
 	Version string `yaml:"version,omitempty"`
 	// Off disables the plugin.
 	Off bool `yaml:"off,omitempty"`
 	// Config is every other key, checked against the plugin's config schema.
 	Config map[string]any `yaml:",inline"`
-}
-
-type Compat struct {
-	// RigEnv also exports RIG_ENV, RIG_FILE, RIG_YES, RIG_TASK and RIG_ARGS to task steps.
-	RigEnv bool `yaml:"rig_env"`
 }
 
 type Project struct {
@@ -58,46 +53,44 @@ type Project struct {
 	Dashboards   map[string]*Dashboard   `yaml:"dashboards"`
 	// Views are screens built from widgets bound to sources: a tab, a service section, a panel.
 	Views map[string]*view.View `yaml:"views"`
-	// Tests are named test suites: `jig test <name>` and the Tests screen.
+	// Tests are named test suites: `rig test <name>` and the Tests screen.
 	Tests     map[string]*TestSuite `yaml:"tests"`
 	Manifests []string              `yaml:"manifests"`
-	// Tasks are named lists of shell steps: `jig task <name>`.
+	// Tasks are named lists of shell steps: `rig task <name>`.
 	Tasks map[string]Task `yaml:"tasks"`
 	// Queries are saved queries: run on demand, or on a schedule while the UI is open.
 	Queries map[string]*Query `yaml:"queries"`
 	// Secrets are names ${NAME} may use whose values live outside the repo: the environment, then
-	// `jig secret set`, then the default written here.
+	// `rig secret set`, then the default written here.
 	Secrets map[string]Secret `yaml:"secrets"`
-	// Alerts are watched while the UI is open and shown in its header; `jig alerts` checks them once.
+	// Alerts are watched while the UI is open and shown in its header; `rig alerts` checks them once.
 	Alerts []Alert `yaml:"alerts"`
-	// Reports name the metrics a run is measured by: `jig report <name>`, a test suite's report:,
+	// Reports name the metrics a run is measured by: `rig report <name>`, a test suite's report:,
 	// the Load screen's W.
 	Reports map[string]*Report `yaml:"reports"`
-	// Load names load runs: a generator driven by a profile, judged by assertions (`jig load run <name>`).
+	// Load names load runs: a generator driven by a profile, judged by assertions (`rig load run <name>`).
 	Load map[string]*LoadRun `yaml:"load"`
 	// Sections split the Services screen by business area; services in none fall under "other".
 	Sections map[string]*Section `yaml:"sections"`
 	// OTel points every app and load service at OpenTelemetry backends.
 	OTel *OTel `yaml:"otel"`
-	// UI picks the screens of `jig` and their order.
+	// UI picks the screens of `rig` and their order.
 	UI *UI `yaml:"ui"`
-	// Keys is the key preset: jig (the default) or rig. Usually set in .jig/local.yaml or
-	// ~/.config/jig/config.yaml, since it is a personal choice.
+	// Keys is the key preset: rig (the default). Usually set in .rig/local.yaml or
+	// ~/.config/rig/config.yaml, since it is a personal choice.
 	Keys string `yaml:"keys"`
-	// Compat keeps what scripts written for rig rely on.
-	Compat Compat `yaml:"compat"`
-	// AI tells the assistant (`jig ai`, @ in the UI) about the project: paths it must not read, notes.
+	// AI tells the assistant (`rig ai`, @ in the UI) about the project: paths it must not read, notes.
 	AI *AI `yaml:"ai"`
 	// Agents are AI agents that run on an event or a schedule with a limited set of tools.
 	Agents map[string]*Agent `yaml:"agents"`
 	// Policy binds users, groups and the AI to roles of allowed, confirmed and approved actions.
 	Policy *policy.Config `yaml:"policy"`
-	// Help is shown by `jig -h` under the project name: this project's own quick-start for its main
+	// Help is shown by `rig -h` under the project name: this project's own quick-start for its main
 	// CLI workflows (e.g. build/deploy/ship with a target database and image tag). Plain text, a few
-	// example command lines; left out, `jig -h` shows only its own generic help.
+	// example command lines; left out, `rig -h` shows only its own generic help.
 	Help string `yaml:"help"`
 
-	// DashboardOrder, TestOrder and SectionOrder are the names as jig.yaml lists them.
+	// DashboardOrder, TestOrder and SectionOrder are the names as rig.yaml lists them.
 	DashboardOrder []string `yaml:"-"`
 	TestOrder      []string `yaml:"-"`
 	SectionOrder   []string `yaml:"-"`
@@ -197,7 +190,7 @@ type AI struct {
 	Deny         []string `yaml:"deny"`
 	Instructions string   `yaml:"instructions"`
 	// Ideas are the questions tab offers in an empty chat, by screen (services, logs, ...) or "all";
-	// they come before jig's own.
+	// they come before rig's own.
 	Ideas map[string][]string `yaml:"ideas"`
 }
 
@@ -229,9 +222,9 @@ type Service struct {
 	// Delay is how long up waits after the service's dependencies are ready before starting it.
 	Delay time.Duration `yaml:"delay"`
 	// Manual services start only when named (or through their group or section), never with "all"
-	// or their role (jig infra up).
+	// or their role (rig infra up).
 	Manual bool `yaml:"manual"`
-	// Watch is what jig watch (ctrl+w in the UI) rebuilds and restarts the service on.
+	// Watch is what rig watch (ctrl+w in the UI) rebuilds and restarts the service on.
 	Watch *Watch `yaml:"watch"`
 
 	// Sections owned by adapters (local:, docker:, k8s:, ...), decoded by the adapter that reads them.
@@ -376,13 +369,13 @@ type Task struct {
 	// ReadOnly marks a task that changes nothing, so it runs in a read-only environment too.
 	ReadOnly bool     `yaml:"readonly"`
 	Steps    []string `yaml:"steps"`
-	// StepHelp says what each step does: the # comment above it in jig.yaml, or its own first # lines.
+	// StepHelp says what each step does: the # comment above it in rig.yaml, or its own first # lines.
 	StepHelp []string `yaml:"-"`
 }
 
-// TaskArg is an input a task asks for before it runs (jig task <name> on a terminal, T in the UI).
+// TaskArg is an input a task asks for before it runs (rig task <name> on a terminal, T in the UI).
 // An UPPER_CASE name reaches the steps as that env var; a lower-case one as positional words ($1...,
-// $JIG_ARGS). Choices, or From (services: every service and group; branches: the git branches;
+// $RIG_ARGS). Choices, or From (services: every service and group; branches: the git branches;
 // hosts), offer a pick list.
 type TaskArg struct {
 	Name    string   `yaml:"name"`
@@ -442,7 +435,7 @@ type Dashboard struct {
 	// Vars are the dashboard's $variables, picked in the UI; queries use them as $name.
 	Vars   map[string]*DashVar `yaml:"vars"`
 	Panels []Panel             `yaml:"panels"`
-	// VarOrder is Vars as jig.yaml lists them.
+	// VarOrder is Vars as rig.yaml lists them.
 	VarOrder []string `yaml:"-"`
 }
 
@@ -519,7 +512,7 @@ type TestSuite struct {
 	Help  string `yaml:"help"`
 	Group string `yaml:"group"`
 	// Command runs the suite through sh instead of go test: pytest, jest, mvn test, cargo test, ...
-	// Writing JUnit XML to $JIG_JUNIT gives the screen one row per test; without it the suite passes
+	// Writing JUnit XML to $RIG_JUNIT gives the screen one row per test; without it the suite passes
 	// or fails as a whole by its exit status.
 	Command string `yaml:"command"`
 	// Runner is a plugin's tests/1 runner (pytest, jest, vitest, hurl, k6, junit) instead of go test;
@@ -592,7 +585,7 @@ type Report struct {
 	AI bool `yaml:"ai"`
 	// Publish runs these actions with the report: ${report} is its markdown, ${file} its saved file.
 	Publish []ReportPublish `yaml:"publish"`
-	// Schedule measures and publishes it on a cron schedule (5 fields) while `jig report watch` runs,
+	// Schedule measures and publishes it on a cron schedule (5 fields) while `rig report watch` runs,
 	// over the time since its last run.
 	Schedule string `yaml:"schedule"`
 }
@@ -661,7 +654,7 @@ func (s *Service) Section(name string, v any) (bool, error) {
 	return true, nil
 }
 
-// Count is the replica count jig.yaml asks for, and whether it asks at all.
+// Count is the replica count rig.yaml asks for, and whether it asks at all.
 func (s *Service) Count() (int, bool) {
 	if s.Replicas == nil {
 		return 0, false
@@ -669,7 +662,7 @@ func (s *Service) Count() (int, bool) {
 	return *s.Replicas, true
 }
 
-// CountOr is the replica count jig.yaml asks for, else def.
+// CountOr is the replica count rig.yaml asks for, else def.
 func (s *Service) CountOr(def int) int {
 	if n, ok := s.Count(); ok {
 		return n

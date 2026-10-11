@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 var lookbacks = []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour}
@@ -368,7 +368,7 @@ func (t *tracesTab) view(m *model, w, h int) string {
 	}
 	title := "traces · " + strings.Join(f, " · ")
 	if t.err != "" && len(t.found) == 0 {
-		return panel(title, sRed.Render(wrap(t.err, w-4))+"\n\n"+sDim.Render("configure a tracing component (zipkin, jaeger) in jig.yaml"), w, h, true)
+		return panel(title, sRed.Render(wrap(t.err, w-4))+"\n\n"+sDim.Render("configure a tracing component (zipkin, jaeger) in rig.yaml"), w, h, true)
 	}
 	listH := m.paneSize("traces", splitGeo{total: h, minA: 5, minB: 6, down: true}, max(6, min(h/2, len(t.list.rows)+3)), 0, 0, w)
 	list := panel(fmt.Sprintf("%s · %d", title, len(t.list.rows)), t.list.view(m, 1, 1, w-2, listH-2, true), w, listH, true)

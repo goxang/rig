@@ -8,7 +8,7 @@ from app import greet
 
 class GreetTest(unittest.TestCase):
     def test_greet(self):
-        self.assertEqual(greet("jig"), "hello, jig")
+        self.assertEqual(greet("rig"), "hello, rig")
 
     def test_greet_needs_a_name(self):
         with self.assertRaises(ValueError):
@@ -16,7 +16,7 @@ class GreetTest(unittest.TestCase):
 
 
 class JUnitResult(unittest.TextTestResult):
-    """Also records each test for $JIG_JUNIT, so jig shows them one by one."""
+    """Also records each test for $RIG_JUNIT, so rig shows them one by one."""
 
     cases = []
 
@@ -33,7 +33,7 @@ class JUnitResult(unittest.TextTestResult):
 
 if __name__ == "__main__":
     result = unittest.main(exit=False, verbosity=2, testRunner=unittest.TextTestRunner(resultclass=JUnitResult)).result
-    if path := os.environ.get("JIG_JUNIT"):
+    if path := os.environ.get("RIG_JUNIT"):
         suite = ET.Element("testsuite", name="unit", tests=str(len(JUnitResult.cases)))
         for name, failure in JUnitResult.cases:
             case = ET.SubElement(suite, "testcase", classname=name.rsplit(".", 1)[0], name=name.rsplit(".", 1)[1])

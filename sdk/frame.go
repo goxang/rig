@@ -46,7 +46,7 @@ func (f *Frame) Len() int {
 }
 
 // ArgsSchema is the JSON Schema of a handler's argument type: a struct's json fields, with the
-// `desc:"..."` and `jig:"required"` tags. Anything else takes any arguments.
+// `desc:"..."` and `rig:"required"` tags. Anything else takes any arguments.
 func ArgsSchema(t reflect.Type) Schema {
 	if t.Kind() != reflect.Struct {
 		return nil
@@ -72,7 +72,7 @@ func ArgsSchema(t reflect.Type) Schema {
 			p["description"] = d
 		}
 		props[name] = p
-		if sf.Tag.Get("jig") == "required" {
+		if sf.Tag.Get("rig") == "required" {
 			req = append(req, name)
 		}
 	}

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/internal/sh"
+	"github.com/goxang/rig/internal/sh"
 )
 
 const maxHits = 500
@@ -33,7 +33,7 @@ type fileIndex struct {
 	at    time.Time
 }
 
-var skipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, ".jig": true, "dist": true, "__pycache__": true}
+var skipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, ".rig": true, "dist": true, "__pycache__": true}
 
 func (ix *fileIndex) list(ctx context.Context) []string {
 	ix.mu.Lock()

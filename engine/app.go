@@ -16,10 +16,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/scaffold"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/scaffold"
+	"github.com/goxang/rig/spec"
 )
 
 // ErrProtected stops a mutating operation on a protected environment unless the caller confirmed.
@@ -33,7 +33,7 @@ type App struct {
 	Env  *spec.Environment
 	// Confirmed lets mutating operations run on a protected environment.
 	Confirmed bool
-	// Inferred is a project with no jig.yaml, built in memory from the directory as jig init would.
+	// Inferred is a project with no rig.yaml, built in memory from the directory as rig init would.
 	Inferred bool
 	// Ask, when set, puts a yes/no question to the user (a terminal), so a protected environment
 	// can be changed after a yes instead of only with --yes.
@@ -66,12 +66,12 @@ type entry struct {
 	once    sync.Once
 }
 
-// inferred are the jig.yaml paths this process built in memory (Inferred), so reopening one (another
+// inferred are the rig.yaml paths this process built in memory (Inferred), so reopening one (another
 // environment, say) infers it again instead of failing on the missing file.
 var inferred sync.Map
 
-// Open loads the project file (found from dir when file is "") for env. With no jig.yaml anywhere
-// up, it infers one in memory from what the directory has, as jig init would write it (Inferred).
+// Open loads the project file (found from dir when file is "") for env. With no rig.yaml anywhere
+// up, it infers one in memory from what the directory has, as rig init would write it (Inferred).
 func Open(file, env string) (*App, error) {
 	var raw []byte
 	if file == "" {
@@ -114,7 +114,7 @@ func Open(file, env string) (*App, error) {
 	if err := a.newRuntime(); err != nil {
 		return nil, err
 	}
-	// `jig vars set` lives in the environment's state, which needs the runtime; values in jig.yaml
+	// `rig vars set` lives in the environment's state, which needs the runtime; values in rig.yaml
 	// (queries, tasks, components, the runtime's own env) were expanded without it, so expand again
 	// with the overrides and rebuild the runtime from them
 	if over := a.varOverrides(); len(over) > 0 {
@@ -194,7 +194,7 @@ func (a *App) StateDir() string {
 	if a.Env != nil {
 		env = a.Env.Name
 	}
-	return filepath.Join(a.Spec.Dir, ".jig", env)
+	return filepath.Join(a.Spec.Dir, ".rig", env)
 }
 
 // Component builds (once) and returns the named component.
@@ -535,7 +535,7 @@ func (a *App) DefaultImage(ctx context.Context, s *spec.Service) string {
 	return st["image."+s.Name]
 }
 
-// infer builds a jig.yaml for dir from its compose files, manifests and sources (jig init's
+// infer builds a rig.yaml for dir from its compose files, manifests and sources (rig init's
 // scaffold); nil when it finds nothing to run.
 func infer(dir string) (string, []byte) {
 	abs, err := filepath.Abs(dir)
@@ -550,15 +550,15 @@ func infer(dir string) (string, []byte) {
 	if err != nil {
 		return "", nil
 	}
-	file := filepath.Join(abs, "jig.yaml")
+	file := filepath.Join(abs, "rig.yaml")
 	inferred.Store(file, true)
 	return file, raw
 }
 
-// ignoreState adds .jig/ to the project's .gitignore once jig keeps state there, so pids, logs,
+// ignoreState adds .rig/ to the project's .gitignore once rig keeps state there, so pids, logs,
 // profiles and reports never show up as changes to commit. Projects outside git are left alone.
 func ignoreState(dir string) {
-	if _, err := os.Stat(filepath.Join(dir, ".jig")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, ".rig")); err != nil {
 		return
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
@@ -567,13 +567,13 @@ func ignoreState(dir string) {
 	file := filepath.Join(dir, ".gitignore")
 	raw, _ := os.ReadFile(file)
 	for _, l := range strings.Split(string(raw), "\n") {
-		// .jig/* with !.jig/plugins/ keeps a project's own plugins in git
+		// .rig/* with !.rig/plugins/ keeps a project's own plugins in git
 		switch strings.TrimPrefix(strings.TrimSpace(l), "/") {
-		case ".jig", ".jig/", ".jig/*":
+		case ".rig", ".rig/", ".rig/*":
 			return
 		}
 	}
-	text := "\n# jig: pids, logs, profiles, reports, test runs (jig.yaml)\n.jig/\n"
+	text := "\n# rig: pids, logs, profiles, reports, test runs (rig.yaml)\n.rig/\n"
 	if len(raw) == 0 || raw[len(raw)-1] == '\n' {
 		text = text[1:]
 	}
@@ -585,9 +585,9 @@ func ignoreState(dir string) {
 	_, _ = f.WriteString(text)
 }
 
-func lastEnvFile(dir string) string { return filepath.Join(dir, ".jig", "last-env") }
+func lastEnvFile(dir string) string { return filepath.Join(dir, ".rig", "last-env") }
 
-// LastEnv is the environment the UI last showed in the project of file ("" finds jig.yaml from here up).
+// LastEnv is the environment the UI last showed in the project of file ("" finds rig.yaml from here up).
 func LastEnv(file string) string {
 	if file == "" {
 		f, err := spec.Find(".")
@@ -600,7 +600,7 @@ func LastEnv(file string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// RememberEnv makes this environment the one the next `jig` opens on.
+// RememberEnv makes this environment the one the next `rig` opens on.
 func (a *App) RememberEnv() {
 	if a.Env == nil || a.Inferred {
 		return

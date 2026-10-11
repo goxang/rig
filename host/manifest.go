@@ -18,11 +18,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/kernel/config"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/kernel/config"
 )
 
-const ManifestFile = "jig-plugin.yaml"
+const ManifestFile = "rig-plugin.yaml"
 
 // Command is a program to run, as a list or a shell line.
 type Command []string
@@ -104,7 +104,7 @@ type Detect struct {
 type Manifest struct {
 	Name        string            `yaml:"name"`
 	Version     string            `yaml:"version"`
-	Jig         string            `yaml:"jig,omitempty"`
+	Rig         string            `yaml:"rig,omitempty"`
 	Description string            `yaml:"description,omitempty"`
 	Publisher   string            `yaml:"publisher,omitempty"`
 	Requires    map[string]string `yaml:"requires,omitempty"`
@@ -116,7 +116,7 @@ type Manifest struct {
 	Server      *Server           `yaml:"server,omitempty"`
 	MCP         *Server           `yaml:"mcp,omitempty"`
 	Permissions Permissions       `yaml:"permissions,omitempty"`
-	// Config is the JSON Schema of plugins.<name>: in jig.yaml, as properties.
+	// Config is the JSON Schema of plugins.<name>: in rig.yaml, as properties.
 	Config    map[string]map[string]any `yaml:"config,omitempty"`
 	Types     map[string]yaml.Node      `yaml:"types,omitempty"`
 	Schemes   []string                  `yaml:"schemes,omitempty"`
@@ -135,13 +135,13 @@ type Manifest struct {
 	// Build runs in the plugin's directory after a git or path install, such as go build -o bin/x .
 	Build Command `yaml:"build,omitempty"`
 
-	// Dir is where the manifest lives; Fragment the jig.yaml keys it contributes.
+	// Dir is where the manifest lives; Fragment the rig.yaml keys it contributes.
 	Dir      string      `yaml:"-"`
 	Fragment *config.Doc `yaml:"-"`
 	Warnings []string    `yaml:"-"`
 }
 
-// fragmentKeys are the jig.yaml keys a manifest may carry as defaults for the project.
+// fragmentKeys are the rig.yaml keys a manifest may carry as defaults for the project.
 var fragmentKeys = map[string]bool{"tasks": true, "queries": true, "dashboards": true, "alerts": true, "reports": true,
 	"tests": true, "agents": true, "templates": true, "defaults": true, "policy": true, "ai": true, "ui": true,
 	"sections": true, "keys": true, "themes": true}
@@ -157,7 +157,7 @@ type parsedManifest struct {
 // manifests caches parsed manifests by file; a command discovers plugins several times.
 var manifests sync.Map
 
-// LoadManifest reads dir/jig-plugin.yaml. Unknown keys are warnings, so an older jig loads a newer plugin.
+// LoadManifest reads dir/rig-plugin.yaml. Unknown keys are warnings, so an older rig loads a newer plugin.
 // Callers share the result and must not change it.
 func LoadManifest(dir string) (*Manifest, error) {
 	file := filepath.Join(dir, ManifestFile)
@@ -205,7 +205,7 @@ func ParseManifest(raw []byte, file string) (*Manifest, error) {
 		case fragmentKeys[k]:
 			frag.Content = append(frag.Content, top.Content[i], top.Content[i+1])
 		case !known[k]:
-			m.Warnings = append(m.Warnings, fmt.Sprintf("%s:%d: unknown key %q (a newer jig may know it)", file, top.Content[i].Line, k))
+			m.Warnings = append(m.Warnings, fmt.Sprintf("%s:%d: unknown key %q (a newer rig may know it)", file, top.Content[i].Line, k))
 		}
 	}
 	m.Fragment = config.FromNode(frag, file, "plugin "+m.Name)
@@ -239,7 +239,7 @@ func structKeys() []string {
 		out = append(out, k)
 	}
 	// omitempty hides these from the probe above
-	out = append(out, "jig", "description", "publisher", "requires", "implements", "permissions", "config", "types",
+	out = append(out, "rig", "description", "publisher", "requires", "implements", "permissions", "config", "types",
 		"schemes", "sources", "actions", "importers", "views", "widgets", "on", "events", "skills", "search",
 		"complete", "doctor", "docs", "build")
 	sort.Strings(out)

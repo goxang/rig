@@ -1,4 +1,4 @@
-// Package scaffold writes a first jig.yaml from what a directory already has: compose files,
+// Package scaffold writes a first rig.yaml from what a directory already has: compose files,
 // Kubernetes manifests, and services in Go, Python, Node, Java or Rust, plus infrastructure presets.
 package scaffold
 
@@ -15,7 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 type Service struct {
@@ -31,11 +31,11 @@ type Service struct {
 	DockerCommand, DockerArgs, Volumes []string
 	Shared                             bool
 	From                               string
-	// Adopt is a running container jig takes over (docker: {container: ...}) instead of making one.
+	// Adopt is a running container rig takes over (docker: {container: ...}) instead of making one.
 	Adopt string
-	// Section groups it on the Services screen (sections:), by what jig init --deep found it as.
+	// Section groups it on the Services screen (sections:), by what rig init --deep found it as.
 	Section string
-	// Imported comes from a compose file or manifests jig.yaml imports: only what they lack is written.
+	// Imported comes from a compose file or manifests rig.yaml imports: only what they lack is written.
 	Imported bool
 }
 
@@ -468,7 +468,7 @@ func (p *Plan) sections() *yaml.Node {
 	return out
 }
 
-// YAML is the jig.yaml of the plan.
+// YAML is the rig.yaml of the plan.
 func (p *Plan) YAML() ([]byte, error) {
 	hasInfra, runnable, built := false, false, false
 	for _, s := range p.Services {
@@ -523,7 +523,7 @@ func (p *Plan) YAML() ([]byte, error) {
 	}
 	if built || len(p.Manifests) > 0 {
 		kind := mapping("type", "kind", "cluster", p.Project, "namespace", p.Project, "registry_port", "5001", "create_namespace", "true")
-		addEnv("kind", mapping("description", "a throwaway kind cluster: jig do runtime create, then jig up --build", "runtime", kind))
+		addEnv("kind", mapping("description", "a throwaway kind cluster: rig do runtime create, then rig up --build", "runtime", kind))
 	}
 	add("environments", envs)
 
@@ -561,8 +561,8 @@ func (p *Plan) YAML() ([]byte, error) {
 
 	var b bytes.Buffer
 	b.WriteString(spec.SchemaHeader + "\n")
-	b.WriteString("# jig.yaml: every environment of " + p.Project + " in one file. Reference: https://github.com/goxang/jig/blob/main/docs/config.md\n")
-	b.WriteString("# Written by jig init from what the directory has; check ports, health checks and passwords.\n")
+	b.WriteString("# rig.yaml: every environment of " + p.Project + " in one file. Reference: https://github.com/goxang/rig/blob/main/docs/config.md\n")
+	b.WriteString("# Written by rig init from what the directory has; check ports, health checks and passwords.\n")
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
 	if err := enc.Encode(&yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}); err != nil {

@@ -22,19 +22,19 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/events"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/rpc"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/events"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/rpc"
 )
 
 // Plugin is one discovered plugin and, once called, its process.
 type Plugin struct {
 	*Manifest
-	// Config is plugins.<name> from jig.yaml over the manifest's config defaults.
+	// Config is plugins.<name> from rig.yaml over the manifest's config defaults.
 	Config map[string]any
 
 	h       *Host
@@ -99,7 +99,7 @@ func (p *Plugin) conn(ctx context.Context) (*rpc.Conn, error) {
 		}
 	}
 	if len(recent) >= 5 {
-		return nil, unavailable("plugin %s stopped 5 times in a minute; see jig plugin logs %s", p.Name, p.Name)
+		return nil, unavailable("plugin %s stopped 5 times in a minute; see rig plugin logs %s", p.Name, p.Name)
 	}
 	if n := len(recent); n > 0 {
 		select {
@@ -125,7 +125,7 @@ func (p *Plugin) conn(ctx context.Context) (*rpc.Conn, error) {
 	proc, err := rpc.Start(cmd, rpc.Options{OnRequest: p.serve, OnNotify: p.notify, Tap: p.tap})
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: fmt.Sprintf("plugin %s: %v", p.Name, err),
-			Data: &protocol.ErrorData{Hint: "jig plugin info " + p.Name}}
+			Data: &protocol.ErrorData{Hint: "rig plugin info " + p.Name}}
 	}
 	ictx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -143,7 +143,7 @@ func (p *Plugin) handshake(ctx context.Context, c *rpc.Conn) error {
 	}
 	var ir protocol.InitializeResult
 	err := c.Call(ctx, protocol.MethodInitialize, protocol.InitializeParams{
-		Host:         protocol.HostInfo{Name: "jig", Version: Version},
+		Host:         protocol.HostInfo{Name: "rig", Version: Version},
 		Protocols:    []string{protocol.Version},
 		Capabilities: &protocol.HostCapabilities{Widgets: view.Widgets},
 	}, &ir)
@@ -316,11 +316,11 @@ func netPort(s string) uint16 {
 	return 443
 }
 
-// environ is PATH, HOME, LANG, proxies and what the plugin declares; nothing else of jig's environment leaks.
+// environ is PATH, HOME, LANG, proxies and what the plugin declares; nothing else of rig's environment leaks.
 func (p *Plugin) environ(extra map[string]string) []string {
 	var out []string
 	if slices.Contains(p.Permissions.Env, "*") {
-		out = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "JIG_") })
+		out = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "RIG_") })
 	}
 	for _, k := range slices.Concat([]string{"PATH", "HOME", "LANG", "LC_ALL", "TZ"}, proxyVars, p.Permissions.Env) {
 		if v, ok := os.LookupEnv(k); ok {
@@ -330,8 +330,8 @@ func (p *Plugin) environ(extra map[string]string) []string {
 			out = append(out, k+"="+v)
 		}
 	}
-	out = append(out, "JIG_PLUGIN="+p.Name, "JIG_PLUGIN_DIR="+p.Dir, "JIG_PROJECT="+p.h.Dir, "JIG_FILE="+p.h.File, "JIG_ENV="+p.h.Env,
-		"JIG_CACHE="+p.cacheDir(), "JIG_PROTOCOL="+protocol.Version)
+	out = append(out, "RIG_PLUGIN="+p.Name, "RIG_PLUGIN_DIR="+p.Dir, "RIG_PROJECT="+p.h.Dir, "RIG_FILE="+p.h.File, "RIG_ENV="+p.h.Env,
+		"RIG_CACHE="+p.cacheDir(), "RIG_PROTOCOL="+protocol.Version)
 	for k, v := range extra {
 		out = append(out, k+"="+p.expand(v))
 	}
@@ -365,9 +365,9 @@ func (p *Plugin) openLog() (*os.File, error) {
 func LogFile(name string) string   { return filepath.Join(StateDir(), "logs", name+".log") }
 func TraceFile(name string) string { return filepath.Join(StateDir(), "logs", name+".trace") }
 
-// tap records the RPC exchange when JIG_TRACE names the plugin (or is *).
+// tap records the RPC exchange when RIG_TRACE names the plugin (or is *).
 func (p *Plugin) tap(dir byte, line []byte) {
-	t := os.Getenv("JIG_TRACE")
+	t := os.Getenv("RIG_TRACE")
 	if t == "" || t != "*" && !slices.Contains(strings.Split(t, ","), p.Name) {
 		return
 	}
@@ -630,7 +630,7 @@ func (p *Plugin) declared() *protocol.Provides {
 	return pr
 }
 
-// script runs a run: command for a query, run, plan or import. Args go in $JIG_ARGS and on stdin.
+// script runs a run: command for a query, run, plan or import. Args go in $RIG_ARGS and on stdin.
 func (p *Plugin) script(ctx context.Context, method string, params, result any) error {
 	switch method {
 	case protocol.MethodQuery:
@@ -657,7 +657,7 @@ func (p *Plugin) script(ctx context.Context, method string, params, result any) 
 		}
 		var env []string
 		if method == protocol.MethodPlan {
-			env = []string{"JIG_DRY_RUN=1"}
+			env = []string{"RIG_DRY_RUN=1"}
 		}
 		out, err := p.runScript(ctx, d.Run, r.Args, jobs.Out(ctx), env...)
 		if err != nil {
@@ -672,7 +672,7 @@ func (p *Plugin) script(ctx context.Context, method string, params, result any) 
 		if !ok || len(d.Run) == 0 {
 			return notFound("importer", p.Name+"."+ip.Importer)
 		}
-		out, err := p.runScript(ctx, d.Run, ip, nil, "JIG_FILES="+strings.Join(ip.Files, string(os.PathListSeparator)))
+		out, err := p.runScript(ctx, d.Run, ip, nil, "RIG_FILES="+strings.Join(ip.Files, string(os.PathListSeparator)))
 		if err != nil {
 			return err
 		}
@@ -694,7 +694,7 @@ func (p *Plugin) runScript(ctx context.Context, c Command, args any, live io.Wri
 	b, _ := json.Marshal(args)
 	conf, _ := json.Marshal(p.Config)
 	cmd := p.command(ctx, c, nil)
-	cmd.Env = append(cmd.Env, append(env, "JIG_ARGS="+string(b), "JIG_CONFIG="+string(conf))...)
+	cmd.Env = append(cmd.Env, append(env, "RIG_ARGS="+string(b), "RIG_CONFIG="+string(conf))...)
 	cmd.Stdin = bytes.NewReader(b)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out

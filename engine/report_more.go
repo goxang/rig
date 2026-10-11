@@ -17,10 +17,10 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // ReportTests is a suite's last run as a report sees it.

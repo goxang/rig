@@ -1,6 +1,6 @@
-// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.
+// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.
 
-export const VERSION = "jig/1";
+export const VERSION = "rig/1";
 
 export const METHODS = {
   "initialize": "host",

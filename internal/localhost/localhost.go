@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 type Host struct{}

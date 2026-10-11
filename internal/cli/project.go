@@ -11,17 +11,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/manifest"
-	"github.com/goxang/jig/scaffold"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/manifest"
+	"github.com/goxang/rig/scaffold"
+	"github.com/goxang/rig/spec"
 )
 
 func projectCommands() []*cobra.Command {
@@ -200,11 +200,11 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	)
 	initCmd := &cobra.Command{
 		Use:   "init",
-		Short: "write jig.yaml from what this directory has: compose files, Kubernetes manifests, Go/Python/Node/Java/Rust services",
-		Example: `  jig init                          # look around and write jig.yaml
-  jig init --dry-run                # print it instead
-  jig init --with postgres,redis    # plus infrastructure (` + strings.Join(scaffold.Presets(), ", ") + `)
-  jig init --deep                   # search every folder and running container, pick what to add (also to an existing jig.yaml)`,
+		Short: "write rig.yaml from what this directory has: compose files, Kubernetes manifests, Go/Python/Node/Java/Rust services",
+		Example: `  rig init                          # look around and write rig.yaml
+  rig init --dry-run                # print it instead
+  rig init --with postgres,redis    # plus infrastructure (` + strings.Join(scaffold.Presets(), ", ") + `)
+  rig init --deep                   # search every folder and running container, pick what to add (also to an existing rig.yaml)`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if deep {
 				return initDeep(cmd.Context(), dry, all)
@@ -214,18 +214,18 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 	}
 	initCmd.Flags().BoolVar(&deep, "deep", false, "search every subfolder (Go mains and tests, Dockerfiles, compose, manifests, Helm, GoLand, Python/Node/Java/Rust/.NET) and running containers, then pick")
 	initCmd.Flags().BoolVar(&all, "all", false, "with --deep: take every candidate without asking")
-	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing jig.yaml")
-	initCmd.Flags().BoolVar(&dry, "dry-run", false, "print jig.yaml instead of writing it")
+	initCmd.Flags().BoolVar(&force, "force", false, "overwrite an existing rig.yaml")
+	initCmd.Flags().BoolVar(&dry, "dry-run", false, "print rig.yaml instead of writing it")
 	initCmd.Flags().StringSliceVar(&with, "with", nil, "infrastructure to add: "+strings.Join(scaffold.Presets(), ", "))
 
 	task := &cobra.Command{
 		Use:   "task [name [args...]]",
-		Short: "run a task from jig.yaml (its shell steps, in order), or list them",
-		Example: `  jig task ship core shaparak              # positional args: $1... and $JIG_ARGS
-  jig task ship BRANCH=feature-x TAG=v3    # NAME=value args: set that env var instead of pre-exporting it
-  jig task nexus-prune keep=3 DRY_RUN=1    # name=value presets a declared arg; the rest take their defaults
-  jig task ship                            # on a terminal, asks for the args the task declares
-  jig -y task ship minimum                 # --yes (or no terminal, as for agents) never asks`,
+		Short: "run a task from rig.yaml (its shell steps, in order), or list them",
+		Example: `  rig task ship core shaparak              # positional args: $1... and $RIG_ARGS
+  rig task ship BRANCH=feature-x TAG=v3    # NAME=value args: set that env var instead of pre-exporting it
+  rig task nexus-prune keep=3 DRY_RUN=1    # name=value presets a declared arg; the rest take their defaults
+  rig task ship                            # on a terminal, asks for the args the task declares
+  rig -y task ship minimum                 # --yes (or no terminal, as for agents) never asks`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				var rows [][]string
@@ -237,8 +237,8 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 			}
 			rest := args[1:]
 			t, ok := a.Tasks()[args[0]]
-			// a task run from another task's step (JIG_TASK set) takes its defaults, never asks
-			interactive := !a.Confirmed && os.Getenv("JIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd()))
+			// a task run from another task's step (RIG_TASK set) takes its defaults, never asks
+			interactive := !a.Confirmed && os.Getenv("RIG_TASK") == "" && term.IsTerminal(int(os.Stdin.Fd()))
 			if ok && len(t.Args) > 0 {
 				if preset, named := engine.PresetTaskArgs(t.Args, rest); named {
 					rest = preset
@@ -283,10 +283,10 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 
 	vars := &cobra.Command{
 		Use:   "vars [set K=V... | unset K...]",
-		Short: "manifest variables ($MAIN_DB, ...): jig.yaml's, overridden per environment and kept in its state",
-		Example: `  jig -e staging vars                                  # what manifests get, and where from
-  jig -e staging vars set MAIN_DB=staging_app AUDIT_DB=staging_audit   # then jig up / deploy renders with them
-  jig -e staging vars unset MAIN_DB                    # back to jig.yaml's value`,
+		Short: "manifest variables ($MAIN_DB, ...): rig.yaml's, overridden per environment and kept in its state",
+		Example: `  rig -e staging vars                                  # what manifests get, and where from
+  rig -e staging vars set MAIN_DB=staging_app AUDIT_DB=staging_audit   # then rig up / deploy renders with them
+  rig -e staging vars unset MAIN_DB                    # back to rig.yaml's value`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) > 0 {
 				if err := a.Guard(); err != nil {
@@ -301,11 +301,11 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 					case args[0] == "unset" && !ok:
 						kv["var."+k] = ""
 					default:
-						return fmt.Errorf("usage: jig vars set K=V [K=V ...] | jig vars unset K [K ...]")
+						return fmt.Errorf("usage: rig vars set K=V [K=V ...] | rig vars unset K [K ...]")
 					}
 				}
 				if len(kv) == 0 {
-					return fmt.Errorf("usage: jig vars set K=V [K=V ...] | jig vars unset K [K ...]")
+					return fmt.Errorf("usage: rig vars set K=V [K=V ...] | rig vars unset K [K ...]")
 				}
 				if err := a.SetState(ctx, kv); err != nil {
 					return err
@@ -330,10 +330,10 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 
 	secret := &cobra.Command{
 		Use:   "secret [ls | set NAME [VALUE] | rm NAME]",
-		Short: "secrets jig.yaml uses as ${NAME}: kept in your config dir (0600), never in the repo; the environment wins",
-		Example: `  jig secret                          # declared secrets and where each value comes from (never the value)
-  jig secret set JIG_RABBITMQ_PASSWORD  # asks without echo (or reads stdin)
-  jig secret rm JIG_RABBITMQ_PASSWORD`,
+		Short: "secrets rig.yaml uses as ${NAME}: kept in your config dir (0600), never in the repo; the environment wins",
+		Example: `  rig secret                          # declared secrets and where each value comes from (never the value)
+  rig secret set RIG_RABBITMQ_PASSWORD  # asks without echo (or reads stdin)
+  rig secret rm RIG_RABBITMQ_PASSWORD`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := g.file
 			if file == "" {
@@ -356,7 +356,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 						return err
 					}
 					if value == "" {
-						return fmt.Errorf("empty value; jig secret rm %s removes it", args[1])
+						return fmt.Errorf("empty value; rig secret rm %s removes it", args[1])
 					}
 				}
 				if err := spec.SetSecret(p.Name, args[1], value); err != nil {
@@ -366,7 +366,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 				return nil
 			}
 			if len(args) > 0 && args[0] != "ls" {
-				return fmt.Errorf("usage: jig secret [ls | set NAME [VALUE] | rm NAME]")
+				return fmt.Errorf("usage: rig secret [ls | set NAME [VALUE] | rm NAME]")
 			}
 			stored, err := spec.LoadSecrets(p.Name)
 			if err != nil {
@@ -399,7 +399,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 		},
 	}
 
-	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("jig", Version) }}
+	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
 	return []*cobra.Command{initCmd, env, vars, secret, nsCommand(), infraCommand(), task, source, manifests, hosts, mcpCommand(), version, upgradeCommand(), uninstallCommand(), migrateCommand(), lintCommand()}
 }

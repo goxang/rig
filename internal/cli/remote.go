@@ -21,15 +21,15 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
-// Remote is a jig server this user signed in to.
+// Remote is a rig server this user signed in to.
 type Remote struct {
 	URL         string `json:"url"`
 	User        string `json:"user,omitempty"`
@@ -60,7 +60,7 @@ func saveRemotes(rs map[string]Remote) error {
 
 // remoteCommands work with -r; the rest need the project here.
 var remoteCommands = map[string]bool{"call": true, "inbox": true, "lock": true, "unlock": true, "admin": true,
-	"tokens": true, "audit": true, "mcp": true, "whoami": true, "logout": true, "login": true, "jig": false}
+	"tokens": true, "audit": true, "mcp": true, "whoami": true, "logout": true, "login": true, "rig": false}
 
 func checkRemote(cmd *cobra.Command) error {
 	if g.remote == "" {
@@ -71,13 +71,13 @@ func checkRemote(cmd *cobra.Command) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("jig %s runs on this machine only; with -r: call, inbox, lock, unlock, admin tokens|audit, mcp, whoami", cmd.Name())
+	return fmt.Errorf("rig %s runs on this machine only; with -r: call, inbox, lock, unlock, admin tokens|audit, mcp, whoami", cmd.Name())
 }
 
 func remoteClient() (*api.Client, error) {
 	r, ok := loadRemotes()[g.remote]
 	if !ok {
-		return nil, fmt.Errorf("no remote %q: jig login <url> --name %s", g.remote, g.remote)
+		return nil, fmt.Errorf("no remote %q: rig login <url> --name %s", g.remote, g.remote)
 	}
 	return &api.Client{URL: r.URL, Token: r.Token, Env: g.env, Fingerprint: r.Fingerprint, Ask: askServer}, nil
 }
@@ -129,10 +129,10 @@ func loginCommand() *cobra.Command {
 	var oidc bool
 	c := &cobra.Command{
 		Use:   "login <url>",
-		Short: "sign in to a jig server; then jig -r <name> ... runs there",
-		Example: `  jig login https://jig.example.local            # password, then a TOTP code if the account has one
-  jig login https://jig.example.local --oidc     # through the identity provider, in a browser
-  jig login https://jig.example.local --token $JIG_TOKEN --name ci`,
+		Short: "sign in to a rig server; then rig -r <name> ... runs there",
+		Example: `  rig login https://rig.example.local            # password, then a TOTP code if the account has one
+  rig login https://rig.example.local --oidc     # through the identity provider, in a browser
+  rig login https://rig.example.local --token $RIG_TOKEN --name ci`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -140,8 +140,8 @@ func loginCommand() *cobra.Command {
 			if err != nil || u.Host == "" {
 				return fmt.Errorf("%q is not a URL", args[0])
 			}
-			if u.Scheme != "https" && os.Getenv("JIG_INSECURE_HTTP") == "" {
-				return errors.New("jig servers speak HTTPS only")
+			if u.Scheme != "https" && os.Getenv("RIG_INSECURE_HTTP") == "" {
+				return errors.New("rig servers speak HTTPS only")
 			}
 			if name == "" {
 				name = strings.Split(u.Hostname(), ".")[0]
@@ -168,7 +168,7 @@ func loginCommand() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(os.Stderr, "the server's certificate is not signed by a known authority.\nSHA-256 fingerprint: %s\n", fp)
-				if !g.yes && !askYes("trust it (compare with what jig serve printed)?") {
+				if !g.yes && !askYes("trust it (compare with what rig serve printed)?") {
 					return errors.New("not trusted")
 				}
 				c = &api.Client{URL: c.URL, Fingerprint: fp}
@@ -232,7 +232,7 @@ func loginCommand() *cobra.Command {
 			if err := saveRemotes(rs); err != nil {
 				return err
 			}
-			fmt.Printf("%s signed in to %s (%s) as %s; jig -r %s ...\n", green("✓"), name, info.Project, me, name)
+			fmt.Printf("%s signed in to %s (%s) as %s; rig -r %s ...\n", green("✓"), name, info.Project, me, name)
 			return nil
 		},
 	}
@@ -260,14 +260,14 @@ func peerFingerprint(addr string) (string, error) {
 func logoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout [name]",
-		Short: "sign out of a jig server and forget it",
+		Short: "sign out of a rig server and forget it",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				g.remote = args[0]
 			}
 			if g.remote == "" {
-				return errors.New("which server? jig logout <name>")
+				return errors.New("which server? rig logout <name>")
 			}
 			c, err := remoteClient()
 			if err != nil {
@@ -286,7 +286,7 @@ func logoutCommand() *cobra.Command {
 func whoamiCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
-		Short: "who jig acts as, with which roles (on the server with -r)",
+		Short: "who rig acts as, with which roles (on the server with -r)",
 		Args:  cobra.NoArgs,
 		RunE: withEngine(func(ctx context.Context, e api.Engine, _ []string) error {
 			me := e.Session(ctx)
@@ -302,9 +302,9 @@ func callCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "call [action|source] [name=value...]",
 		Short: "run an action or read a source by name, through policy (on the server with -r)",
-		Example: `  jig call                              # every action and source
-  jig call services.status
-  jig -r work call runtime.restart service=api`,
+		Example: `  rig call                              # every action and source
+  rig call services.status
+  rig -r work call runtime.restart service=api`,
 		RunE: withEngine(func(ctx context.Context, e api.Engine, args []string) error {
 			p := e.Provides(ctx)
 			if len(args) == 0 {

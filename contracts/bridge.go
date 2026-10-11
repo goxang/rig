@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/manifest"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/manifest"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // Caller reaches a plugin's sources and actions by their namespaced names: the plugin host.

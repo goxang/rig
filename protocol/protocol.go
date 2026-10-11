@@ -1,4 +1,4 @@
-// Package protocol is jig/1, the plugin protocol: its schema, the types generated from it, and a
+// Package protocol is rig/1, the plugin protocol: its schema, the types generated from it, and a
 // validator. The schema is the contract; sdk/ and the Python and TypeScript SDKs are generated from it.
 package protocol
 
@@ -14,7 +14,7 @@ import (
 
 //go:generate go test -run TestGenerated -update .
 
-//go:embed jig1.schema.json
+//go:embed rig1.schema.json
 var SchemaJSON []byte
 
 var schema = sync.OnceValue(func() map[string]any {

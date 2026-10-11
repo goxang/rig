@@ -79,7 +79,7 @@ func detectDir(dir string) (found, bool) {
 		f.lang, f.run, f.port = "django", []string{"python", "manage.py", "runserver", "0.0.0.0:8000"}, 8000
 		f.test = "python manage.py test"
 		if pytest {
-			f.test = "pytest --junitxml=$JIG_JUNIT"
+			f.test = "pytest --junitxml=$RIG_JUNIT"
 		}
 	case py != "":
 		f.lang, f.port = "python", 8000
@@ -99,7 +99,7 @@ func detectDir(dir string) (found, bool) {
 			}
 		}
 		if pytest {
-			f.test = "pytest --junitxml=$JIG_JUNIT"
+			f.test = "pytest --junitxml=$RIG_JUNIT"
 		}
 		if f.run == nil && !f.dockerfile {
 			return f, false
@@ -123,12 +123,12 @@ func detectDir(dir string) (found, bool) {
 			return f, false
 		}
 	case exists(filepath.Join(dir, "pom.xml")):
-		f.lang, f.port, f.test = "java", 8080, "mvn -q test; s=$?; cat target/surefire-reports/*.xml > $JIG_JUNIT 2>/dev/null; exit $s"
+		f.lang, f.port, f.test = "java", 8080, "mvn -q test; s=$?; cat target/surefire-reports/*.xml > $RIG_JUNIT 2>/dev/null; exit $s"
 		if strings.Contains(readFile(dir, "pom.xml"), "spring-boot") {
 			f.run = []string{"mvn", "spring-boot:run"}
 		}
 	case exists(filepath.Join(dir, "build.gradle")) || exists(filepath.Join(dir, "build.gradle.kts")):
-		f.lang, f.port, f.test = "java", 8080, "./gradlew test; s=$?; cat build/test-results/test/*.xml > $JIG_JUNIT 2>/dev/null; exit $s"
+		f.lang, f.port, f.test = "java", 8080, "./gradlew test; s=$?; cat build/test-results/test/*.xml > $RIG_JUNIT 2>/dev/null; exit $s"
 		if g := readFile(dir, "build.gradle") + readFile(dir, "build.gradle.kts"); strings.Contains(g, "org.springframework.boot") {
 			f.run = []string{"./gradlew", "bootRun"}
 		}

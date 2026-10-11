@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 type Level int
@@ -36,7 +36,7 @@ func (f Firing) String() string {
 	return fmt.Sprintf("%s %s%s", s, strconv.FormatFloat(f.Value, 'f', -1, 64), f.Unit)
 }
 
-// DefaultAlerts watch the nodes when jig.yaml names no alerts: memory and CPU at 90% and 98%, disk at 97% and 98%.
+// DefaultAlerts watch the nodes when rig.yaml names no alerts: memory and CPU at 90% and 98%, disk at 97% and 98%.
 var DefaultAlerts = []spec.Alert{
 	{Name: "memory", Source: "hosts", Metric: "memory", Warn: 90, Crit: 98, Unit: "%"},
 	{Name: "cpu", Source: "hosts", Metric: "cpu", Warn: 90, Crit: 98, Unit: "%"},

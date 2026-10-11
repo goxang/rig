@@ -11,7 +11,7 @@ import (
 	"github.com/goxang/scrub/packs"
 )
 
-// Redactor puts <secret:NAME> in place of secrets in text bound for a model: the values jig knows
+// Redactor puts <secret:NAME> in place of secrets in text bound for a model: the values rig knows
 // to be secret (Known), then whatever goxang/scrub's packs take for a credential (URL passwords,
 // key=value pairs, JWTs, cloud tokens, bearer headers, private keys, card numbers, PINs).
 // A nil Redactor redacts nothing.

@@ -5,9 +5,9 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/internal/cli"
-	"github.com/goxang/jig/internal/tui"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/internal/cli"
+	"github.com/goxang/rig/internal/tui"
 )
 
 var version = "dev"

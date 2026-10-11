@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 type UpOptions struct {
@@ -258,7 +258,7 @@ func (a *App) settle(ctx context.Context, deployed map[string]int, d time.Durati
 		}
 	}
 	if len(bad) > 0 {
-		return fmt.Errorf("ready, then failing: %s; see jig logs <service>", strings.Join(bad, "; "))
+		return fmt.Errorf("ready, then failing: %s; see rig logs <service>", strings.Join(bad, "; "))
 	}
 	fmt.Fprintln(out, "  ✓ stable")
 	return nil
@@ -428,7 +428,7 @@ func (a *App) build(ctx context.Context, s *spec.Service, tag, ref string, push 
 var buildSlots = make(chan struct{}, buildJobs())
 
 func buildJobs() int {
-	if n, err := strconv.Atoi(os.Getenv("JIG_BUILD_JOBS")); err == nil && n > 0 {
+	if n, err := strconv.Atoi(os.Getenv("RIG_BUILD_JOBS")); err == nil && n > 0 {
 		return n
 	}
 	return 2

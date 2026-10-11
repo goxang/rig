@@ -3,10 +3,10 @@ package engine
 import (
 	"fmt"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
-// KubeTarget is the kubeconfig context and server env's runtime names, read from jig.yaml alone so
+// KubeTarget is the kubeconfig context and server env's runtime names, read from rig.yaml alone so
 // it works while the cluster cannot be reached.
 func KubeTarget(file, env string) (name, context, server string, err error) {
 	if file == "" {

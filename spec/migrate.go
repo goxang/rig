@@ -8,8 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CurrentVersion is the jig.yaml schema version this build understands. Bump it and add a
-// Migration below whenever a change needs an old jig.yaml rewritten to keep loading.
+// CurrentVersion is the rig.yaml schema version this build understands. Bump it and add a
+// Migration below whenever a change needs an old rig.yaml rewritten to keep loading.
 const CurrentVersion = 1
 
 // Migration rewrites a project file's root mapping from one version to the next; From is the
@@ -22,7 +22,7 @@ type Migration struct {
 // migrations runs in order; none exist yet because the schema hasn't changed since version 1.
 var migrations []Migration
 
-// Migrate brings a jig.yaml up to CurrentVersion in place, keeping comments and formatting.
+// Migrate brings a rig.yaml up to CurrentVersion in place, keeping comments and formatting.
 // It reports the version found and whether the file was rewritten.
 func Migrate(file string) (from int, changed bool, err error) {
 	raw, err := os.ReadFile(file)

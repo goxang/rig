@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 func TestVarsByDependency(t *testing.T) {

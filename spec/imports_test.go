@@ -15,7 +15,7 @@ func TestImportKeepsMultilineStrings(t *testing.T) {
 			map[string]any{"title": "t", "query": query}}}}}, nil
 	}
 	d := t.TempDir()
-	f := filepath.Join(d, "jig.yaml")
+	f := filepath.Join(d, "rig.yaml")
 	if err := os.WriteFile(f, []byte("version: 1\nproject: x\nimports:\n  - grafana: r.json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

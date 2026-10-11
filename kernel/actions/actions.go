@@ -9,12 +9,12 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/goxang/jig/kernel/audit"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/audit"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/protocol"
 )
 
 type Func func(ctx context.Context, args protocol.Args) (*protocol.RunResult, error)
@@ -159,7 +159,7 @@ func (r *Runner) hold(ctx context.Context, a Action, c Call, why string) error {
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("%s waits for approval (%s): jig inbox approve %s", c.Action, why, it.ID)
+	msg := fmt.Sprintf("%s waits for approval (%s): rig inbox approve %s", c.Action, why, it.ID)
 	entry := audit.Entry{Subject: c.Subject, Action: c.Action, Args: c.Args, Effect: a.Effect, Env: c.Env, Decision: string(policy.Approve), Error: msg}
 	return errors.Join(&protocol.Error{Code: protocol.CodeNeedsInput, Message: msg}, r.log(a, entry))
 }

@@ -12,7 +12,7 @@ func TestRedundant(t *testing.T) {
 		return map[string]*Service{"api": {Image: "api:1", Ports: map[string]int{"http": 8080}}}, nil
 	})
 	dir := t.TempDir()
-	f := filepath.Join(dir, "jig.yaml")
+	f := filepath.Join(dir, "rig.yaml")
 	os.WriteFile(f, []byte(`project: p
 imports: [{lintfake: x}]
 services:

@@ -1,6 +1,6 @@
 // Package plugin is the in-process adapter registry. An adapter registers a factory for one kind
-// from its package init; jig itself bundles none (they live in goxang/jig-plugins and reach jig as
-// plugins), while jig-std imports them all to serve them.
+// from its package init; rig itself bundles none (they live in goxang/rig-plugins and reach rig as
+// plugins), while rig-std imports them all to serve them.
 package plugin
 
 import (
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 type Factory func(env core.Env, c *spec.Component) (any, error)
@@ -81,7 +81,7 @@ func Resolve(c *spec.Component) (Adapter, error) {
 	case 1:
 		return found[0], nil
 	case 0:
-		return Adapter{}, fmt.Errorf("component %s: unknown type %q (see `jig plugin ls`; `jig plugin add %s` installs it)", c.Name, c.Type, c.Type)
+		return Adapter{}, fmt.Errorf("component %s: unknown type %q (see `rig plugin ls`; `rig plugin add %s` installs it)", c.Name, c.Type, c.Type)
 	}
 	var kinds []string
 	for _, a := range found {

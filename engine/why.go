@@ -15,16 +15,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/kernel/audit"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/kernel/audit"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/protocol"
 )
 
-// Evidence is one fact jig why found, cited by its ID.
+// Evidence is one fact rig why found, cited by its ID.
 type Evidence struct {
 	ID      string    `json:"id"`
 	Kind    string    `json:"kind"` // status, health, reach, logs, traces, metrics, alert, change
@@ -44,7 +44,7 @@ type Suspect struct {
 	Evidence []string `json:"evidence"`
 }
 
-// Incident is what jig why gathered about one service and what it depends on.
+// Incident is what rig why gathered about one service and what it depends on.
 type Incident struct {
 	Service string `json:"service"`
 	// Symptom is what the user described, when they said more than a service's name.
@@ -357,7 +357,7 @@ func (a *App) metricEvidence(ctx context.Context, names []string, window time.Du
 	}
 }
 
-// changeEvidence: what the assistant changed, and when jig last changed the environment's state.
+// changeEvidence: what the assistant changed, and when rig last changed the environment's state.
 func (a *App) changeEvidence(window time.Duration, add func(Evidence)) {
 	es, _ := ai.ReadAudit(a.AuditFile())
 	for _, e := range es {
@@ -373,13 +373,13 @@ func (a *App) changeEvidence(window time.Duration, add func(Evidence)) {
 		}
 	}
 	if fi, err := os.Stat(filepath.Join(a.StateDir(), "state.json")); err == nil && time.Since(fi.ModTime()) < window {
-		add(Evidence{Kind: "change", At: fi.ModTime(), Summary: fmt.Sprintf("jig changed this environment's state (a deploy, tag or env) %s ago", time.Since(fi.ModTime()).Round(time.Second))})
+		add(Evidence{Kind: "change", At: fi.ModTime(), Summary: fmt.Sprintf("rig changed this environment's state (a deploy, tag or env) %s ago", time.Since(fi.ModTime()).Round(time.Second))})
 	}
 }
 
 type hosted struct{ name, host string }
 
-// componentHosts are the components whose addr is a jig service (svc://name:port).
+// componentHosts are the components whose addr is a rig service (svc://name:port).
 func (a *App) componentHosts() []hosted {
 	var out []hosted
 	for _, n := range a.componentNames() {
@@ -461,8 +461,8 @@ func contains(xs []string, x string) bool {
 	return false
 }
 
-// FixPrompt is what "fix" after a jig why analysis tells the assistant.
-const FixPrompt = `fix: apply the fix you proposed, now, with jig's tools (jig_file edits, jig_kv, jig_service, jig_deploy, ...); every change waits for the user's yes. Then check it worked with the same evidence (logs, traces, metrics) and say whether the symptom is gone.`
+// FixPrompt is what "fix" after a rig why analysis tells the assistant.
+const FixPrompt = `fix: apply the fix you proposed, now, with rig's tools (rig_file edits, rig_kv, rig_service, rig_deploy, ...); every change waits for the user's yes. Then check it worked with the same evidence (logs, traces, metrics) and say whether the symptom is gone.`
 
 // Brief is one line about what was gathered: how much evidence, how much of it bad, the top suspects.
 func (inc *Incident) Brief() string {
@@ -490,7 +490,7 @@ func (inc *Incident) Prompt() string {
 	if inc.Service == "" {
 		what = "Something"
 	}
-	fmt.Fprintf(&b, "%s on environment %s misbehaves. jig gathered this evidence over the last %s (services checked: %s).\n\n",
+	fmt.Fprintf(&b, "%s on environment %s misbehaves. rig gathered this evidence over the last %s (services checked: %s).\n\n",
 		what, inc.Env, inc.Window, strings.Join(inc.Checked, ", "))
 	if inc.Symptom != "" {
 		fmt.Fprintf(&b, "The user describes the symptom as: %q\n\n", inc.Symptom)
@@ -511,12 +511,12 @@ one or two sentences naming the most likely root cause.
 ## Hypotheses
 a numbered list, most likely first; each names the service at fault, why, and cites evidence IDs like [E3].
 ## Proposed fix
-the change that would fix it: the file and the edit, the KV key and value, the config, or the jig
+the change that would fix it: the file and the edit, the KV key and value, the config, or the rig
 command (restart, scale, deploy), with how to check it worked. Say what you would still need to
 know when the evidence does not settle it.
 ## Next steps
-up to four concrete commands or checks (jig logs, jig restart, jig data, kubectl, ...).
-Use the evidence above; when you have jig's tools, use them to look further (logs, traces, metrics,
+up to four concrete commands or checks (rig logs, rig restart, rig data, kubectl, ...).
+Use the evidence above; when you have rig's tools, use them to look further (logs, traces, metrics,
 the code) before you answer. Change nothing yet: the user answers "fix" to have you apply it.
 `)
 	return b.String()
@@ -538,13 +538,13 @@ func (inc *Incident) writeEvidence(w io.Writer) {
 	}
 }
 
-// NextSteps are jig's own suggestions for the top suspect, for when no AI answers.
+// NextSteps are rig's own suggestions for the top suspect, for when no AI answers.
 func (inc *Incident) NextSteps() []string {
 	if len(inc.Suspects) == 0 {
-		return []string{strings.TrimSpace("jig logs -F " + inc.Service), "jig doctor"}
+		return []string{strings.TrimSpace("rig logs -F " + inc.Service), "rig doctor"}
 	}
 	top := inc.Suspects[0].Service
-	return []string{"jig status " + top, "jig logs " + top, "jig restart " + top + "   (if it is down or wedged)", "jig doctor   (tools, components, ports)"}
+	return []string{"rig status " + top, "rig logs " + top, "rig restart " + top + "   (if it is down or wedged)", "rig doctor   (tools, components, ports)"}
 }
 
 // Markdown writes the incident report: summary (the AI's analysis when there is one), timeline,

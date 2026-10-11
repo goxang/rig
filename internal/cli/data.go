@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 func dataCommands() []*cobra.Command {
@@ -68,7 +68,7 @@ func dataCommands() []*cobra.Command {
 	)
 
 	cache := &cobra.Command{
-		Use: "cache <command...>", Short: "run a cache command: jig cache GET key | INFO", Args: cobra.MinimumNArgs(1),
+		Use: "cache <command...>", Short: "run a cache command: rig cache GET key | INFO", Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			c, _, err := engine.Get[core.Cache](a, core.KindCache, comp)
 			if err != nil {
@@ -197,11 +197,11 @@ func dataCommands() []*cobra.Command {
 	browse := &cobra.Command{
 		Use:   "data [component] [path...]",
 		Short: "walk databases and caches: data db Switch tables dbo.transactions | data cache db0 <key>",
-		Example: `  jig data                                  # components that can be walked
-  jig data db                               # databases
-  jig data db Switch                        # tables, views, procedures, functions, running
-  jig data db Switch procedures             # every procedure; then one: ... procedures dbo.usp_x
-  jig data cache db0 session:42             # a Redis key's value`,
+		Example: `  rig data                                  # components that can be walked
+  rig data db                               # databases
+  rig data db Switch                        # tables, views, procedures, functions, running
+  rig data db Switch procedures             # every procedure; then one: ... procedures dbo.usp_x
+  rig data cache db0 session:42             # a Redis key's value`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				var rows [][]string
@@ -222,7 +222,7 @@ func dataCommands() []*cobra.Command {
 			}
 			b, ok := core.As[core.Browser](v)
 			if !ok {
-				return fmt.Errorf("%s does not support browsing (no Browser adapter): use `jig query` for it instead", args[0])
+				return fmt.Errorf("%s does not support browsing (no Browser adapter): use `rig query` for it instead", args[0])
 			}
 			t, _, err := b.Browse(ctx, args[1:])
 			if err != nil {
@@ -233,10 +233,10 @@ func dataCommands() []*cobra.Command {
 		}),
 	}
 	browse.Example += `
-  jig data snapshot db before-migration     # save db's data in .jig/<env>/snapshots/db/
-  jig data restore db before-migration      # put it back, replacing what db holds now
-  jig data snapshots db                     # the snapshots kept
-  jig data seed db                          # run db's seed: (jig up runs it on an empty database)`
+  rig data snapshot db before-migration     # save db's data in .rig/<env>/snapshots/db/
+  rig data restore db before-migration      # put it back, replacing what db holds now
+  rig data snapshots db                     # the snapshots kept
+  rig data seed db                          # run db's seed: (rig up runs it on an empty database)`
 	browse.AddCommand(dataSnapshotCommands()...)
 	return []*cobra.Command{db, cache, queue, kv, browse, loadCommand(), queryCommand(), doCommand()}
 }
@@ -274,7 +274,7 @@ func dataSnapshotCommands() []*cobra.Command {
 				printTable(os.Stdout, []string{"SNAPSHOT", "TAKEN", "SIZE"}, rows)
 				return err
 			})},
-		{Use: "seed <component>", Short: "run a database's seed: SQL files or commands (jig up runs it on an empty database)", Args: cobra.ExactArgs(1),
+		{Use: "seed <component>", Short: "run a database's seed: SQL files or commands (rig up runs it on an empty database)", Args: cobra.ExactArgs(1),
 			RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 				return a.SeedData(ctx, args[0], os.Stdout)
 			})},
@@ -391,14 +391,14 @@ func queryCommand() *cobra.Command {
 	var times int
 	cmd := &cobra.Command{
 		Use:   "query [saved-query [name=value...] | component query...]",
-		Short: "run a saved query from jig.yaml, or an ad hoc one in a component's language (SQL, PromQL, redis, kubectl, ...)",
+		Short: "run a saved query from rig.yaml, or an ad hoc one in a component's language (SQL, PromQL, redis, kubectl, ...)",
 		Long:  "With no arguments, lists saved queries and the components that answer queries.",
-		Example: `  jig query                                   # what can be queried
-  jig query db-top-cpu                        # a saved query
-  jig query db-table-rows table=transactions  # a saved query with a parameter
-  jig query db "@Switch SELECT TOP 5 * FROM terminals"
-  jig query prom 'sum(rate(http_requests_total[1m]))' --every 5s
-  jig --brief query tx-per-minute --every 30s --times 10   # a sample series, for scripts and agents`,
+		Example: `  rig query                                   # what can be queried
+  rig query db-top-cpu                        # a saved query
+  rig query db-table-rows table=transactions  # a saved query with a parameter
+  rig query db "@Switch SELECT TOP 5 * FROM terminals"
+  rig query prom 'sum(rate(http_requests_total[1m]))' --every 5s
+  rig --brief query tx-per-minute --every 30s --times 10   # a sample series, for scripts and agents`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if len(args) == 0 {
 				saved := a.Queries()
@@ -439,7 +439,7 @@ func queryCommand() *cobra.Command {
 					return a.RunSaved(ctx, args[0], params)
 				}
 				if len(args) < 2 {
-					return core.Table{}, fmt.Errorf("%s is neither a saved query nor followed by a query (see `jig query`)", args[0])
+					return core.Table{}, fmt.Errorf("%s is neither a saved query nor followed by a query (see `rig query`)", args[0])
 				}
 				return a.RunQuery(ctx, args[0], strings.Join(args[1:], " "))
 			}

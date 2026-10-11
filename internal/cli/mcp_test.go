@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goxang/jig/ai"
+	"github.com/goxang/rig/ai"
 )
 
 // An assistant's change shows its command and waits for a yes; "always" answers the same command
@@ -16,7 +16,7 @@ func TestAIChangesWaitForConfirmation(t *testing.T) {
 	audit := filepath.Join(dir, "ai-audit.jsonl")
 	sock := filepath.Join(dir, "s.sock")
 	var asked []string
-	answer := ai.Reply{OK: true, Text: "the user, in jig (always this session)"}
+	answer := ai.Reply{OK: true, Text: "the user, in rig (always this session)"}
 	always := map[string]bool{}
 	stop, err := ai.Serve(sock, func(r ai.Request) ai.Reply {
 		if r.Op != "approve" {
@@ -36,15 +36,15 @@ func TestAIChangesWaitForConfirmation(t *testing.T) {
 	for k, v := range map[string]string{ai.EnvLock: "dev", ai.EnvSock: sock, ai.EnvAudit: audit, ai.EnvDir: dir} {
 		t.Setenv(k, v)
 	}
-	tool := mcpTool{Name: "jig_x", argv: func(a map[string]any) ([]string, error) { return []string{"restart", "api"}, nil }}
-	read := mcpTool{Name: "jig_y", argv: func(a map[string]any) ([]string, error) { return []string{"status"}, nil }}
+	tool := mcpTool{Name: "rig_x", argv: func(a map[string]any) ([]string, error) { return []string{"restart", "api"}, nil }}
+	read := mcpTool{Name: "rig_y", argv: func(a map[string]any) ([]string, error) { return []string{"status"}, nil }}
 	runFake := func(t mcpTool) { callTool(context.Background(), nil, t, map[string]any{}) }
 
 	runFake(read)
 	runFake(tool)
 	runFake(tool)
-	if len(asked) != 1 || asked[0] != "jig restart api" {
-		t.Fatalf("asked %v, want one question for jig restart api", asked)
+	if len(asked) != 1 || asked[0] != "rig restart api" {
+		t.Fatalf("asked %v, want one question for rig restart api", asked)
 	}
 	es, err := ai.ReadAudit(audit)
 	if err != nil {
@@ -56,12 +56,12 @@ func TestAIChangesWaitForConfirmation(t *testing.T) {
 	if es[0].By != "" || es[1].By != answer.Text || es[2].By != "allowed for this session" {
 		t.Fatalf("confirmed by: %q %q %q", es[0].By, es[1].By, es[2].By)
 	}
-	if es[1].Env != "dev" || es[1].Command != "jig restart api" {
+	if es[1].Env != "dev" || es[1].Command != "rig restart api" {
 		t.Fatalf("entry %+v", es[1])
 	}
 
 	_ = os.Remove(audit)
-	answer, always = ai.Reply{Text: "declined in jig"}, map[string]bool{}
+	answer, always = ai.Reply{Text: "declined in rig"}, map[string]bool{}
 	if text, failed := callTool(context.Background(), nil, tool, map[string]any{}); !failed {
 		t.Fatalf("declined change ran: %s", text)
 	}

@@ -42,7 +42,7 @@ func AI(on Subject) Subject {
 	return Subject{Kind: KindAI, Name: "ai@" + on.Name, Roles: on.Roles}
 }
 
-// Agent is a jig.yaml agent acting for on, with on's roles.
+// Agent is a rig.yaml agent acting for on, with on's roles.
 func Agent(name string, approve []string, on Subject) Subject {
 	return Subject{Kind: KindAgent, Name: name, Roles: on.Roles, Approve: approve}
 }

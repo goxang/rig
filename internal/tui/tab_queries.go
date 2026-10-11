@@ -15,11 +15,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/spec"
 )
 
 // ---- scheduler: saved queries that run on their own while the UI is open ----
@@ -240,7 +240,7 @@ func firstNumber(t core.Table) (float64, bool) {
 
 // ---- the screen ----
 
-// queriesTab is saved queries (from jig.yaml) and ad hoc ones in one list: run any, schedule any,
+// queriesTab is saved queries (from rig.yaml) and ad hoc ones in one list: run any, schedule any,
 // sort the result like any grid.
 type queriesTab struct {
 	list      *grid
@@ -450,7 +450,7 @@ func (t *queriesTab) update(m *model, msg tea.Msg) tea.Cmd {
 					return nil
 				}
 				if m.sched.toggle(name) {
-					m.setStatus(name+" runs every "+q.Every.String()+" while jig is open", false)
+					m.setStatus(name+" runs every "+q.Every.String()+" while rig is open", false)
 				} else {
 					m.setStatus(name+" schedule off", false)
 				}
@@ -602,7 +602,7 @@ func (t *queriesTab) view(m *model, w, h int) string {
 func (t *queriesTab) savedView(m *model, w, h int) string {
 	t.list.set(t.rows(m))
 	if len(t.list.rows) == 0 && len(t.langs) == 0 {
-		return panel("queries", sDim.Render("no saved queries and no component that answers queries.\n\nadd saved queries to jig.yaml:\n\nqueries:\n  slow-requests:\n    source: prom\n    query: topk(5, rate(http_request_duration_seconds_sum[5m]))\n    every: 30s"), w, h, true)
+		return panel("queries", sDim.Render("no saved queries and no component that answers queries.\n\nadd saved queries to rig.yaml:\n\nqueries:\n  slow-requests:\n    source: prom\n    query: topk(5, rate(http_request_duration_seconds_sum[5m]))\n    every: 30s"), w, h, true)
 	}
 	listH := 4
 	if len(t.list.rows) > 0 {

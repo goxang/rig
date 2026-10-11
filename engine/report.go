@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/spec"
 )
 
 var defaultStats = []string{"avg", "max", "last"}
@@ -552,7 +552,7 @@ func (a *App) ReportFile(name string, at time.Time) string {
 func (a *App) reportDir() string {
 	dir, err := spec.DataDir(a.Spec.Dir)
 	if err != nil {
-		dir = filepath.Join(a.Spec.Dir, ".jig")
+		dir = filepath.Join(a.Spec.Dir, ".rig")
 	}
 	return filepath.Join(dir, "reports")
 }
@@ -597,7 +597,7 @@ func (a *App) StartReporter(name string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("no report %q in %s (have %v)", name, a.Spec.File, a.ReportNames())
 	}
 	if at, ok := a.ReporterStarted(name); ok {
-		return at, fmt.Errorf("%s has been running since %s: jig report stop %s ends it", name, at.Format("15:04:05"), name)
+		return at, fmt.Errorf("%s has been running since %s: rig report stop %s ends it", name, at.Format("15:04:05"), name)
 	}
 	now := time.Now()
 	f := a.reporterFile(name)
@@ -621,7 +621,7 @@ func (a *App) ReporterStarted(name string) (time.Time, bool) {
 func (a *App) StopReporter(ctx context.Context, name, source string) (*ReportResult, error) {
 	from, ok := a.ReporterStarted(name)
 	if !ok {
-		return nil, fmt.Errorf("%s is not started: jig report start %s", name, name)
+		return nil, fmt.Errorf("%s is not started: rig report start %s", name, name)
 	}
 	rep, err := a.MeasureReport(ctx, name, source, from, time.Now())
 	if err != nil {

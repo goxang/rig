@@ -10,7 +10,7 @@ import (
 
 func TestMigrate(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "jig.yaml")
+	file := filepath.Join(dir, "rig.yaml")
 	if err := os.WriteFile(file, []byte("version: 0\nproject: p\nname_was: old\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/actions"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/actions"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // pluginActions make plugin management ordinary actions, so the AI can find and install a plugin
@@ -64,7 +64,7 @@ func (l *Local) pluginActions() {
 		}
 		_ = reg.Add(a)
 	}
-	add("plugin.add", "install plugins and pin them in jig.lock", func(ctx context.Context, ns []string) error {
+	add("plugin.add", "install plugins and pin them in rig.lock", func(ctx context.Context, ns []string) error {
 		return installer(ctx).Add(ctx, ns)
 	}, func(ctx context.Context, ns []string) string {
 		ix, err := host.UserRegistry().Index(ctx, false)
@@ -83,13 +83,13 @@ func (l *Local) pluginActions() {
 		}
 		return strings.Join(out, "\n")
 	})
-	add("plugin.rm", "unpin plugins from jig.lock", func(_ context.Context, ns []string) error { return installer(context.Background()).Remove(ns) }, nil)
+	add("plugin.rm", "unpin plugins from rig.lock", func(_ context.Context, ns []string) error { return installer(context.Background()).Remove(ns) }, nil)
 	add("plugin.up", "upgrade plugins within their major version", func(ctx context.Context, ns []string) error { return installer(ctx).Up(ctx, ns, false) }, nil)
 	for _, on := range []bool{true, false} {
 		verb := map[bool]string{true: "on", false: "off"}[on]
-		add("plugin."+verb, "turn plugins "+verb+" for this user (.jig/local.yaml)", func(_ context.Context, ns []string) error {
+		add("plugin."+verb, "turn plugins "+verb+" for this user (.rig/local.yaml)", func(_ context.Context, ns []string) error {
 			for _, n := range ns {
-				if err := spec.SetYAML(filepath.Join(dir, ".jig", "local.yaml"), []string{"plugins", n, "off"}, !on); err != nil {
+				if err := spec.SetYAML(filepath.Join(dir, ".rig", "local.yaml"), []string{"plugins", n, "off"}, !on); err != nil {
 					return err
 				}
 			}

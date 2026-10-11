@@ -16,10 +16,10 @@ import (
 
 	llsys "github.com/landlock-lsm/go-landlock/landlock/syscall"
 
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/rpc"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/rpc"
 )
 
 func TestMain(m *testing.M) {
@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 			return
 		}
 	}
-	tmp, _ := os.MkdirTemp("", "jig-host-*")
+	tmp, _ := os.MkdirTemp("", "rig-host-*")
 	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
 		os.Setenv(k, filepath.Join(tmp, k))
 	}
@@ -57,7 +57,7 @@ func plugin(t *testing.T, root, manifest string) string {
 }
 
 func TestManifest(t *testing.T) {
-	m, err := ParseManifest([]byte("name: x\nversion: 1.0.0\nfuture: 1\ntasks: {hi: {steps: [echo hi]}}\nactions: {go: {run: echo}}\n"), "/p/jig-plugin.yaml")
+	m, err := ParseManifest([]byte("name: x\nversion: 1.0.0\nfuture: 1\ntasks: {hi: {steps: [echo hi]}}\nactions: {go: {run: echo}}\n"), "/p/rig-plugin.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestParseOutput(t *testing.T) {
 
 func TestScriptPlugin(t *testing.T) {
 	proj := t.TempDir()
-	t.Setenv("JIG_TEST_LEAK", "secret-value")
+	t.Setenv("RIG_TEST_LEAK", "secret-value")
 	dir := plugin(t, filepath.Join(proj, "plugins"), `name: sh
 version: 0.1.0
 sources:
@@ -112,7 +112,7 @@ actions:
   say: { run: bin/say, effect: read }
 `)
 	os.MkdirAll(filepath.Join(dir, "bin"), 0o755)
-	os.WriteFile(filepath.Join(dir, "bin/say"), []byte("#!/bin/sh\necho working\necho \"said $JIG_ARGS\"\n"), 0o755)
+	os.WriteFile(filepath.Join(dir, "bin/say"), []byte("#!/bin/sh\necho working\necho \"said $RIG_ARGS\"\n"), 0o755)
 	m, err := LoadManifest(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -170,8 +170,8 @@ func TestServerPlugin(t *testing.T) {
 	if pr.Actions["greet"].Effect != protocol.EffectWrite || !pr.Sources["ticks"].Stream {
 		t.Fatalf("provides %+v", pr)
 	}
-	f, err := h.Query(ctx, "hello.greetings", protocol.Args{"name": "jig"})
-	if err != nil || frames.Row(f, 0)["name"] != "jig" {
+	f, err := h.Query(ctx, "hello.greetings", protocol.Args{"name": "rig"})
+	if err != nil || frames.Row(f, 0)["name"] != "rig" {
 		t.Fatalf("greetings %+v %v", f, err)
 	}
 	var jm jobs.Manager
@@ -225,7 +225,7 @@ func TestServerPlugin(t *testing.T) {
 
 func TestHostMethods(t *testing.T) {
 	proj := t.TempDir()
-	m, _ := ParseManifest([]byte("name: a\npermissions: { secrets: [TOK], uses: [\"b.*\"] }\n"), filepath.Join(proj, "a/jig-plugin.yaml"))
+	m, _ := ParseManifest([]byte("name: a\npermissions: { secrets: [TOK], uses: [\"b.*\"] }\n"), filepath.Join(proj, "a/rig-plugin.yaml"))
 	h := &Host{Options: Options{Dir: proj, Secret: func(n string) (string, bool) { return "v-" + n, true }}, plugins: map[string]*Plugin{}}
 	p := h.add(m, nil)
 	ctx := context.Background()
@@ -269,7 +269,7 @@ func TestSandboxDeniesUndeclaredPath(t *testing.T) {
 	defer func() { SandboxExe = "" }()
 	proj := t.TempDir()
 	for fs, ok := range map[string]bool{"": false, "permissions: { fs: [\"ro:" + outside + "\"] }\n": true} {
-		m, _ := ParseManifest([]byte("name: s\n"+fs+"sources: { f: { run: [cat, "+filepath.Join(outside, "f")+"] } }\n"), filepath.Join(proj, "s/jig-plugin.yaml"))
+		m, _ := ParseManifest([]byte("name: s\n"+fs+"sources: { f: { run: [cat, "+filepath.Join(outside, "f")+"] } }\n"), filepath.Join(proj, "s/rig-plugin.yaml"))
 		h := &Host{Options: Options{Dir: proj}, plugins: map[string]*Plugin{}}
 		h.add(m, nil)
 		_, err := h.Query(context.Background(), "s.f", nil)
@@ -310,7 +310,7 @@ func fakeMCP() {
 
 func TestMCPBridge(t *testing.T) {
 	proj := t.TempDir()
-	m, _ := ParseManifest([]byte("name: m\nmcp: { command: [\""+os.Args[0]+"\", __mcp] }\n"), filepath.Join(proj, "m/jig-plugin.yaml"))
+	m, _ := ParseManifest([]byte("name: m\nmcp: { command: [\""+os.Args[0]+"\", __mcp] }\n"), filepath.Join(proj, "m/rig-plugin.yaml"))
 	h := &Host{Options: Options{Dir: proj}, plugins: map[string]*Plugin{}}
 	p := h.add(m, nil)
 	defer h.Close()
@@ -349,7 +349,7 @@ func TestSecretsNeverReachPluginEnv(t *testing.T) {
 	t.Setenv("OTHER_TOKEN", "canary-91c2")
 	t.Setenv("VISIBLE", "shown")
 	proj := t.TempDir()
-	m, _ := ParseManifest([]byte("name: s\npermissions: { env: [VISIBLE], secrets: [CANARY_SECRET] }\nsources: { env: { run: [env], format: lines } }\n"), filepath.Join(proj, "s/jig-plugin.yaml"))
+	m, _ := ParseManifest([]byte("name: s\npermissions: { env: [VISIBLE], secrets: [CANARY_SECRET] }\nsources: { env: { run: [env], format: lines } }\n"), filepath.Join(proj, "s/rig-plugin.yaml"))
 	h := &Host{Options: Options{Dir: proj}, plugins: map[string]*Plugin{}}
 	h.add(m, nil)
 	f, err := h.Query(context.Background(), "s.env", nil)
@@ -364,8 +364,8 @@ func TestSecretsNeverReachPluginEnv(t *testing.T) {
 
 // Budgets of docs/plan.md section 17, run by CI's bench job.
 func TestBudgetRoundTrip(t *testing.T) {
-	if os.Getenv("JIG_BENCH") == "" {
-		t.Skip("JIG_BENCH unset")
+	if os.Getenv("RIG_BENCH") == "" {
+		t.Skip("RIG_BENCH unset")
 	}
 	bin := buildHello(t)
 	proj := t.TempDir()

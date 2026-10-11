@@ -5,11 +5,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goxang/jig/kernel/catalog"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/catalog"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
 // Fake is an Engine of canned answers that records what it was asked to run.

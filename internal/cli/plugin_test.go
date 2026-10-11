@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func TestSetYAMLKeepsCommentsAndNests(t *testing.T) {

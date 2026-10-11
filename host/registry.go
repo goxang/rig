@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultIndex = "https://raw.githubusercontent.com/goxang/jig-plugins/main/registry/index.json"
+const DefaultIndex = "https://raw.githubusercontent.com/goxang/rig-plugins/main/registry/index.json"
 
 type Index struct {
 	Plugins map[string]*IndexEntry `json:"plugins"`
@@ -36,7 +36,7 @@ type IndexEntry struct {
 }
 
 type IndexVersion struct {
-	Jig         string              `json:"jig,omitempty"`
+	Rig         string              `json:"rig,omitempty"`
 	Requires    map[string]string   `json:"requires,omitempty"`
 	Permissions Permissions         `json:"permissions"`
 	Artifacts   map[string]Artifact `json:"artifacts"`
@@ -47,7 +47,7 @@ type Artifact struct {
 	SHA256 string `json:"sha256"`
 	// Sig is the minisign signature file's text.
 	Sig string `json:"sig,omitempty"`
-	// Files are gzipped files the archive leaves out because several plugins share them (jig-std),
+	// Files are gzipped files the archive leaves out because several plugins share them (rig-std),
 	// by their path in the plugin; each is downloaded once.
 	Files map[string]Artifact `json:"files,omitempty"`
 }
@@ -59,9 +59,9 @@ type Registry struct {
 	Client *http.Client
 }
 
-// UserRegistry is the registry the user config, or $JIG_REGISTRY, points at.
+// UserRegistry is the registry the user config, or $RIG_REGISTRY, points at.
 func UserRegistry() *Registry {
-	r := &Registry{Mirror: os.Getenv("JIG_REGISTRY"), Client: &http.Client{Timeout: 5 * time.Minute}}
+	r := &Registry{Mirror: os.Getenv("RIG_REGISTRY"), Client: &http.Client{Timeout: 5 * time.Minute}}
 	if r.Mirror == "" {
 		var c struct {
 			Registry string `yaml:"registry"`
@@ -196,7 +196,7 @@ func minVersion(c string) string {
 	return v
 }
 
-// HostSupports says whether this jig satisfies a manifest's jig: constraint; dev builds take anything.
+// HostSupports says whether this rig satisfies a manifest's rig: constraint; dev builds take anything.
 func HostSupports(c string) bool {
 	if c == "" || !semver.IsValid(canon(Version)) {
 		return true

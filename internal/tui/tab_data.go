@@ -11,10 +11,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
 )
 
 // dataTab walks the data components: queues (depth trend, consumers, rates), and databases and
@@ -144,7 +144,7 @@ func (t *dataTab) hints() [][2]string {
 
 // snapshotMenu offers a database's snapshot, its seed, and a restore of any snapshot kept.
 func (t *dataTab) snapshotMenu(m *model, comp string) {
-	items, desc := []string{"snapshot now", "seed"}, []string{"save the data under .jig/" + m.app.Env.Name + "/snapshots/" + comp, "run the seed: of " + comp}
+	items, desc := []string{"snapshot now", "seed"}, []string{"save the data under .rig/" + m.app.Env.Name + "/snapshots/" + comp, "run the seed: of " + comp}
 	ss, _ := m.app.Snapshots(comp)
 	for _, s := range ss {
 		items = append(items, "restore "+s.Name)

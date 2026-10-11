@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/kernel/actions"
-	"github.com/goxang/jig/kernel/audit"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/actions"
+	"github.com/goxang/rig/kernel/audit"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/protocol"
 )
 
 // Lease holds an environment for one person: while it lasts, nobody else changes it.

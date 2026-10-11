@@ -13,7 +13,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 // Palette follows Grafana's classic series colours.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func TestRelevant(t *testing.T) {
@@ -35,7 +35,7 @@ func TestRelevant(t *testing.T) {
 			t.Errorf("%s with %v: relevant %v", m.Name, c.cfg, got)
 		}
 	}
-	m, _ := LoadManifest(plugin(t, filepath.Join(proj, ".jig", "plugins"), "name: helm\nversion: 1.0.0\ndetect: {files: [Chart.yaml]}\n"))
+	m, _ := LoadManifest(plugin(t, filepath.Join(proj, ".rig", "plugins"), "name: helm\nversion: 1.0.0\ndetect: {files: [Chart.yaml]}\n"))
 	if !m.Relevant(proj, nil) {
 		t.Error("a project plugin is always relevant")
 	}

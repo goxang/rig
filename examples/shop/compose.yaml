@@ -1,5 +1,5 @@
-# The shop's stack as plain docker compose: `docker compose up --build` runs it without jig, and
-# `jig init` reads this file to write a first jig.yaml (the one here is that, tidied up).
+# The shop's stack as plain docker compose: `docker compose up --build` runs it without rig, and
+# `rig init` reads this file to write a first rig.yaml (the one here is that, tidied up).
 name: shop
 services:
   api:

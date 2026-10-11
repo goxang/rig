@@ -16,11 +16,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/server"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/server"
+	"github.com/goxang/rig/spec"
 )
 
 func serverDir() string { return filepath.Join(host.StateDir(), "server") }
@@ -33,13 +33,13 @@ func serveCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "serve this project to remote CLIs, MCP clients and the web inbox, over HTTPS, with accounts and server-side policy",
-		Long: `Serves the project over HTTPS: the Engine API for jig -r, and the inbox at /. Without --cert, a
+		Long: `Serves the project over HTTPS: the Engine API for rig -r, and the inbox at /. Without --cert, a
 self-signed certificate is made once and clients pin its fingerprint. Accounts live under the
-jig state directory: jig admin users add <name> makes one. Agents and scheduled reports run here
+rig state directory: rig admin users add <name> makes one. Agents and scheduled reports run here
 for as long as the server does.`,
-		Example: `  jig admin users add alice --role dev --totp
-  jig serve --addr :7443 --host jig.example.local
-  jig serve --oidc-issuer https://sso.example.local/realms/dev --oidc-client-id jig --oidc-redirect https://jig.example.local:7443/v1/oidc/callback`,
+		Example: `  rig admin users add alice --role dev --totp
+  rig serve --addr :7443 --host rig.example.local
+  rig serve --oidc-issuer https://sso.example.local/realms/dev --oidc-client-id rig --oidc-redirect https://rig.example.local:7443/v1/oidc/callback`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -55,12 +55,12 @@ for as long as the server does.`,
 				return err
 			}
 			if len(st.Users()) == 0 {
-				fmt.Fprintln(os.Stderr, amber("no accounts yet: jig admin users add <name> --role admin"))
+				fmt.Fprintln(os.Stderr, amber("no accounts yet: rig admin users add <name> --role admin"))
 			}
 			s := &server.Server{File: file, Store: st}
 			defer s.Close()
 			if oidc.Issuer != "" {
-				oidc.ClientSecret = os.Getenv("JIG_OIDC_CLIENT_SECRET")
+				oidc.ClientSecret = os.Getenv("RIG_OIDC_CLIENT_SECRET")
 				s.OIDC = &oidc
 			}
 			l, err := s.Engine(g.env)
@@ -92,7 +92,7 @@ for as long as the server does.`,
 				if host, _, _ := net.SplitHostPort(ln.Addr().String()); !net.ParseIP(host).IsLoopback() {
 					return errors.New("--plain-http only on a loopback address, behind a TLS proxy")
 				}
-				fmt.Printf("jig serving %s on http://%s (plain HTTP, loopback only)\n", l.App.Spec.Name, ln.Addr())
+				fmt.Printf("rig serving %s on http://%s (plain HTTP, loopback only)\n", l.App.Spec.Name, ln.Addr())
 				err = srv.Serve(ln)
 			} else {
 				crt, fp, cerr := server.Certificate(cert, key, serverDir(), hosts)
@@ -100,11 +100,11 @@ for as long as the server does.`,
 					return cerr
 				}
 				srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{crt}, MinVersion: tls.VersionTLS12}
-				fmt.Printf("jig serving %s on https://%s\n", l.App.Spec.Name, ln.Addr())
+				fmt.Printf("rig serving %s on https://%s\n", l.App.Spec.Name, ln.Addr())
 				if cert == "" {
 					fmt.Printf("certificate fingerprint (SHA-256): %s\n", fp)
 				}
-				fmt.Println(dim("sign in: jig login https://<this host>" + portOf(ln.Addr().String())))
+				fmt.Println(dim("sign in: rig login https://<this host>" + portOf(ln.Addr().String())))
 				err = srv.ServeTLS(ln, "", "")
 			}
 			if errors.Is(err, http.ErrServerClosed) {
@@ -120,7 +120,7 @@ for as long as the server does.`,
 	c.Flags().BoolVar(&plain, "plain-http", false, "no TLS, for a loopback address behind a TLS-terminating proxy")
 	c.Flags().StringVar(&pull, "pull", "", "git pull --ff-only the project this often (1m), reopening it when it changes")
 	c.Flags().BoolVar(&quiet, "no-agents", false, "do not run agents and report schedules")
-	c.Flags().StringVar(&oidc.Issuer, "oidc-issuer", "", "OIDC issuer URL (Keycloak realm, GitLab, Google, Okta); the secret comes from $JIG_OIDC_CLIENT_SECRET")
+	c.Flags().StringVar(&oidc.Issuer, "oidc-issuer", "", "OIDC issuer URL (Keycloak realm, GitLab, Google, Okta); the secret comes from $RIG_OIDC_CLIENT_SECRET")
 	c.Flags().StringVar(&oidc.ClientID, "oidc-client-id", "", "OIDC client id")
 	c.Flags().StringVar(&oidc.RedirectURL, "oidc-redirect", "", "this server's /v1/oidc/callback URL as the provider redirects to it")
 	c.Flags().StringSliceVar(&oidc.Roles, "oidc-roles", []string{"viewer"}, "roles of an account first made by an OIDC sign-in")
@@ -154,7 +154,7 @@ func keepPulled(ctx context.Context, dir string, every time.Duration, s *server.
 		if now := head(); now != at {
 			at = now
 			fmt.Println(dim("project changed (" + now[:min(8, len(now))] + "): reopening"))
-			// ponytail: agents and report schedules keep the project as it was at start; restart jig serve for theirs
+			// ponytail: agents and report schedules keep the project as it was at start; restart rig serve for theirs
 			s.Close()
 		}
 	}
@@ -166,10 +166,10 @@ func adminCommand() *cobra.Command {
 	var totp, noPassword bool
 	users := &cobra.Command{
 		Use:   "users [add|rm|passwd|totp <name>]",
-		Short: "accounts of the jig server on this machine",
-		Example: `  jig admin users
-  jig admin users add alice --role dev --group backend --totp
-  jig admin users passwd alice`,
+		Short: "accounts of the rig server on this machine",
+		Example: `  rig admin users
+  rig admin users add alice --role dev --group backend --totp
+  rig admin users passwd alice`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := server.OpenStore(filepath.Join(serverDir(), "users.json"))
@@ -193,7 +193,7 @@ func adminCommand() *cobra.Command {
 				return nil
 			}
 			if len(args) != 2 {
-				return errors.New("usage: jig admin users add|rm|passwd|totp <name>")
+				return errors.New("usage: rig admin users add|rm|passwd|totp <name>")
 			}
 			name := args[1]
 			u, exists := st.User(name)
@@ -227,7 +227,7 @@ func adminCommand() *cobra.Command {
 			}
 			if totp || args[0] == "totp" {
 				u.TOTP = server.NewTOTP()
-				fmt.Printf("TOTP secret: %s\n%s\n", u.TOTP, server.TOTPURL("jig", name, u.TOTP))
+				fmt.Printf("TOTP secret: %s\n%s\n", u.TOTP, server.TOTPURL("rig", name, u.TOTP))
 			}
 			if err := st.PutUser(name, u, pw); err != nil {
 				return err
@@ -248,7 +248,7 @@ func adminCommand() *cobra.Command {
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if g.remote == "" {
-				return errors.New("tokens are a server's: jig -r <server> admin tokens")
+				return errors.New("tokens are a server's: rig -r <server> admin tokens")
 			}
 			c, err := remoteClient()
 			if err != nil {
@@ -274,12 +274,12 @@ func adminCommand() *cobra.Command {
 					return err
 				}
 				fmt.Println(out.Token)
-				fmt.Fprintln(os.Stderr, dim("shown once; id "+out.ID+" (jig admin tokens rm "+out.ID+" revokes it)"))
+				fmt.Fprintln(os.Stderr, dim("shown once; id "+out.ID+" (rig admin tokens rm "+out.ID+" revokes it)"))
 				return nil
 			case len(args) == 2 && args[0] == "rm":
 				return c.Do(ctx, "DELETE /v1/tokens/"+args[1], nil, nil, nil)
 			}
-			return errors.New("usage: jig admin tokens [create <name> | rm <id>]")
+			return errors.New("usage: rig admin tokens [create <name> | rm <id>]")
 		},
 	}
 	tokens.Flags().StringVar(&ttl, "ttl", "720h", "how long a new token lasts")

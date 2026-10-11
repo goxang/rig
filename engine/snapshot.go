@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 // Snapshot is one saved copy of a data component, in the environment's state dir.
@@ -108,7 +108,7 @@ func (a *App) RestoreSnapshot(ctx context.Context, comp, name string, log io.Wri
 		return fmt.Errorf("snapshot name %q: letters, digits, '.', '_' and '-'", name)
 	}
 	if _, err := os.Stat(file); err != nil {
-		return fmt.Errorf("no snapshot %s of %s (jig data snapshots %s lists them)", name, comp, comp)
+		return fmt.Errorf("no snapshot %s of %s (rig data snapshots %s lists them)", name, comp, comp)
 	}
 	if err := s.Restore(ctx, file, log); err != nil {
 		return fmt.Errorf("restore %s: %w", comp, err)
@@ -132,7 +132,7 @@ func (a *App) SeedData(ctx context.Context, comp string, log io.Writer) error {
 	return s.Seed(ctx, log)
 }
 
-// seedFresh seeds each database that runs in one of services and has no tables yet: jig up on a
+// seedFresh seeds each database that runs in one of services and has no tables yet: rig up on a
 // fresh database leaves it filled.
 func (a *App) seedFresh(ctx context.Context, services map[string]bool, out io.Writer) error {
 	for _, n := range a.Names(core.KindDatabase) {

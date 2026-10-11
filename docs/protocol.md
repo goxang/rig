@@ -1,13 +1,13 @@
-# Protocol jig/1
+# Protocol rig/1
 
-How jig talks to a plugin program. The schema, `protocol/jig1.schema.json`, is the contract: the Go,
+How rig talks to a plugin program. The schema, `protocol/rig1.schema.json`, is the contract: the Go,
 Python and TypeScript SDKs are generated from it (`go generate ./protocol`), and a plugin built with
 an old SDK keeps working on a new host.
 
 ## Framing
 
 Newline-delimited JSON-RPC 2.0 on the plugin's stdin and stdout, one message per line. stderr is the
-plugin's log (`~/.local/state/jig/logs/<plugin>.log`). Both sides may have many requests in flight.
+plugin's log (`~/.local/state/rig/logs/<plugin>.log`). Both sides may have many requests in flight.
 
 ## Methods
 
@@ -20,7 +20,7 @@ Host to plugin. Only `initialize` is required; the rest answer `-32601` until im
 | `query` | `source`, `component`, `args`, `cursor`, `context` | a frame |
 | `stream` | `id`, `source`, `args`, `context` | `{}`, then `$/stream` batches |
 | `run`, `plan` | `action`, `component`, `args`, `job`, `context` | `message`, `frame`, `refs`, `outputs`, `changes` |
-| `import` | `importer`, `files`, `dir`, `config` | a jig.yaml `fragment`, `watch`, `warnings` |
+| `import` | `importer`, `files`, `dir`, `config` | a rig.yaml `fragment`, `watch`, `warnings` |
 | `complete` | `language`, `text`, `pos` | `items` |
 | `render`, `view.event` | `view` (and `node`, `event`, `value`) | a widget tree |
 | `widget.render` | `widget`, `props`, `frame`, `size`, `theme` | `lines` |
@@ -95,8 +95,8 @@ JSON-RPC's codes, plus:
 
 | language | where | example |
 |---|---|---|
-| Go | `github.com/goxang/jig/sdk` (standard library only) | `sdk/examples/hello` |
-| Python 3.10+ | `sdk/python/jig` (standard library only) | `sdk/python/examples/hello.py` |
+| Go | `github.com/goxang/rig/sdk` (standard library only) | `sdk/examples/hello` |
+| Python 3.10+ | `sdk/python/rig` (standard library only) | `sdk/python/examples/hello.py` |
 | TypeScript, Node 18+ | `sdk/typescript` (no dependencies, typings included) | `sdk/typescript/examples/hello.js` |
 
 ```go
@@ -116,7 +116,7 @@ one, replays against all three.
 
 ## Testing a plugin
 
-`jig plugin test [folder]` is what a plugin author runs: the manifest, the build, every source that
+`rig plugin test [folder]` is what a plugin author runs: the manifest, the build, every source that
 needs no arguments, the contracts it implements and its `testdata/*.jsonl` transcripts (`--record`
 writes one). A source that answers `-32003` or `-32005` (no project, a missing tool or setting) is
 listed as unable to run there, not failed; the Go SDK sends `-32003` for a tool that is missing or fails. Underneath, `protocol/conformance` runs what every plugin must pass: initialize with

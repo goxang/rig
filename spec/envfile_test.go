@@ -9,11 +9,11 @@ import (
 func TestEnvFileUnderEnv(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("# db\nexport DB_USER=app\nDB_PASS=\"p #1\"\nDB_NAME=shop # comment\nPORT=1\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "jig.yaml"), []byte(`project: p
+	os.WriteFile(filepath.Join(dir, "rig.yaml"), []byte(`project: p
 services:
   api: { env_file: [.env], env: { PORT: "2" } }
 `), 0o644)
-	p, _, err := Load(filepath.Join(dir, "jig.yaml"), "")
+	p, _, err := Load(filepath.Join(dir, "rig.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from jig import Error, Plugin, protocol  # noqa: E402
+from rig import Error, Plugin, protocol  # noqa: E402
 
 p = Plugin("hello", version="0.1.0")
 

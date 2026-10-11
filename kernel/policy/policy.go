@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/protocol"
 )
 
 type Decision string
@@ -46,7 +46,7 @@ type Role struct {
 	Approve []string `yaml:"approve,omitempty" json:"approve,omitempty"`
 }
 
-// Config is jig.yaml's `policy:`. Bind maps user:<name>, group:<name> or ai to a role.
+// Config is rig.yaml's `policy:`. Bind maps user:<name>, group:<name> or ai to a role.
 type Config struct {
 	Roles map[string]Role   `yaml:"roles,omitempty" json:"roles,omitempty"`
 	Bind  map[string]string `yaml:"bind,omitempty" json:"bind,omitempty"`

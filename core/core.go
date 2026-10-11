@@ -1,4 +1,4 @@
-// Package core defines what every component kind must do. Adapters (in goxang/jig-plugins, or a
+// Package core defines what every component kind must do. Adapters (in goxang/rig-plugins, or a
 // plugin bridged through its contract) implement one of these interfaces; anything an adapter can do beyond it is offered through
 // the optional interfaces at the bottom (Forwarder, Actioner, Querier, ...), found by type assertion.
 package core
@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/manifest"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/manifest"
+	"github.com/goxang/rig/spec"
 )
 
 type Kind string
@@ -43,8 +43,8 @@ var Kinds = []Kind{KindRuntime, KindBuilder, KindMetrics, KindTracing, KindProfi
 
 var ErrUnsupported = errors.New("not supported by this adapter")
 
-// ErrReadOnly refuses a change in an environment jig.yaml marks readonly: true, whatever confirms it.
-var ErrReadOnly = errors.New("environment is read-only (readonly: true in jig.yaml)")
+// ErrReadOnly refuses a change in an environment rig.yaml marks readonly: true, whatever confirms it.
+var ErrReadOnly = errors.New("environment is read-only (readonly: true in rig.yaml)")
 
 // Writable refuses with ErrReadOnly when env's environment is read-only.
 func Writable(env Env) error {
@@ -147,11 +147,11 @@ type EnvReader interface {
 	LiveEnv(ctx context.Context, s *spec.Service) (map[string]string, error)
 }
 
-// Workload is something running in the environment, managed by jig or not.
+// Workload is something running in the environment, managed by rig or not.
 type Workload struct {
 	Name    string
 	Kind    string
-	Service string // the jig service it belongs to, "" when unmanaged
+	Service string // the rig service it belongs to, "" when unmanaged
 	Status  Status
 }
 
@@ -215,7 +215,7 @@ type Builder interface {
 }
 
 // Pusher is a builder that can push an image already in the local Docker daemon; without one,
-// jig runs docker push.
+// rig runs docker push.
 type Pusher interface {
 	Push(ctx context.Context, image string, out io.Writer) error
 }
@@ -512,7 +512,7 @@ type Querier interface {
 	RunQuery(ctx context.Context, q string) (Table, error)
 }
 
-// Action is an adapter-specific operation, exposed as `jig do <component> <action>`.
+// Action is an adapter-specific operation, exposed as `rig do <component> <action>`.
 type Action struct {
 	Name   string
 	Help   string
@@ -611,7 +611,7 @@ type Snapshotter interface {
 }
 
 // Seeder fills a database with its seed (SQL files or commands). Fresh tells whether it holds no
-// tables yet; Host is the jig service it runs in ("" for none), which jig up seeds when it starts empty.
+// tables yet; Host is the rig service it runs in ("" for none), which rig up seeds when it starts empty.
 type Seeder interface {
 	Seed(ctx context.Context, log io.Writer) error
 	Fresh(ctx context.Context) (bool, error)

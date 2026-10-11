@@ -1,3 +1,3 @@
-module github.com/goxang/jig/sdk
+module github.com/goxang/rig/sdk
 
 go 1.26.0

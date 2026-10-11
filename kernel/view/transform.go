@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/protocol"
 )
 
 // Apply runs a node's transform: ops in order, each one of filter, sort, limit, select, rename,

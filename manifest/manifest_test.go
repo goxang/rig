@@ -155,14 +155,14 @@ func TestRender(t *testing.T) {
 		Image:        "localhost:5001/api:new",
 		Env:          map[string]string{"LOG_LEVEL": "debug", "PPROF": "true"},
 		Replicas:     &n,
-		Labels:       map[string]string{"app.kubernetes.io/managed-by": "jig"},
+		Labels:       map[string]string{"app.kubernetes.io/managed-by": "rig"},
 		Capabilities: []string{"SYS_PTRACE"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	y := string(out)
-	for _, want := range []string{"image: localhost:5001/api:new", "replicas: 4", "value: debug", "name: PPROF", "name: KEEP", "app.kubernetes.io/managed-by: jig", "kind: ConfigMap", "- SYS_PTRACE"} {
+	for _, want := range []string{"image: localhost:5001/api:new", "replicas: 4", "value: debug", "name: PPROF", "name: KEEP", "app.kubernetes.io/managed-by: rig", "kind: ConfigMap", "- SYS_PTRACE"} {
 		if !strings.Contains(y, want) {
 			t.Errorf("render lacks %q:\n%s", want, y)
 		}

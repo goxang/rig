@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func init() { spec.PluginImport = pluginImport }
 
 // pluginImport runs the importer through the plugin that provides it. Fragments are cached in
-// .jig/cache/import by the sha256 of the imported files and the plugin, so warm loads start no plugin.
+// .rig/cache/import by the sha256 of the imported files and the plugin, so warm loads start no plugin.
 // ponytail: files an importer reads beside path (a compose .env) are not in the key; use ImportResult.Watch when one bites.
 func pluginImport(dir, name, path string) (map[string]any, error) {
 	ms, _ := Discover(dir, nil)
@@ -32,7 +32,7 @@ func pluginImport(dir, name, path string) (map[string]any, error) {
 	if m == nil {
 		return nil, fmt.Errorf("%q: %w", name, spec.ErrNoImporter)
 	}
-	cache := filepath.Join(dir, ".jig", "cache", "import", importKey(m, name, path)+".json")
+	cache := filepath.Join(dir, ".rig", "cache", "import", importKey(m, name, path)+".json")
 	if b, err := os.ReadFile(cache); err == nil {
 		var frag map[string]any
 		if json.Unmarshal(b, &frag) == nil {

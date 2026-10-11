@@ -163,7 +163,7 @@ func (s *Store) Check(name, password, code string) bool {
 
 // Issue makes a token for user and returns its secret, shown once.
 func (s *Store) Issue(user, name string, ttl time.Duration, session bool) (string, Token, error) {
-	secret := "jig_" + randomString(24)
+	secret := "rig_" + randomString(24)
 	t := Token{ID: randomString(6), User: user, Name: name, Expires: time.Now().Add(ttl), Session: session}
 	s.mu.Lock()
 	defer s.mu.Unlock()

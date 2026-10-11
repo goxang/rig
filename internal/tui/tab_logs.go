@@ -13,10 +13,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/viz"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/viz"
+	"github.com/goxang/rig/spec"
 )
 
 const logCap = 5000
@@ -602,7 +602,7 @@ func (f logFormat) keys(lines []core.LogLine) []string {
 	return out
 }
 
-// pickFields chooses which JSON keys lv's lines show; it lasts until jig quits (ui.logs.hide keeps
+// pickFields chooses which JSON keys lv's lines show; it lasts until rig quits (ui.logs.hide keeps
 // it as the default). Shared by the Logs tab and a service's own log page.
 func pickFields(m *model, lv *logView) {
 	keys := lv.fmt.keys(lv.lines)

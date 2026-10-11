@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// host drives a plugin over pipes, the way jig does.
+// host drives a plugin over pipes, the way rig does.
 type host struct {
 	t   *testing.T
 	in  io.WriteCloser
@@ -125,7 +125,7 @@ func mustJSON(v any) []byte {
 
 func TestArgsSchemaEmbedded(t *testing.T) {
 	type base struct {
-		Release string `json:"release" jig:"required"`
+		Release string `json:"release" rig:"required"`
 	}
 	s := ArgsSchema(reflect.TypeOf(struct {
 		base

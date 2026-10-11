@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/contracts"
+	"github.com/goxang/rig/contracts"
 
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 type namedTab struct {
@@ -27,7 +27,7 @@ func (n *namedTab) name() string { return n.title }
 func TestKeyPresets(t *testing.T) {
 	a, b := &namedTab{title: "Services"}, &namedTab{title: "Logs"}
 	m := &model{tabs: []tab{a, b}, opened: map[int]bool{0: true, 1: true}, refreshed: map[int]time.Time{},
-		app: &engine.App{Spec: &spec.Project{Keys: "jig"}}}
+		app: &engine.App{Spec: &spec.Project{Keys: "rig"}}}
 	if _, ok := m.globalKey("g"); ok {
 		t.Fatal("g is the screen's")
 	}
@@ -40,11 +40,7 @@ func TestKeyPresets(t *testing.T) {
 		t.Fatal(":open services")
 	}
 	if _, ok := m.globalKey("S"); ok {
-		t.Fatal("S is the screen's under jig")
-	}
-	m.app.Spec.Keys = "rig"
-	if m.keyFor("save") != "S" || m.keyFor("search") != "" {
-		t.Fatal("rig preset")
+		t.Fatal("S is the screen's under rig")
 	}
 }
 

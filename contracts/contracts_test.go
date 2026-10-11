@@ -3,10 +3,10 @@ package contracts
 import (
 	"testing"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestContractsLoadAndCheck(t *testing.T) {

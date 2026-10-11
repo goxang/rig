@@ -10,7 +10,7 @@ import (
 
 func TestAffected(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "jig.yaml")
+	p := filepath.Join(dir, "rig.yaml")
 	body := `
 project: a
 environments: { dev: { runtime: { type: fake } } }

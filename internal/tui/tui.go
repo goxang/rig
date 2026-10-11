@@ -1,4 +1,4 @@
-// Package tui is jig's terminal control plane: one screen per concern (services, logs, metrics,
+// Package tui is rig's terminal control plane: one screen per concern (services, logs, metrics,
 // traces, queries, key-value, data, load, manifests, hosts), all driven by the same engine as the CLI.
 // Screens load nothing until opened and refresh only while showing; the service list is one runtime
 // call per refresh.
@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/kernel/jobs"
+	"github.com/goxang/rig/kernel/jobs"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -28,13 +28,13 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/internal/kubectx"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/internal/kubectx"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 // tab is one screen. Messages a tab sends itself must carry gen so results that arrive after an
@@ -107,10 +107,10 @@ type model struct {
 	saving     sync.Mutex
 	// views are the filters of each screen, carried over a reload and kept by a saved session
 	views map[string]map[string]string
-	// specAt is jig.yaml's modification time when it was read, to notice an edit
+	// specAt is rig.yaml's modification time when it was read, to notice an edit
 	specAt    time.Time
 	specNoted bool
-	// devAt is when jig plugin dev last built, to reload after the next build
+	// devAt is when rig plugin dev last built, to reload after the next build
 	devAt time.Time
 	// jobs are the operations started this session (act, do, tasks), shown with their output under !
 	jobs      jobs.Manager
@@ -122,7 +122,7 @@ type model struct {
 	kubeEnv string
 	busy    int
 	// workCtx is what one-off operations (queries, actions, loads) run under: ctrl+c ends them
-	// without leaving jig
+	// without leaving rig
 	workCtx  context.Context
 	stopWork context.CancelFunc
 
@@ -134,9 +134,9 @@ type model struct {
 	trail []crumb
 
 	confirm *confirm
-	// driving is jig_ui pressing keys for the AI: every change they start waits for the user
+	// driving is rig_ui pressing keys for the AI: every change they start waits for the user
 	driving bool
-	// yes is jig opened with --yes: a protected environment no longer asks before every change
+	// yes is rig opened with --yes: a protected environment no longer asks before every change
 	yes    bool
 	prompt *prompt
 	picker *picker
@@ -145,13 +145,13 @@ type model struct {
 	// and jumped to with / and n
 	helpScroll int
 	helpQuery  string
-	// session is the saved session this run continues (S, jig resume); quitting updates it
+	// session is the saved session this run continues (S, rig resume); quitting updates it
 	session *Session
 	// mouseOff hands the mouse to the terminal, so text can be selected and copied
 	mouseOff bool
 	// chat is the assistant's drawer (@); sock is where its tools reach this UI
 	chat *chat
-	// aiAllowed are the assistant's commands the user said "always" to, for this run of jig
+	// aiAllowed are the assistant's commands the user said "always" to, for this run of rig
 	aiAllowed map[string]bool
 	sock      string
 	ai        *ai.Runner
@@ -272,7 +272,7 @@ type (
 	envMsg struct {
 		app *engine.App
 		err error
-		// reload is ctrl+r opening the same environment again from the edited jig.yaml
+		// reload is ctrl+r opening the same environment again from the edited rig.yaml
 		reload bool
 		// name is the environment that was opened, for offering a kubeconfig when it failed on one
 		name string
@@ -344,7 +344,7 @@ func showView(mode string, t *viewTab) bool {
 	return mode == "simple" || slices.Contains(t.v.Modes, mode)
 }
 
-func modeFile(a *engine.App) string { return filepath.Join(a.Spec.Dir, ".jig", "ui-mode") }
+func modeFile(a *engine.App) string { return filepath.Join(a.Spec.Dir, ".rig", "ui-mode") }
 
 // startMode is the mode V last chose in this project, else ui.mode.
 func startMode(a *engine.App) string {
@@ -478,7 +478,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 	m.tabs, m.transient = newTabs(a, m.all, m.mode), false
 	m.sched = newScheduler(a)
 	m.specAt = specTime(a)
-	if st, err := os.Stat(filepath.Join(a.Spec.Dir, ".jig", host.DevStamp)); err == nil {
+	if st, err := os.Stat(filepath.Join(a.Spec.Dir, ".rig", host.DevStamp)); err == nil {
 		m.devAt = st.ModTime()
 	}
 	if s != nil {
@@ -492,7 +492,7 @@ func run(ctx context.Context, a *engine.App, s *Session, init func(m *model)) er
 		case rep := <-reply:
 			return rep
 		case <-time.After(10 * time.Minute):
-			return ai.Reply{Text: "no answer in jig"}
+			return ai.Reply{Text: "no answer in rig"}
 		}
 	})
 	if err != nil {
@@ -534,7 +534,7 @@ func (m *model) setupHint() tea.Cmd {
 		if len(names) == 0 {
 			return nil
 		}
-		return setupMsg(fmt.Sprintf("to set up: %s · %s · jig doctor says how", strings.Join(names, ", "), fix))
+		return setupMsg(fmt.Sprintf("to set up: %s · %s · rig doctor says how", strings.Join(names, ", "), fix))
 	}
 }
 
@@ -745,7 +745,7 @@ func (m *model) do(label string, f func(ctx context.Context) error) tea.Cmd {
 }
 
 // needsConfirm: only dangerous changes on a real Kubernetes cluster, and every change on a protected
-// environment (unless jig was opened with --yes), wait for enter. Local, docker and kind run at once.
+// environment (unless rig was opened with --yes), wait for enter. Local, docker and kind run at once.
 func (m *model) needsConfirm(dangerous bool) bool {
 	e := m.app.Env
 	return m.driving || e.Protected && !m.yes || dangerous && e.Runtime != nil && e.Runtime.Type == "kubernetes"
@@ -937,7 +937,7 @@ func (m *model) alertsView() string {
 		}
 		rules = append(rules, fmt.Sprintf("%s: %s, warn %v crit %v%s", r.Name, src, r.Warn, r.Crit, r.Unit))
 	}
-	b.WriteString("\n" + sDim.Render("checked every 15s · rules (alerts: in jig.yaml):\n"+strings.Join(rules, "\n")))
+	b.WriteString("\n" + sDim.Render("checked every 15s · rules (alerts: in rig.yaml):\n"+strings.Join(rules, "\n")))
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(1, 2).
 		Render(sTitle.Render("alerts") + "\n\n" + b.String())
 }
@@ -1123,7 +1123,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.typingText() {
 			k, ok := latinKey(msg)
 			if !ok {
-				m.setStatus("jig's keys follow the English (US) layout: switch the keyboard to English", true)
+				m.setStatus("rig's keys follow the English (US) layout: switch the keyboard to English", true)
 				return m, nil
 			}
 			msg = k
@@ -1785,7 +1785,7 @@ func (m *model) quitTwice(key string, again bool) tea.Cmd {
 }
 
 // quit leaves at once unless that would cut something short: a test run and operations still
-// working stop with jig, while load generators keep sending without it, so it asks first.
+// working stop with rig, while load generators keep sending without it, so it asks first.
 func (m *model) quit() tea.Cmd {
 	var stops, gens []string
 	for _, t := range m.tabs {
@@ -1848,7 +1848,7 @@ func (m *model) quit() tea.Cmd {
 	}
 	opts, desc = append(opts, "stay"), append(desc, "")
 	a, ctx := m.app, core.WithConfirmed(m.ctx)
-	m.pick("quit jig?", opts, desc, 0, false, func(c []string) tea.Cmd {
+	m.pick("quit rig?", opts, desc, 0, false, func(c []string) tea.Cmd {
 		if len(c) == 0 || c[0] == "stay" {
 			return nil
 		}
@@ -1876,7 +1876,7 @@ func (m *model) quit() tea.Cmd {
 	return nil
 }
 
-// pickTask runs a jig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
+// pickTask runs a rig.yaml task (clear-db, ship, ...) in the terminal: tasks print as they go and
 // may read input, so the TUI steps aside until it ends. Enter on the confirmation is the task's --yes.
 // prefix narrows the list (the KV screen's kv-*).
 // pickTheme previews each theme as the cursor lands on it; enter keeps it for good, esc puts back the old one.
@@ -1893,7 +1893,7 @@ func (m *model) pickTheme() {
 			m.setStatus(err.Error(), true)
 			return nil
 		}
-		m.setStatus("theme "+chosen[0]+" (jig theme --save to edit a copy)", false)
+		m.setStatus("theme "+chosen[0]+" (rig theme --save to edit a copy)", false)
 		return nil
 	})
 	m.picker.back = func() tea.Cmd {
@@ -1912,7 +1912,7 @@ func (m *model) pickTheme() {
 		return strings.Join([]string{
 			sw(t.Accent, "accent") + "   " + sw(t.Green, "ok") + "   " + sw(t.Amber, "warn") + "   " + sw(t.Red, "error") + "   " + sw(t.Purple, "purple"),
 			sAccent.Render("accent text") + "  " + sDim.Render("dim text") + "  " + sSelected.Render(" selected row ") + " " + sCursor.Render(" cursor "),
-			"fonts and their size are the terminal's; jig sets colours only",
+			"fonts and their size are the terminal's; rig sets colours only",
 		}, "\n")
 	}
 }
@@ -2094,7 +2094,7 @@ func (m *model) runTask(name string, args []string) {
 		defer out.Close()
 		cmd := exec.Command(self, append([]string{"-f", file, "-e", env, "--yes", "task", name}, args...)...)
 		sh.Detach(cmd)
-		cmd.Env = append(os.Environ(), "JIG_ERROR_FILE="+base+".err", "JIG_DONE_FILE="+base+".done", "NO_COLOR=1")
+		cmd.Env = append(os.Environ(), "RIG_ERROR_FILE="+base+".err", "RIG_DONE_FILE="+base+".done", "NO_COLOR=1")
 		cmd.Stdout, cmd.Stderr = out, out
 		in, err := cmd.StdinPipe()
 		if err != nil {
@@ -2184,7 +2184,7 @@ func (m *model) showNamespaces(msg namespacesMsg) tea.Cmd {
 			return envMsg{app: b, err: err}
 		}
 	}
-	m.pick("namespace of "+env+" (kept until jig ns --reset)", names, nil, sel, false, func(c []string) tea.Cmd {
+	m.pick("namespace of "+env+" (kept until rig ns --reset)", names, nil, sel, false, func(c []string) tea.Cmd {
 		switch {
 		case len(c) == 0 || c[0] == m.app.Namespace():
 			return nil
@@ -2202,7 +2202,7 @@ func (m *model) showNamespaces(msg namespacesMsg) tea.Cmd {
 	return nil
 }
 
-// reload reads jig.yaml again and reopens the current environment, keeping each screen's filters.
+// reload reads rig.yaml again and reopens the current environment, keeping each screen's filters.
 func (m *model) reload() tea.Cmd {
 	file, env := m.app.Spec.File, m.app.Env.Name
 	m.setStatus("reloading "+filepath.Base(file)+"…", false)
@@ -2220,16 +2220,16 @@ func specTime(a *engine.App) time.Time {
 	return st.ModTime()
 }
 
-// noticePluginDev reloads after jig plugin dev rebuilt a plugin, tracing its RPC from then on.
+// noticePluginDev reloads after rig plugin dev rebuilt a plugin, tracing its RPC from then on.
 func (m *model) noticePluginDev() tea.Cmd {
-	file := filepath.Join(m.app.Spec.Dir, ".jig", host.DevStamp)
+	file := filepath.Join(m.app.Spec.Dir, ".rig", host.DevStamp)
 	st, err := os.Stat(file)
 	if err != nil || !st.ModTime().After(m.devAt) {
 		return nil
 	}
 	m.devAt = st.ModTime()
-	if name, _ := os.ReadFile(file); len(name) > 0 && os.Getenv("JIG_TRACE") == "" {
-		os.Setenv("JIG_TRACE", string(name))
+	if name, _ := os.ReadFile(file); len(name) > 0 && os.Getenv("RIG_TRACE") == "" {
+		os.Setenv("RIG_TRACE", string(name))
 	}
 	return m.reload()
 }
@@ -2321,7 +2321,7 @@ func (m *model) fetchKubeconfig(env string) tea.Cmd {
 			raw, err := kubectx.Fetch(ctx, source, server, token, false)
 			if err != nil {
 				if strings.Contains(err.Error(), "x509:") {
-					err = fmt.Errorf("%w (a self-signed server: jig -e %s kubeconfig --insecure in a terminal)", err, env)
+					err = fmt.Errorf("%w (a self-signed server: rig -e %s kubeconfig --insecure in a terminal)", err, env)
 				}
 				return envMsg{err: fmt.Errorf("fetch kubeconfig: %w", err), name: env}
 			}
@@ -2412,7 +2412,7 @@ func (m *model) overlay(box string, h int) string {
 
 func (m *model) header() string {
 	a := m.app
-	left := sAccent.Render(" ◆ jig ") + sTitle.Render(a.Spec.Name) + sDim.Render("  env ") + sTitle.Render(a.Env.Name) +
+	left := sAccent.Render(" ◆ rig ") + sTitle.Render(a.Spec.Name) + sDim.Render("  env ") + sTitle.Render(a.Env.Name) +
 		sDim.Render(" ("+a.Env.Runtime.Type+")")
 	if ns := a.Namespace(); ns != "" {
 		left += sDim.Render("  ns ") + sTitle.Render(ns)
@@ -2684,7 +2684,7 @@ const footerHints = 5
 var screenHelp = map[string]string{
 	"Services":  "what runs in this environment: start, stop, restart, scale, deploy, logs, debug",
 	"Logs":      "follow the logs of one or more services, filter and search them",
-	"Metrics":   "the dashboards of jig.yaml over the environment's Prometheus",
+	"Metrics":   "the dashboards of rig.yaml over the environment's Prometheus",
 	"Traces":    "find a request's trace (Zipkin/Jaeger) and walk its spans",
 	"Queries":   "saved queries (SQL, PromQL, redis, HTTP): run, schedule, chart",
 	"Data":      "walk databases, queues and caches; edit or delete rows and keys",
@@ -2692,7 +2692,7 @@ var screenHelp = map[string]string{
 	"Load":      "load generators: start, stop, change the rate, watch what they send",
 	"Hosts":     "the machines the environment runs on: CPU, memory, disk, a shell",
 	"Manifests": "what runs on the cluster, or the project's manifest files (c): objects, links, issues, edit, apply",
-	"Tests":     "the test suites of jig.yaml: run, rerun failures, reports",
+	"Tests":     "the test suites of rig.yaml: run, rerun failures, reports",
 }
 
 // helpLines are the help text's rows, split for scrolling and search; the content itself is
@@ -2731,16 +2731,16 @@ func (m *model) helpLines() []string {
 			{k("envinfo"), "this environment: variables, databases, addresses (↑↓, / searches, e edits a variable)"},
 			{k("kubeconfig"), "fetch the environment's kubeconfig (Rancher API key, URL or file) into yours"},
 			{"ctrl+w", "watch: rebuild and restart services as their sources change (errors in A)"},
-			{"ctrl+r", "reload jig.yaml after you or the assistant edited it (filters stay)"},
-			{k("save"), "save this session: jig opens on it from now on, as you leave it, filters included (jig --fresh starts clean)"},
+			{"ctrl+r", "reload rig.yaml after you or the assistant edited it (filters stay)"},
+			{k("save"), "save this session: rig opens on it from now on, as you leave it, filters included (rig --fresh starts clean)"},
 		}},
 		{"Assistant and activity", [][2]string{
-			{"@", "AI chat about this screen (jig ai config sets it up)"},
+			{"@", "AI chat about this screen (rig ai config sets it up)"},
 			{"A", "alerts (header badge)"},
 			{"!", "activity: builds, deploys and tasks you started with their output; x stops one, enter types its input, tab errors, y copies"},
 		}},
 		{"Look", [][2]string{
-			{"ctrl+p", "colour theme, previewed as you move (jig theme --save to make your own)"},
+			{"ctrl+p", "colour theme, previewed as you move (rig theme --save to make your own)"},
 			{"M", "mouse on/off (off: select text)"},
 			{"V", "mode: detailed, simple, software (dev screens) or product (metrics, issues, docs)"},
 		}},
@@ -2853,7 +2853,7 @@ func (m *model) helpView(h int) string {
 		w = max(w, lipgloss.Width(l))
 	}
 	w = min(w, m.w-8)
-	title := "jig — keys"
+	title := "rig — keys"
 	if len(lines) > inner {
 		title += sDim.Render(fmt.Sprintf("  %d-%d/%d", m.helpScroll+1, end, len(lines)))
 	}

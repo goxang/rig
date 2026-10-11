@@ -87,7 +87,7 @@ func valid(raw []byte) error {
 
 // Merge adds raw to the user's kubeconfig (the first file of $KUBECONFIG, else ~/.kube/config):
 // its entries replace same-named ones, the current context stays, and the old file is kept
-// beside it as .jig-backup. It returns the file written and the contexts raw brought.
+// beside it as .rig-backup. It returns the file written and the contexts raw brought.
 func Merge(raw []byte) (string, []string, error) {
 	dest := filepath.SplitList(os.Getenv("KUBECONFIG"))
 	if len(dest) == 0 || dest[0] == "" {
@@ -101,7 +101,7 @@ func Merge(raw []byte) (string, []string, error) {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return "", nil, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".jig-kubeconfig-*")
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".rig-kubeconfig-*")
 	if err != nil {
 		return "", nil, err
 	}
@@ -147,7 +147,7 @@ func Merge(raw []byte) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	if err := os.WriteFile(file+".jig-backup", old, 0o600); err != nil {
+	if err := os.WriteFile(file+".rig-backup", old, 0o600); err != nil {
 		return "", nil, err
 	}
 	if err := os.WriteFile(file, merged, 0o600); err != nil {

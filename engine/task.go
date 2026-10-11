@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 var svcRef = regexp.MustCompile(`svc://[A-Za-z0-9_.-]+(:[A-Za-z0-9_-]+)?`)
@@ -44,7 +44,7 @@ func (a *App) TaskHelp(name string) string {
 	var steps []string
 	for _, st := range t.Steps {
 		first, _, _ := strings.Cut(strings.TrimSpace(st), "\n")
-		if !strings.HasPrefix(first, `[ -n "${JIG_YES`) {
+		if !strings.HasPrefix(first, `[ -n "${RIG_YES`) {
 			steps = append(steps, first)
 		}
 	}
@@ -167,10 +167,10 @@ func PresetTaskArgs(args []spec.TaskArg, words []string) (out []string, named bo
 var taskParam = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
 // RunTask runs a task's steps in order with sh -c from the project directory, stopping at the first
-// failure. svc:// addresses in a step become a host:port reachable from here, and a nested `jig`
+// failure. svc:// addresses in a step become a host:port reachable from here, and a nested `rig`
 // inherits this project, environment and confirmation. A NAME=value arg sets that env var for the
 // steps (overriding any manifest var or pre-set shell env of the same name) instead of requiring it
-// pre-set; every other arg reaches every step positionally as $1... and $JIG_ARGS.
+// pre-set; every other arg reaches every step positionally as $1... and $RIG_ARGS.
 func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Writer) error {
 	task, ok := a.Tasks()[name]
 	steps := task.Steps
@@ -190,25 +190,18 @@ func (a *App) RunTask(ctx context.Context, name string, args []string, out io.Wr
 			positional = append(positional, arg)
 		}
 	}
-	env := []string{"JIG_FILE=" + a.Spec.File}
-	// a nested `jig` is this binary, on PATH or not
+	env := []string{"RIG_FILE=" + a.Spec.File}
+	// a nested `rig` is this binary, on PATH or not
 	if exe, err := os.Executable(); err == nil {
 		env = append(env, "PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	if a.Env != nil {
-		env = append(env, "JIG_ENV="+a.Env.Name)
+		env = append(env, "RIG_ENV="+a.Env.Name)
 	}
 	if a.Confirmed {
-		env = append(env, "JIG_YES=1")
+		env = append(env, "RIG_YES=1")
 	}
-	env = append(env, "JIG_TASK="+name, "JIG_ARGS="+strings.Join(positional, " "))
-	if a.Spec.Compat.RigEnv {
-		for _, kv := range slices.Clone(env) {
-			if rest, ok := strings.CutPrefix(kv, "JIG_"); ok {
-				env = append(env, "RIG_"+rest)
-			}
-		}
-	}
+	env = append(env, "RIG_TASK="+name, "RIG_ARGS="+strings.Join(positional, " "))
 	vars, _ := a.Vars(ctx)
 	for k, v := range vars {
 		env = append(env, k+"="+v.Value)
@@ -305,7 +298,7 @@ func exitText(err error) string {
 // ${NAME}; the old "type yes" step of a task shows as what it does.
 func stepTitle(step string, secrets map[string]string) string {
 	title, _, more := strings.Cut(strings.TrimSpace(step), "\n")
-	if strings.HasPrefix(title, `[ -n "${JIG_YES`) {
+	if strings.HasPrefix(title, `[ -n "${RIG_YES`) {
 		return "confirm"
 	}
 	if more {
@@ -324,7 +317,7 @@ type Var struct {
 	Value, From string
 }
 
-// Vars are the runtime's manifest variables: jig.yaml's, with `jig vars set` overrides from the
+// Vars are the runtime's manifest variables: rig.yaml's, with `rig vars set` overrides from the
 // environment's state on top.
 func (a *App) Vars(ctx context.Context) (map[string]Var, error) {
 	out := map[string]Var{}
@@ -336,7 +329,7 @@ func (a *App) Vars(ctx context.Context) (map[string]Var, error) {
 	}
 	_ = a.Env.Runtime.Node.Decode(&file)
 	for k, v := range file.Vars {
-		out[k] = Var{Value: v, From: "jig.yaml"}
+		out[k] = Var{Value: v, From: "rig.yaml"}
 	}
 	state, err := a.LoadState(ctx)
 	if err != nil {
@@ -344,7 +337,7 @@ func (a *App) Vars(ctx context.Context) (map[string]Var, error) {
 	}
 	for k, v := range state {
 		if n, ok := strings.CutPrefix(k, "var."); ok {
-			out[n] = Var{Value: v, From: "set (jig.yaml: " + file.Vars[n] + ")"}
+			out[n] = Var{Value: v, From: "set (rig.yaml: " + file.Vars[n] + ")"}
 		}
 	}
 	return out, nil

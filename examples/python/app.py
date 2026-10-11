@@ -1,4 +1,4 @@
-"""A tiny Python service for jig: JSON logs on stdout, Prometheus text on /metrics, no dependencies."""
+"""A tiny Python service for rig: JSON logs on stdout, Prometheus text on /metrics, no dependencies."""
 import json
 import os
 import random

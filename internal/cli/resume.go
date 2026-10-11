@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/ai"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/ai"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/spec"
 )
 
 func resumeCommand() *cobra.Command {
@@ -56,7 +56,7 @@ continues one, d closes it. With an id, continues that one; --close forgets the 
 					return err
 				}
 				if len(rows) == 0 {
-					fmt.Println("no sessions yet: jig ai starts a conversation, S in the UI saves a session")
+					fmt.Println("no sessions yet: rig ai starts a conversation, S in the UI saves a session")
 					return nil
 				}
 				switch {

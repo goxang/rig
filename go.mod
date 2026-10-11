@@ -1,4 +1,4 @@
-module github.com/goxang/jig
+module github.com/goxang/rig
 
 go 1.26.0
 

@@ -6,7 +6,7 @@ import (
 )
 
 // TiedToParent makes cmd die with this process, even when this process is killed: a port-forward
-// must not outlive the jig that opened it.
+// must not outlive the rig that opened it.
 func TiedToParent(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 }

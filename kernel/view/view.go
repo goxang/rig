@@ -9,10 +9,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
-// View is one entry under views: in jig.yaml or a plugin manifest.
+// View is one entry under views: in rig.yaml or a plugin manifest.
 type View struct {
 	Title string
 	// Slot is tab, command, subtab:<view>, service.section, detail:<scheme>, panel or home.
@@ -249,14 +249,14 @@ func Walk(n *protocol.Node, fn func(*protocol.Node)) {
 }
 
 // Kind is a node's widget without its version: table@1 is table.
-// Widgets are the widgets jig renders and the highest version of each; plugins learn them at initialize.
+// Widgets are the widgets rig renders and the highest version of each; plugins learn them at initialize.
 var Widgets = map[string]int{
 	"table": 1, "list": 1, "kv": 1, "tree": 1, "form": 1, "stat": 1, "gauge": 1, "progress": 1, "bar": 1, "bars": 1,
 	"sparkline": 1, "chart": 1, "heatmap": 1, "text": 1, "markdown": 1, "code": 1, "diff": 1, "logs": 1,
 	"waterfall": 1, "graph": 1, "timeline": 1, "board": 1, "terminal": 1, "canvas": 1, "calendar": 1,
 }
 
-// Supported reports whether jig renders n's widget at the version it asks for (calendar@2).
+// Supported reports whether rig renders n's widget at the version it asks for (calendar@2).
 func Supported(n protocol.Node) bool {
 	k, v, versioned := strings.Cut(n.Widget, "@")
 	have, ok := Widgets[k]

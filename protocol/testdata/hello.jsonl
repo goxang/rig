@@ -1,16 +1,16 @@
-{"dir":">","msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"host":{"name":"jig","version":"1.0.0"},"protocols":["jig/1"]}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","id":1,"result":{"name":"hello","version":"0.1.0","protocol":"jig/1","provides":{"sources":{"greetings":{"description":"one greeting","args":{"properties":{"name":{"description":"who to greet; world by default","type":"string"}},"type":"object"}},"ticks":{"description":"a line every 10ms","args":{"properties":{"n":{"description":"how many ticks; 0 ticks until cancelled","type":"integer"}},"type":"object"},"stream":true}},"actions":{"greet":{"description":"greet someone","effect":"write","args":{"properties":{"name":{"description":"who to greet","type":"string"}},"required":["name"],"type":"object"},"plan":true,"keys":["G"]}},"schemes":["hello"],"search":true},"capabilities":["doctor","plan","resolve","search","stream"]}}}
+{"dir":">","msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"host":{"name":"rig","version":"1.0.0"},"protocols":["rig/1"]}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","id":1,"result":{"name":"hello","version":"0.1.0","protocol":"rig/1","provides":{"sources":{"greetings":{"description":"one greeting","args":{"properties":{"name":{"description":"who to greet; world by default","type":"string"}},"type":"object"}},"ticks":{"description":"a line every 10ms","args":{"properties":{"n":{"description":"how many ticks; 0 ticks until cancelled","type":"integer"}},"type":"object"},"stream":true}},"actions":{"greet":{"description":"greet someone","effect":"write","args":{"properties":{"name":{"description":"who to greet","type":"string"}},"required":["name"],"type":"object"},"plan":true,"keys":["G"]}},"schemes":["hello"],"search":true},"capabilities":["doctor","plan","resolve","search","stream"]}}}
 {"dir":">","msg":{"jsonrpc":"2.0","id":2,"method":"configure","params":{"config":{"greeting":"hi"}}}}
 {"dir":"<","msg":{"jsonrpc":"2.0","id":2,"result":{}}}
-{"dir":">","msg":{"jsonrpc":"2.0","id":3,"method":"query","params":{"source":"greetings","args":{"name":"jig"}}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","id":3,"result":{"fields":[{"name":"name","type":"string"},{"name":"count","type":"int"}],"columns":[["jig"],[1]]}}}
-{"dir":">","msg":{"jsonrpc":"2.0","id":4,"method":"run","params":{"action":"greet","args":{"name":"jig"},"job":"j1"}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","method":"$/progress","params":{"job":"j1","message":"greeting jig","done":1,"total":1}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","id":4,"result":{"message":"hello jig"}}}
-{"dir":">","msg":{"jsonrpc":"2.0","id":5,"method":"plan","params":{"action":"greet","args":{"name":"jig"}}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","id":5,"result":{"changes":[{"op":"run","target":"hello://jig"}]}}}
-{"dir":">","msg":{"jsonrpc":"2.0","id":6,"method":"resolve","params":{"ref":"hello://jig"}}}
-{"dir":"<","msg":{"jsonrpc":"2.0","id":6,"result":{"ref":"hello://jig","kind":"greeting","title":"hello jig"}}}
+{"dir":">","msg":{"jsonrpc":"2.0","id":3,"method":"query","params":{"source":"greetings","args":{"name":"rig"}}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","id":3,"result":{"fields":[{"name":"name","type":"string"},{"name":"count","type":"int"}],"columns":[["rig"],[1]]}}}
+{"dir":">","msg":{"jsonrpc":"2.0","id":4,"method":"run","params":{"action":"greet","args":{"name":"rig"},"job":"j1"}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","method":"$/progress","params":{"job":"j1","message":"greeting rig","done":1,"total":1}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","id":4,"result":{"message":"hello rig"}}}
+{"dir":">","msg":{"jsonrpc":"2.0","id":5,"method":"plan","params":{"action":"greet","args":{"name":"rig"}}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","id":5,"result":{"changes":[{"op":"run","target":"hello://rig"}]}}}
+{"dir":">","msg":{"jsonrpc":"2.0","id":6,"method":"resolve","params":{"ref":"hello://rig"}}}
+{"dir":"<","msg":{"jsonrpc":"2.0","id":6,"result":{"ref":"hello://rig","kind":"greeting","title":"hello rig"}}}
 {"dir":">","msg":{"jsonrpc":"2.0","id":7,"method":"resolve","params":{"ref":"svc://api"}}}
 {"dir":"<","msg":{"jsonrpc":"2.0","id":7,"error":{"code":-32002,"message":"not a hello ref: svc://api"}}}
 {"dir":">","msg":{"jsonrpc":"2.0","id":8,"method":"search","params":{"query":"wor"}}}

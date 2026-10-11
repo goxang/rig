@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goxang/jig/host"
+	"github.com/goxang/rig/host"
 )
 
 func TestNewPlugin(t *testing.T) {
@@ -35,9 +35,9 @@ func TestNewPlugin(t *testing.T) {
 // TestVendoredSDKs fails when an SDK changed and go generate ./scaffold has not copied it.
 func TestVendoredSDKs(t *testing.T) {
 	for vendored, src := range map[string]string{
-		"plugin/python/jig/__init__.py": "../sdk/python/jig/__init__.py", "plugin/python/jig/protocol.py": "../sdk/python/jig/protocol.py",
-		"plugin/ts/jig/index.js": "../sdk/typescript/index.js", "plugin/ts/jig/index.d.ts": "../sdk/typescript/index.d.ts",
-		"plugin/ts/jig/protocol.js": "../sdk/typescript/protocol.js", "plugin/ts/jig/protocol.d.ts": "../sdk/typescript/protocol.d.ts",
+		"plugin/python/rig/__init__.py": "../sdk/python/rig/__init__.py", "plugin/python/rig/protocol.py": "../sdk/python/rig/protocol.py",
+		"plugin/ts/rig/index.js": "../sdk/typescript/index.js", "plugin/ts/rig/index.d.ts": "../sdk/typescript/index.d.ts",
+		"plugin/ts/rig/protocol.js": "../sdk/typescript/protocol.js", "plugin/ts/rig/protocol.d.ts": "../sdk/typescript/protocol.d.ts",
 	} {
 		a, _ := pluginFS.ReadFile(vendored)
 		b, err := os.ReadFile(src)

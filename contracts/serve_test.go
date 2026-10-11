@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/manifest"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/manifest"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // wire is a Caller that sends every call through JSON to served, as the host and a plugin would.

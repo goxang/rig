@@ -1,6 +1,6 @@
 // Package config composes a project's configuration from its layers and remembers where each value
-// came from. The order, lowest first: plugin and pack defaults, imports, includes, jig.yaml, then
-// .jig/local.yaml; afterwards `defaults:` and `templates:`/`extends` fill each entry. A layer above
+// came from. The order, lowest first: plugin and pack defaults, imports, includes, rig.yaml, then
+// .rig/local.yaml; afterwards `defaults:` and `templates:`/`extends` fill each entry. A layer above
 // wins key by key, and `key: null` drops what the layers below say.
 package config
 
@@ -268,20 +268,20 @@ func (d *Doc) Explain(path string) []Origin {
 	return nil
 }
 
-// Options feed Compose what lives outside jig.yaml.
+// Options feed Compose what lives outside rig.yaml.
 type Options struct {
 	// Defaults are plugin and pack fragments, lowest first.
 	Defaults []*Doc
 	// Import runs one `imports:` entry and returns its fragment.
 	Import func(kind, path string, project *yaml.Node) (*Doc, error)
-	// NoLocal skips .jig/local.yaml.
+	// NoLocal skips .rig/local.yaml.
 	NoLocal bool
 }
 
-// Compose builds a project's configuration from jig.yaml (raw, at file) and every layer around it.
+// Compose builds a project's configuration from rig.yaml (raw, at file) and every layer around it.
 func Compose(raw []byte, file string, o Options) (*Doc, error) {
 	dir := filepath.Dir(file)
-	d, err := Parse(raw, file, "jig.yaml")
+	d, err := Parse(raw, file, "rig.yaml")
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func Compose(raw []byte, file string, o Options) (*Doc, error) {
 		d.Under(o.Defaults[i])
 	}
 	if !o.NoLocal {
-		local := filepath.Join(dir, ".jig", "local.yaml")
+		local := filepath.Join(dir, ".rig", "local.yaml")
 		if b, err := os.ReadFile(local); err == nil {
 			l, err := Parse(b, local, "local")
 			if err != nil {

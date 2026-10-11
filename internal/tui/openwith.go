@@ -13,7 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/internal/sh"
+	"github.com/goxang/rig/internal/sh"
 )
 
 // opener is an app that can open a document: the label shown and the command that opens it.

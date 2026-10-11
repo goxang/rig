@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 // The shop with its database killed: the api only fails, postgres is down, unreachable and named in
@@ -31,7 +31,7 @@ func TestRankBlamesTheDependency(t *testing.T) {
 	}
 	var b bytes.Buffer
 	inc.Markdown(&b, "")
-	if md := b.String(); !strings.Contains(md, "1. **postgres**") || !strings.Contains(md, "`jig restart postgres") {
+	if md := b.String(); !strings.Contains(md, "1. **postgres**") || !strings.Contains(md, "`rig restart postgres") {
 		t.Fatalf("report:\n%s", md)
 	}
 }

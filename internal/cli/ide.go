@@ -13,12 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
 func ideCommand() *cobra.Command {
@@ -27,15 +27,15 @@ func ideCommand() *cobra.Command {
 		Use:   "ide [service|group...]",
 		Short: "put the services into GoLand's Services view, grouped by section: logs, stop and debug from the IDE (o on the Services screen)",
 		Long: `Writes, for each service of this environment, GoLand run configurations in one folder per
-section of jig.yaml ("jig · <section>"):
+section of rig.yaml ("rig · <section>"):
 
-  <service>          jig attach: starts it if it is down, shows its live logs; stop stops it
+  <service>          rig attach: starts it if it is down, shows its live logs; stop stops it
   <service> · debug  Go services: starts it when it is down, brings up its debugger in the
-                     background (jig debug --detach --start), then attaches GoLand; breakpoints work
+                     background (rig debug --detach --start), then attaches GoLand; breakpoints work
                      from there. "<service> · stop debugger" ends the background debugger
 
-They run jig on this environment, so jig and GoLand see the same processes: what one starts or
-stops, the other shows. VS Code gets "jig: <service>" attach configs in .vscode/launch.json.`,
+They run rig on this environment, so rig and GoLand see the same processes: what one starts or
+stops, the other shows. VS Code gets "rig: <service>" attach configs in .vscode/launch.json.`,
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			var names []string
 			if len(args) > 0 {
@@ -62,7 +62,7 @@ func attachCommand() *cobra.Command {
 	var keep, debug bool
 	c := &cobra.Command{
 		Use:   "attach <service>",
-		Short: "start a service if it is down and follow its logs; Ctrl-C stops it (--keep leaves it running). GoLand's jig configs run this",
+		Short: "start a service if it is down and follow its logs; Ctrl-C stops it (--keep leaves it running). GoLand's rig configs run this",
 		Args:  cobra.ExactArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			name := args[0]
@@ -142,7 +142,7 @@ func attachCommand() *cobra.Command {
 		}),
 	}
 	c.Flags().BoolVar(&keep, "keep", false, "leave the service running when this ends")
-	c.Flags().BoolVar(&debug, "debug", false, "also bring up its debugger (on its jig ide port) for as long as this runs")
+	c.Flags().BoolVar(&debug, "debug", false, "also bring up its debugger (on its rig ide port) for as long as this runs")
 	return c
 }
 
@@ -200,7 +200,7 @@ func debugPIDFile(a *engine.App, svc string) string {
 	return filepath.Join(a.StateDir(), "debug", svc+".pid")
 }
 
-// debugInBackground runs `jig debug <svc>` detached from this process (the debugger, its port
+// debugInBackground runs `rig debug <svc>` detached from this process (the debugger, its port
 // forward and relay live in it) and returns once the service's stable debug port answers.
 func debugInBackground(ctx context.Context, a *engine.App, svc, instance string) error {
 	self, err := os.Executable()
@@ -233,7 +233,7 @@ func debugInBackground(ctx context.Context, a *engine.App, svc, instance string)
 	deadline := time.After(2 * time.Minute)
 	for {
 		if addr, ok := debuggerUp(svc); ok {
-			fmt.Println(green("✓ debugger on ") + bold(addr) + dim("  (jig debug --stop "+svc+" ends it; log "+logFile+")"))
+			fmt.Println(green("✓ debugger on ") + bold(addr) + dim("  (rig debug --stop "+svc+" ends it; log "+logFile+")"))
 			return nil
 		}
 		select {
@@ -254,7 +254,7 @@ func debugInBackground(ctx context.Context, a *engine.App, svc, instance string)
 func stopDebugger(a *engine.App, svc string) error {
 	raw, err := os.ReadFile(debugPIDFile(a, svc))
 	if err != nil {
-		return fmt.Errorf("no background debugger of %s (jig debug --detach starts one)", svc)
+		return fmt.Errorf("no background debugger of %s (rig debug --detach starts one)", svc)
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
 	_ = os.Remove(debugPIDFile(a, svc))

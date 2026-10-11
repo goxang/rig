@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/engine"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/engine"
 )
 
 func serviceCommands() []*cobra.Command {
@@ -26,7 +26,7 @@ func serviceCommands() []*cobra.Command {
 		Short: "build (with --build) and deploy services and their dependencies, in dependency order",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			up.Out = os.Stdout
-			fmt.Printf("%s %s on %s\n", bold("jig up"), strings.Join(args, " "), envLabel(a))
+			fmt.Printf("%s %s on %s\n", bold("rig up"), strings.Join(args, " "), envLabel(a))
 			return runEcho(ctx, a, "env.up", protocol.Args{"targets": args, "options": up})
 		}),
 	}
@@ -79,9 +79,9 @@ func serviceCommands() []*cobra.Command {
 	deploy := &cobra.Command{
 		Use:   "deploy <service|group...>",
 		Short: "roll out services: --tag deploys that image tag from the registry, --build builds a fresh one first",
-		Example: `  jig deploy app -t master-20261003     # every app at an existing tag, infra untouched
-  jig deploy api --build             # build from the working tree, push, roll out
-  jig deploy core --build --ref master  # build branch master, push, roll out`,
+		Example: `  rig deploy app -t master-20261003     # every app at an existing tag, infra untouched
+  rig deploy api --build             # build from the working tree, push, roll out
+  rig deploy core --build --ref master  # build branch master, push, roll out`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if err := a.Guard(); err != nil {
@@ -158,11 +158,11 @@ func serviceCommands() []*cobra.Command {
 	}
 	build.Flags().StringVarP(&tag, "tag", "t", "", "image tag (default: <branch>-<date>-<time>)")
 	build.Flags().StringVar(&ref, "ref", "", "build from this git branch, tag or commit instead of the working tree")
-	build.Flags().BoolVar(&noPush, "no-push", false, "keep the image in the local Docker daemon (jig push sends it later)")
+	build.Flags().BoolVar(&noPush, "no-push", false, "keep the image in the local Docker daemon (rig push sends it later)")
 
 	push := &cobra.Command{
 		Use:   "push <service|group...> -t <tag>",
-		Short: "push images jig build --no-push left in the local Docker daemon to the environment's registry",
+		Short: "push images rig build --no-push left in the local Docker daemon to the environment's registry",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if tag == "" {
@@ -179,7 +179,7 @@ func serviceCommands() []*cobra.Command {
 
 	scale := &cobra.Command{
 		Use:   "scale <service|group...> <replicas|+n|-n>",
-		Short: "set replica counts, or move them up or down: jig scale core +1",
+		Short: "set replica counts, or move them up or down: rig scale core +1",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			if err := a.Guard(); err != nil {
@@ -242,7 +242,7 @@ func serviceCommands() []*cobra.Command {
 	status.Flags().BoolVarP(&watch, "watch", "w", false, "refresh every 2s")
 
 	discover := &cobra.Command{
-		Use: "discover", Short: "everything running in the environment, managed by jig or not",
+		Use: "discover", Short: "everything running in the environment, managed by rig or not",
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			ws, err := a.Runtime().Discover(ctx)
 			if err != nil {
@@ -318,9 +318,9 @@ func serviceCommands() []*cobra.Command {
 	setenv := &cobra.Command{
 		Use:   "setenv <service|group> [K=V... | K=]",
 		Short: "env vars of services, kept in the environment's state so every deploy keeps them; running ones redeploy",
-		Example: `  jig setenv load-generator              # what is set
-  jig -e staging -y setenv api VERBOSITY=2 LOG_MODE=json
-  jig -e staging -y setenv api VERBOSITY=             # back to the manifest's`,
+		Example: `  rig setenv load-generator              # what is set
+  rig -e staging -y setenv api VERBOSITY=2 LOG_MODE=json
+  rig -e staging -y setenv api VERBOSITY=             # back to the manifest's`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: withApp(func(ctx context.Context, a *engine.App, args []string) error {
 			names, err := a.Targets(args[:1], false)
@@ -360,7 +360,7 @@ func serviceCommands() []*cobra.Command {
 			if len(args) == 0 {
 				names = nil
 			}
-			fmt.Printf("%s on %s: ctrl+c stops\n", bold("jig watch"), envLabel(a))
+			fmt.Printf("%s on %s: ctrl+c stops\n", bold("rig watch"), envLabel(a))
 			return a.Watch(ctx, names, func(e engine.WatchEvent) {
 				fmt.Print(dim(time.Now().Format("15:04:05 ")))
 				switch e.State {

@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/internal/sh"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/internal/sh"
+	"github.com/goxang/rig/spec"
 )
 
 // runCommand runs a command suite: its output streams into one row named after the suite, and the
-// JUnit XML it leaves in $JIG_JUNIT becomes a row per test. $JIG_RUN is the regex of the tests to
-// run again (jig test --failed), ".*" for all: jest -t, node --test-name-pattern, go -run take it.
+// JUnit XML it leaves in $RIG_JUNIT becomes a row per test. $RIG_RUN is the regex of the tests to
+// run again (rig test --failed), ".*" for all: jest -t, node --test-name-pattern, go -run take it.
 func runCommand(ctx context.Context, s *spec.TestSuite, run *TestRun, dir string, env []string) error {
-	f, err := os.CreateTemp("", "jig-junit-*.xml")
+	f, err := os.CreateTemp("", "rig-junit-*.xml")
 	if err != nil {
 		return err
 	}
@@ -32,7 +32,7 @@ func runCommand(ctx context.Context, s *spec.TestSuite, run *TestRun, dir string
 	cmd := exec.Command("sh", "-c", s.Command)
 	sh.OwnGroup(cmd)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), env...), "JIG_JUNIT="+junit)
+	cmd.Env = append(append(os.Environ(), env...), "RIG_JUNIT="+junit)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	run.mu.Lock()

@@ -1,8 +1,8 @@
-# yaml-language-server: $schema=../../spec/jig.schema.json
-# The smallest jig project: one Go service run as a local process.
+# yaml-language-server: $schema=../../spec/rig.schema.json
+# The smallest rig project: one Go service run as a local process.
 #
-#   jig up       build and start it
-#   jig          the control plane: Services, Logs, Metrics, Load, Tests
+#   rig up       build and start it
+#   rig          the control plane: Services, Logs, Metrics, Load, Tests
 version: 1
 project: hello
 default: local
@@ -20,7 +20,7 @@ environments:
     runtime: { type: local }
 
 components:
-  prom: { type: scrape }   # jig reads /metrics itself: no Prometheus to run
+  prom: { type: scrape }   # rig reads /metrics itself: no Prometheus to run
   load: { kind: loadgen, type: http, target: "svc://hello:7070/hello?name=load", rate: 10, max: 200, step: 10 }
 
 dashboards:

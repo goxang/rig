@@ -1,13 +1,13 @@
-# yaml-language-server: $schema=../../spec/jig.schema.json
-# jig on Kubernetes: an api and a worker (one Go binary, ./app) deployed on a local kind cluster
+# yaml-language-server: $schema=../../spec/rig.schema.json
+# rig on Kubernetes: an api and a worker (one Go binary, ./app) deployed on a local kind cluster
 # from the manifests in deploy/, with an HPA on the api. The same services also run on docker, or as
 # local processes.
 #
-#   jig do runtime create      # kind: cluster + registry
-#   jig up --build             # everything, in dependency order
-#   jig                        # the control plane
+#   rig do runtime create      # kind: cluster + registry
+#   rig up --build             # everything, in dependency order
+#   rig                        # the control plane
 version: 1
-project: jig-demo
+project: rig-demo
 default: kind
 
 services:
@@ -35,7 +35,7 @@ environments:
     description: local kind cluster with its own registry
     runtime:
       type: kind
-      cluster: jig-demo
+      cluster: rig-demo
       node_image: kindest/node:v1.28.0
       namespace: demo
       registry_port: 5002
@@ -55,8 +55,8 @@ environments:
       worker: { ports: { http: 8081, metrics: 9091 }, env: { PORT: "8081", METRICS_PORT: "9091" } }
 
 components:
-  # load sent from inside jig, in every environment
-  load: { kind: loadgen, type: http, target: "svc://api:8080/echo?q=jig", rate: 20, max: 400, step: 20 }
+  # load sent from inside rig, in every environment
+  load: { kind: loadgen, type: http, target: "svc://api:8080/echo?q=rig", rate: 20, max: 400, step: 20 }
   api-http: { kind: query, type: http, addr: "svc://api:8080" }
   go-build: { type: go, base: "docker://alpine:3.20" }
 

@@ -1,10 +1,10 @@
-// Package skills carries the agent skills jig installs into a project (jig skill --install).
+// Package skills carries the agent skills rig installs into a project (rig skill --install).
 package skills
 
 import _ "embed"
 
-//go:embed jig/SKILL.md
-var Jig string
+//go:embed rig/SKILL.md
+var Rig string
 
-//go:embed jig-plugin/SKILL.md
+//go:embed rig-plugin/SKILL.md
 var Plugin string

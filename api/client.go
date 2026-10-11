@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/kernel/catalog"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/catalog"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
 )
 
 // Hints on a needs-input error that say what the server wants asked before the call is retried.
@@ -81,7 +81,7 @@ type Request struct {
 	Pos     int               `json:"pos,omitempty"`
 }
 
-// Client is an Engine served by `jig serve`.
+// Client is an Engine served by `rig serve`.
 type Client struct {
 	URL   string
 	Token string
@@ -108,7 +108,7 @@ func (c *Client) client() *http.Client {
 				}
 				sum := sha256.Sum256(s.PeerCertificates[0].Raw)
 				if hex.EncodeToString(sum[:]) != want {
-					return errors.New("server certificate changed: jig login again only if you trust the new one")
+					return errors.New("server certificate changed: rig login again only if you trust the new one")
 				}
 				return nil
 			}}
@@ -155,7 +155,7 @@ func (c *Client) send(ctx context.Context, path string, headers map[string]strin
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	if c.Env != "" {
-		req.Header.Set("X-Jig-Env", c.Env)
+		req.Header.Set("X-Rig-Env", c.Env)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -190,7 +190,7 @@ func (c *Client) call(ctx context.Context, method string, in Request) (*http.Res
 		}
 		switch pe.Data.Hint {
 		case HintConfirm:
-			headers["X-Jig-Confirm"] = "1"
+			headers["X-Rig-Confirm"] = "1"
 		case HintReauth:
 			body := map[string]string{"password": answer}
 			if totpCode.MatchString(answer) {

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/kernel/audit"
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/kernel/inbox"
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/kernel/policy"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/audit"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/kernel/inbox"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/kernel/policy"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestRunGoesThroughPolicyJobAndAudit(t *testing.T) {

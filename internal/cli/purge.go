@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/spec"
 )
 
 func purgeCommand() *cobra.Command {
@@ -21,14 +21,14 @@ func purgeCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "purge",
 		Short: "free space: saved sessions, reports, logs, profiles, builds and backups older than --days, and plugin versions no project uses",
-		Long: `Deletes what jig wrote and no longer needs, untouched for --days (default 30):
-saved sessions (not the pinned one), reports, AI and test runs of every project jig has opened;
-this project's .jig/<env> logs, profiles and built binaries (rebuilt on the next run);
+		Long: `Deletes what rig wrote and no longer needs, untouched for --days (default 30):
+saved sessions (not the pinned one), reports, AI and test runs of every project rig has opened;
+this project's .rig/<env> logs, profiles and built binaries (rebuilt on the next run);
 backups, keeping the newest of each kind; the plugin description cache; and installed plugin
-versions no project's or your own jig.lock pins. Secrets, config and locks are never touched.
+versions no project's or your own rig.lock pins. Secrets, config and locks are never touched.
 A service log above --max-log MB is emptied whatever its age, since a running service keeps filling it.
-Disk full? jig purge --days 0 drops every log and built binary of this project at once.`,
-		Example: "  jig purge --dry-run      # list it first\n  jig purge --days 7",
+Disk full? rig purge --days 0 drops every log and built binary of this project at once.`,
+		Example: "  rig purge --dry-run      # list it first\n  rig purge --days 7",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p := &purger{cutoff: time.Now().AddDate(0, 0, -days), dry: dry}
@@ -36,12 +36,12 @@ Disk full? jig purge --days 0 drops every log and built binary of this project a
 				p.projects(filepath.Dir(root))
 			}
 			dir := projectDir()
-			envs, _ := os.ReadDir(filepath.Join(dir, ".jig"))
+			envs, _ := os.ReadDir(filepath.Join(dir, ".rig"))
 			for _, e := range envs {
 				if !e.IsDir() {
 					continue
 				}
-				d := filepath.Join(dir, ".jig", e.Name())
+				d := filepath.Join(dir, ".rig", e.Name())
 				p.truncateBig(filepath.Join(d, "logs"), int64(maxLog)<<20)
 				for _, sub := range []string{"logs", "profiles", "bin"} {
 					p.old(filepath.Join(d, sub))
@@ -49,7 +49,7 @@ Disk full? jig purge --days 0 drops every log and built binary of this project a
 				p.backups(d, e.Name() == "cluster-backups")
 			}
 			if cache, err := os.UserCacheDir(); err == nil {
-				p.old(filepath.Join(cache, "jig", "provides"))
+				p.old(filepath.Join(cache, "rig", "provides"))
 			}
 			verb := "freed"
 			if dry {

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/host"
-	"github.com/goxang/jig/kernel/frames"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/host"
+	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestMetaTools(t *testing.T) {

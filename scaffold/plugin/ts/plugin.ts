@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Plugin } from "./jig/index.js";
+import { Plugin } from "./rig/index.js";
 
 new Plugin("{%.Name%}", "0.1.0")
   .source("items", () => [{ name: "alpha", count: 1 }, { name: "beta", count: 2 }], {

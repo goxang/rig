@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 var fromRe = regexp.MustCompile(`(?is)\bFROM\s+(\S+)(?:.*?\bWHERE\s+(.+?))?;?\s*$`)

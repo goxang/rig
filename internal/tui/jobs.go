@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/goxang/jig/kernel/jobs"
+	"github.com/goxang/rig/kernel/jobs"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,7 +18,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/internal/sh"
+	"github.com/goxang/rig/internal/sh"
 )
 
 type job = jobs.Job
@@ -26,7 +26,7 @@ type job = jobs.Job
 // taskFiles makes the files a task writes: base.log its output, base.err and base.done how it ended.
 // Those of tasks started over a week ago go.
 func taskFiles() (base string, out *os.File, err error) {
-	dir := filepath.Join(os.TempDir(), "jig-tasks")
+	dir := filepath.Join(os.TempDir(), "rig-tasks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", nil, err
 	}

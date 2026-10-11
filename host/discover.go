@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goxang/jig/kernel/config"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/kernel/config"
+	"github.com/goxang/rig/spec"
 )
 
 func init() {
@@ -31,13 +31,13 @@ func xdg(env, fallback string) string {
 	return filepath.Join(home, fallback)
 }
 
-func ConfigDir() string { return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "jig") }
-func StoreDir() string  { return filepath.Join(xdg("XDG_DATA_HOME", ".local/share"), "jig", "plugins") }
-func StateDir() string  { return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "jig") }
-func CacheDir() string  { return filepath.Join(xdg("XDG_CACHE_HOME", ".cache"), "jig") }
+func ConfigDir() string { return filepath.Join(xdg("XDG_CONFIG_HOME", ".config"), "rig") }
+func StoreDir() string  { return filepath.Join(xdg("XDG_DATA_HOME", ".local/share"), "rig", "plugins") }
+func StateDir() string  { return filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "rig") }
+func CacheDir() string  { return filepath.Join(xdg("XDG_CACHE_HOME", ".cache"), "rig") }
 
 // Discover finds the project's plugins. A later scope replaces an earlier one of the same name: what
-// jig.lock pins, then what the user's own lock pins (jig plugin add --user), then user plugins, then
+// rig.lock pins, then what the user's own lock pins (rig plugin add --user), then user plugins, then
 // project plugins (under workspace trust), then plugins.<name>.path.
 func Discover(dir string, cfg map[string]*spec.Plugin) (ms []*Manifest, warnings []string) {
 	found := map[string]*Manifest{}
@@ -50,8 +50,8 @@ func Discover(dir string, cfg map[string]*spec.Plugin) (ms []*Manifest, warnings
 			return
 		}
 		warnings = append(warnings, m.Warnings...)
-		if !HostSupports(m.Jig) {
-			warnings = append(warnings, fmt.Sprintf("plugin %s needs jig %s; this is %s", m.Name, m.Jig, Version))
+		if !HostSupports(m.Rig) {
+			warnings = append(warnings, fmt.Sprintf("plugin %s needs rig %s; this is %s", m.Name, m.Rig, Version))
 			return
 		}
 		found[m.Name] = m
@@ -72,8 +72,8 @@ func Discover(dir string, cfg map[string]*spec.Plugin) (ms []*Manifest, warnings
 		lock = &Lock{}
 	}
 	trusted := Trusted(dir)
-	if !trusted && (len(lock.Plugins) > 0 || exists(filepath.Join(dir, ".jig", "plugins"))) {
-		warnings = append(warnings, "project plugins stay off until the workspace is trusted (jig trust)")
+	if !trusted && (len(lock.Plugins) > 0 || exists(filepath.Join(dir, ".rig", "plugins"))) {
+		warnings = append(warnings, "project plugins stay off until the workspace is trusted (rig trust)")
 	}
 	for _, n := range lock.Names() {
 		if !trusted {
@@ -85,7 +85,7 @@ func Discover(dir string, cfg map[string]*spec.Plugin) (ms []*Manifest, warnings
 		} else if d := storePath(n, l.Version); exists(d) {
 			add(d)
 		} else {
-			warnings = append(warnings, fmt.Sprintf("plugin %s %s is locked but not installed (any jig command installs it)", n, l.Version))
+			warnings = append(warnings, fmt.Sprintf("plugin %s %s is locked but not installed (any rig command installs it)", n, l.Version))
 		}
 	}
 	if user, err := ReadLock(ConfigDir()); err == nil {
@@ -108,7 +108,7 @@ func Discover(dir string, cfg map[string]*spec.Plugin) (ms []*Manifest, warnings
 	}
 	scan(filepath.Join(ConfigDir(), "plugins"))
 	if trusted {
-		scan(filepath.Join(dir, ".jig", "plugins"))
+		scan(filepath.Join(dir, ".rig", "plugins"))
 	}
 	for name, c := range cfg {
 		if trusted && c != nil && c.Path != "" {
@@ -151,7 +151,7 @@ func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // Trusted says whether project-local plugins and auto-install may run in dir.
 func Trusted(dir string) bool {
-	if os.Getenv("JIG_TRUST") == "project" {
+	if os.Getenv("RIG_TRUST") == "project" {
 		return true
 	}
 	t := readTrust()
@@ -202,17 +202,17 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// DevStamp, under .jig, names the plugin jig plugin dev just built; a running TUI reloads when it changes.
+// DevStamp, under .rig, names the plugin rig plugin dev just built; a running TUI reloads when it changes.
 const DevStamp = "plugin-dev"
 
 // ShowsTab reports whether m's tab views belong on dir's screens. A plugin only the user installed
-// shows its tabs when jig.yaml configures it, or when its detect matches and the credentials it
+// shows its tabs when rig.yaml configures it, or when its detect matches and the credentials it
 // asks for are set: a tab that cannot load anything is noise in a fresh project.
 func (m *Manifest) ShowsTab(dir string, cfg map[string]*spec.Plugin) bool {
 	if c, ok := cfg[m.Name]; ok {
 		return c == nil || !c.Off
 	}
-	if strings.HasPrefix(m.Dir, filepath.Join(dir, ".jig")+string(filepath.Separator)) {
+	if strings.HasPrefix(m.Dir, filepath.Join(dir, ".rig")+string(filepath.Separator)) {
 		return true
 	}
 	if lock, err := ReadLock(dir); err == nil && lock.Plugins[m.Name] != nil {
@@ -231,7 +231,7 @@ func (m *Manifest) ShowsTab(dir string, cfg map[string]*spec.Plugin) bool {
 }
 
 // Relevant reports whether m belongs on dir's screens. Project plugins always do; a user-wide one
-// does when jig.yaml configures it, its detect matches, or it has neither detect nor config.
+// does when rig.yaml configures it, its detect matches, or it has neither detect nor config.
 func (m *Manifest) Relevant(dir string, cfg map[string]*spec.Plugin) bool {
 	if c, ok := cfg[m.Name]; ok {
 		return c == nil || !c.Off

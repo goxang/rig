@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 // runPluginTests streams the suite's runner plugin's tests.events, each line a go test -json event.

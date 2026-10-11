@@ -34,7 +34,7 @@ func generated(t *testing.T) map[string][]byte {
 	return map[string][]byte{
 		"protocol/types_gen.go":        host,
 		"sdk/protocol_gen.go":          sdk,
-		"sdk/python/jig/protocol.py":   pyFile(s),
+		"sdk/python/rig/protocol.py":   pyFile(s),
 		"sdk/typescript/protocol.d.ts": tsTypes(s),
 		"sdk/typescript/protocol.js":   jsConsts(s),
 	}
@@ -50,7 +50,7 @@ func TestGenerated(t *testing.T) {
 		}
 		got, err := os.ReadFile("../" + path)
 		if err != nil || !bytes.Equal(got, want) {
-			t.Errorf("%s is out of date with jig1.schema.json: go generate ./protocol", path)
+			t.Errorf("%s is out of date with rig1.schema.json: go generate ./protocol", path)
 		}
 	}
 }
@@ -236,8 +236,8 @@ func comment(b *bytes.Buffer, indent, doc string) {
 
 func goFile(m *schemaModel, pkg string) ([]byte, error) {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\npackage %s\n\n", pkg)
-	b.WriteString("// Version is the protocol this package speaks.\nconst Version = \"jig/1\"\n\n")
+	fmt.Fprintf(&b, "// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\npackage %s\n\n", pkg)
+	b.WriteString("// Version is the protocol this package speaks.\nconst Version = \"rig/1\"\n\n")
 	b.WriteString("const (\n")
 	for _, me := range m.methods {
 		fmt.Fprintf(&b, "\tMethod%s = %q\n", goName(strings.Replace(me.name, "$/", "notify/", 1)), me.name)
@@ -312,7 +312,7 @@ func (m *schemaModel) pyType(s *ordered) string {
 
 func pyFile(m *schemaModel) []byte {
 	var b bytes.Buffer
-	b.WriteString("# Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.\nfrom __future__ import annotations\n\nfrom typing import Any, TypedDict\n\nVERSION = \"jig/1\"\n\n")
+	b.WriteString("# Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.\nfrom __future__ import annotations\n\nfrom typing import Any, TypedDict\n\nVERSION = \"rig/1\"\n\n")
 	b.WriteString("METHODS = {\n")
 	for _, me := range m.methods {
 		fmt.Fprintf(&b, "    %q: %q,\n", me.name, me.from)
@@ -394,7 +394,7 @@ func (m *schemaModel) tsType(s *ordered) string {
 
 func tsTypes(m *schemaModel) []byte {
 	var b bytes.Buffer
-	b.WriteString("// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\nexport const VERSION: \"jig/1\";\nexport const METHODS: Record<string, \"host\" | \"plugin\" | \"any\">;\nexport const ERRORS: {\n")
+	b.WriteString("// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\nexport const VERSION: \"rig/1\";\nexport const METHODS: Record<string, \"host\" | \"plugin\" | \"any\">;\nexport const ERRORS: {\n")
 	for _, e := range m.errors {
 		fmt.Fprintf(&b, "  readonly %s: %s;\n", e.name, e.code)
 	}
@@ -426,7 +426,7 @@ func tsTypes(m *schemaModel) []byte {
 
 func jsConsts(m *schemaModel) []byte {
 	var b bytes.Buffer
-	b.WriteString("// Code generated from protocol/jig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\nexport const VERSION = \"jig/1\";\n\nexport const METHODS = {\n")
+	b.WriteString("// Code generated from protocol/rig1.schema.json by go generate ./protocol; DO NOT EDIT.\n\nexport const VERSION = \"rig/1\";\n\nexport const METHODS = {\n")
 	for _, me := range m.methods {
 		fmt.Fprintf(&b, "  %q: %q,\n", me.name, me.from)
 	}

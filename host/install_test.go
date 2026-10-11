@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,7 +95,7 @@ func TestInstallPackVendorGC(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir()) // a clean machine
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	offline := &Installer{Dir: proj, Registry: &Registry{Mirror: filepath.Join(mirror, "gone")}}
-	if _, err := offline.Ensure(ctx); err == nil || !strings.Contains(err.Error(), "jig trust") {
+	if _, err := offline.Ensure(ctx); err == nil || !strings.Contains(err.Error(), "rig trust") {
 		t.Fatalf("an untrusted, non-interactive install went ahead: %v", err)
 	}
 	offline.Yes = true
@@ -151,7 +151,7 @@ func TestParseSource(t *testing.T) {
 		"pack/product@1.2.0":              "registry pack-product 1.2.0",
 		"github.com/o/r/sub@v1.2.0":       "git https://github.com/o/r sub v1.2.0",
 		"git+ssh://git@host/grp/r.git@v1": "git ssh://git@host/grp/r.git  v1",
-		"./tools/jig-foo":                 "path ./tools/jig-foo",
+		"./tools/rig-foo":                 "path ./tools/rig-foo",
 		"https://x/p.tar.gz#sha256=abc":   "tarball https://x/p.tar.gz abc",
 	} {
 		s := parseSource(in)
@@ -264,7 +264,7 @@ func TestUserPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exists(filepath.Join(proj, LockFile)) {
-		t.Fatal("a user plugin wrote the project's jig.lock")
+		t.Fatal("a user plugin wrote the project's rig.lock")
 	}
 	ms, _ := Discover(proj, nil)
 	if len(ms) != 1 || ms[0].Name != "arcade" || !ms[0].Relevant(proj, nil) {

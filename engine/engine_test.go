@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 // fake is an in-memory runtime: the smallest adapter there is, and proof the engine needs nothing more.
@@ -99,7 +99,7 @@ tasks:
 func open(t *testing.T, env string) *App {
 	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "jig.yaml")
+	p := filepath.Join(dir, "rig.yaml")
 	if err := os.WriteFile(p, []byte(file), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestUpLeavesRunningInfra(t *testing.T) {
 
 func TestSharedInfraRunsInItsEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "jig.yaml")
+	p := filepath.Join(dir, "rig.yaml")
 	y := `
 project: t
 default: dev
@@ -259,7 +259,7 @@ func TestUpLeavesRunningDependencies(t *testing.T) {
 
 func TestIgnoreState(t *testing.T) {
 	dir := t.TempDir()
-	for _, d := range []string{".git", ".jig"} {
+	for _, d := range []string{".git", ".rig"} {
 		if err := os.Mkdir(filepath.Join(dir, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -269,14 +269,14 @@ func TestIgnoreState(t *testing.T) {
 	ignoreState(dir)
 	ignoreState(dir)
 	raw, _ := os.ReadFile(gi)
-	if got := string(raw); got != "bin/\n# jig: pids, logs, profiles, reports, test runs (jig.yaml)\n.jig/\n" {
+	if got := string(raw); got != "bin/\n# rig: pids, logs, profiles, reports, test runs (rig.yaml)\n.rig/\n" {
 		t.Fatalf(".gitignore = %q", got)
 	}
-	own := "/.jig/*\n!/.jig/plugins/\n"
+	own := "/.rig/*\n!/.rig/plugins/\n"
 	_ = os.WriteFile(gi, []byte(own), 0o644)
 	ignoreState(dir)
 	if raw, _ := os.ReadFile(gi); string(raw) != own {
-		t.Fatalf("a .jig/* rule got .jig/ added: %q", raw)
+		t.Fatalf("a .rig/* rule got .rig/ added: %q", raw)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestVarsSetReachesTheRuntime(t *testing.T) {
 		db = o.Env["DB_URL"]
 		return &fake{running: map[string]int{}}, nil
 	})
-	p := filepath.Join(t.TempDir(), "jig.yaml")
+	p := filepath.Join(t.TempDir(), "rig.yaml")
 	project := "project: t\ndefault: test\nvars: {MAIN_DB: Switch}\nservices: {api: {}}\nenvironments:\n  test: {runtime: {type: fakevars, env: {DB_URL: 'db/${MAIN_DB}'}}}\n"
 	if err := os.WriteFile(p, []byte(project), 0o644); err != nil {
 		t.Fatal(err)

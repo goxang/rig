@@ -9,8 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/goxang/jig/kernel/view"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/view"
+	"github.com/goxang/rig/protocol"
 )
 
 // formState is a form generated from a JSON Schema: the action's args, or schema: in the view.

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goxang/jig/kernel/identity"
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/kernel/identity"
+	"github.com/goxang/rig/protocol"
 )
 
 const (

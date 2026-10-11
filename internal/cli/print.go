@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 
-	"github.com/goxang/jig/core"
+	"github.com/goxang/rig/core"
 )
 
 // plain drops colour: NO_COLOR, --brief, or stdout not a terminal.
@@ -40,9 +40,9 @@ func stateText(s core.State) string {
 	return dim("? " + string(s))
 }
 
-// brief is output for agents (--brief, JIG_BRIEF=1): no colour or padding, tab-separated, long
+// brief is output for agents (--brief, RIG_BRIEF=1): no colour or padding, tab-separated, long
 // cells cut, at most briefRows rows; every token is paid for.
-var brief = os.Getenv("JIG_BRIEF") != ""
+var brief = os.Getenv("RIG_BRIEF") != ""
 
 const briefRows = 100
 

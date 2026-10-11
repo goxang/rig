@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/spec"
 )
 
 // logView is a followed log shared by the Logs screen and a service's page: scroll back (which

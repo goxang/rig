@@ -3,7 +3,7 @@ package frames
 import (
 	"testing"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 func TestRowsRoundTrip(t *testing.T) {

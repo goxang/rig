@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/protocol"
+	"github.com/goxang/rig/protocol"
 )
 
 type Event = protocol.Event

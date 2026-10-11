@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goxang/jig/kernel/jobs"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/protocol/rpc"
+	"github.com/goxang/rig/kernel/jobs"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/protocol/rpc"
 )
 
 // The MCP bridge: an MCP server's tools become actions, its resources two sources, resources and resource.
@@ -41,7 +41,7 @@ func (p *Plugin) mcpHandshake(ctx context.Context, c *rpc.Conn) error {
 		Capabilities    map[string]any `json:"capabilities"`
 	}
 	err := c.Call(ctx, "initialize", map[string]any{"protocolVersion": mcpVersion, "capabilities": map[string]any{},
-		"clientInfo": map[string]string{"name": "jig", "version": Version}}, &init)
+		"clientInfo": map[string]string{"name": "rig", "version": Version}}, &init)
 	if err != nil {
 		return err
 	}

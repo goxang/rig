@@ -20,11 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/plugin"
-	"github.com/goxang/jig/protocol"
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 type stubRuntime struct{ core.Runtime }
@@ -51,7 +51,7 @@ policy:
 func newServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 	dir := t.TempDir()
-	file := filepath.Join(dir, "jig.yaml")
+	file := filepath.Join(dir, "rig.yaml")
 	if err := os.WriteFile(file, []byte(project), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -221,12 +221,12 @@ func TestOIDC(t *testing.T) {
 				http.Error(w, "bad", 400)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"id_token": jwt(key, map[string]any{"iss": idp.URL, "aud": "jig",
+			_ = json.NewEncoder(w).Encode(map[string]string{"id_token": jwt(key, map[string]any{"iss": idp.URL, "aud": "rig",
 				"exp": time.Now().Add(time.Minute).Unix(), "nonce": nonce, "preferred_username": "carol", "groups": []string{"/backend"}})})
 		}
 	}))
 	defer idp.Close()
-	s.OIDC = &OIDC{Issuer: idp.URL, ClientID: "jig", ClientSecret: "x", RedirectURL: ts.URL + "/v1/oidc/callback", Roles: []string{"dev"}}
+	s.OIDC = &OIDC{Issuer: idp.URL, ClientID: "rig", ClientSecret: "x", RedirectURL: ts.URL + "/v1/oidc/callback", Roles: []string{"dev"}}
 
 	c := &api.Client{URL: ts.URL, Fingerprint: fp}
 	state := "state-0123456789abcdef"

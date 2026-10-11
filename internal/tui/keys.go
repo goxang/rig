@@ -15,27 +15,26 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/host"
+	"github.com/goxang/rig/host"
 )
 
 // keyPresets map a key to a global command; keys left out go to the screen. Keys every preset
 // shares (q, @, ?, tab, ...) stay in the global switch.
 var keyPresets = map[string]map[string]string{
-	"jig": {":": "palette", "ctrl+k": "search", "ctrl+e": "env", ".": "menu", "T": "task"},
-	"rig": {"S": "save", "ctrl+e": "envinfo", "ctrl+k": "kubeconfig", "E": "env", "T": "task", "N": "namespace", ":": "palette"},
+	"rig": {":": "palette", "ctrl+k": "search", "ctrl+e": "env", ".": "menu", "T": "task"},
 }
 
-// preset is keys: from the project (.jig/local.yaml), else ~/.config/jig/config.yaml, else jig.
+// preset is keys: from the project (.rig/local.yaml), else ~/.config/rig/config.yaml, else rig.
 func (m *model) preset() string {
 	if k := m.app.Spec.Keys; k != "" {
 		return k
 	}
 	dir, _ := os.UserConfigDir()
 	var c struct{ Keys string }
-	if b, err := os.ReadFile(filepath.Join(dir, "jig", "config.yaml")); err == nil {
+	if b, err := os.ReadFile(filepath.Join(dir, "rig", "config.yaml")); err == nil {
 		_ = yaml.Unmarshal(b, &c)
 	}
-	return cmp.Or(c.Keys, "jig")
+	return cmp.Or(c.Keys, "rig")
 }
 
 // globalKey runs the preset's command for s, or a view's own key; ok is false when neither has it.
@@ -52,7 +51,7 @@ func (m *model) globalKey(s string) (tea.Cmd, bool) {
 }
 
 // command runs a palette line: the CLI's grammar, with what the UI does itself handled here and
-// the rest run as `jig <line>` with its output in a box.
+// the rest run as `rig <line>` with its output in a box.
 func (m *model) command(line string) tea.Cmd {
 	f := strings.Fields(line)
 	if len(f) == 0 {
@@ -87,7 +86,7 @@ func (m *model) command(line string) tea.Cmd {
 		if err != nil {
 			m.setStatus("save session: "+err.Error(), true)
 		} else {
-			m.setStatus("session "+id+" saved: jig opens on it from now on, as you leave it (jig --fresh starts clean)", false)
+			m.setStatus("session "+id+" saved: rig opens on it from now on, as you leave it (rig --fresh starts clean)", false)
 		}
 		return nil
 	case "env":
@@ -146,7 +145,7 @@ func (m *model) command(line string) tea.Cmd {
 	if t, ok := m.all["cmd:"+verb]; ok {
 		return m.transientScreen(t)
 	}
-	return m.runJig(line, f)
+	return m.runRig(line, f)
 }
 
 func (m *model) servicesTab() *servicesTab {
@@ -167,8 +166,8 @@ func (m *model) tabIndex(t tab) int {
 	return m.active
 }
 
-// runJig runs the line as a jig command in this project and environment.
-func (m *model) runJig(line string, args []string) tea.Cmd {
+// runRig runs the line as a rig command in this project and environment.
+func (m *model) runRig(line string, args []string) tea.Cmd {
 	exe, err := os.Executable()
 	if err != nil {
 		m.setStatus(err.Error(), true)
@@ -178,7 +177,7 @@ func (m *model) runJig(line string, args []string) tea.Cmd {
 	return m.do(":"+line, func(ctx context.Context) error {
 		c := exec.CommandContext(ctx, exe, append([]string{"-f", a.Spec.File, "-e", a.Env.Name}, args...)...)
 		c.Dir = a.Spec.Dir
-		c.Env = append(os.Environ(), "JIG_BRIEF=1", "NO_COLOR=1")
+		c.Env = append(os.Environ(), "RIG_BRIEF=1", "NO_COLOR=1")
 		out, err := c.CombinedOutput()
 		text := strings.TrimRight(string(out), "\n")
 		if err != nil {

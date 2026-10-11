@@ -1,4 +1,4 @@
-// Command sign writes file.minisig for each file, signed with $JIG_SIGNING_KEY; the release job runs it.
+// Command sign writes file.minisig for each file, signed with $RIG_SIGNING_KEY; the release job runs it.
 package main
 
 import (
@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/goxang/jig/host"
+	"github.com/goxang/rig/host"
 )
 
 func main() {
@@ -15,12 +15,12 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
-		fmt.Printf("public key (host.OfficialKey): %s\nJIG_SIGNING_KEY=%s\n", pub, secret)
+		fmt.Printf("public key (host.OfficialKey): %s\nRIG_SIGNING_KEY=%s\n", pub, secret)
 		return
 	}
-	key := os.Getenv("JIG_SIGNING_KEY")
+	key := os.Getenv("RIG_SIGNING_KEY")
 	if key == "" {
-		fail(fmt.Errorf("JIG_SIGNING_KEY is not set"))
+		fail(fmt.Errorf("RIG_SIGNING_KEY is not set"))
 	}
 	for _, f := range os.Args[1:] {
 		data, err := os.ReadFile(f)

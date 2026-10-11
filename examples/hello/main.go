@@ -1,4 +1,4 @@
-// Command hello is the smallest jig example: one HTTP service with JSON logs and Prometheus metrics.
+// Command hello is the smallest rig example: one HTTP service with JSON logs and Prometheus metrics.
 package main
 
 import (

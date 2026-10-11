@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goxang/jig/kernel/identity"
+	"github.com/goxang/rig/kernel/identity"
 )
 
 type Entry struct {
@@ -36,7 +36,7 @@ type Log struct {
 	secrets []string
 }
 
-// Open logs to path, usually .jig/<env>/audit.jsonl; secrets are masked in every entry.
+// Open logs to path, usually .rig/<env>/audit.jsonl; secrets are masked in every entry.
 func Open(path string, secrets ...string) *Log {
 	var keep []string
 	for _, s := range secrets {

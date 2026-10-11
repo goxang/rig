@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/goxang/jig/api"
-	"github.com/goxang/jig/kernel/inbox"
+	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/inbox"
 )
 
 func inboxCommand() *cobra.Command {
@@ -33,7 +33,7 @@ func inboxCommand() *cobra.Command {
 				return nil
 			}
 			if len(args) > 0 {
-				return fmt.Errorf("usage: jig inbox [approve|reject <id>]")
+				return fmt.Errorf("usage: rig inbox [approve|reject <id>]")
 			}
 			var rows [][]string
 			for _, it := range e.Inbox(ctx) {

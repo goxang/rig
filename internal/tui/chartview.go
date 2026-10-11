@@ -11,8 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/goxang/jig/core"
-	"github.com/goxang/jig/internal/viz"
+	"github.com/goxang/rig/core"
+	"github.com/goxang/rig/internal/viz"
 )
 
 // chartView shows one chart of lines kept in memory full size, as the Metrics screen shows a panel:

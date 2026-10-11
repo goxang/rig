@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// installs says how to get each tool jig drives, for an error that says it is missing.
+// installs says how to get each tool rig drives, for an error that says it is missing.
 var installs = map[string]string{
 	"docker":         "install Docker: https://docs.docker.com/get-docker/",
 	"kubectl":        "install kubectl: https://kubernetes.io/docs/tasks/tools/",
@@ -13,7 +13,7 @@ var installs = map[string]string{
 	"helm":           "install Helm: https://helm.sh/docs/intro/install/",
 	"go":             "install Go: https://go.dev/dl/",
 	"git":            "install Git: https://git-scm.com/downloads",
-	"opencode":       "install opencode: `curl -fsSL https://opencode.ai/install | bash`, then `jig ai config`",
+	"opencode":       "install opencode: `curl -fsSL https://opencode.ai/install | bash`, then `rig ai config`",
 	"ssh":            "install an OpenSSH client",
 	"psql":           "install the PostgreSQL client (psql)",
 	"mysql":          "install the MySQL client",
@@ -41,12 +41,12 @@ var (
 var common = []struct{ match, hint string }{
 	{"Cannot connect to the Docker daemon", "Docker is installed but not running: start Docker Desktop, or `sudo systemctl start docker`"},
 	{"permission denied while trying to connect to the Docker daemon", "your user may not use Docker: `sudo usermod -aG docker $USER`, then log in again"},
-	{"current-context is not set", "no Kubernetes cluster is set up: `kind create cluster` for a local one, or ctrl+k / `jig kubeconfig` to fetch one"},
-	{"no configuration has been provided", "no Kubernetes cluster is set up: `kind create cluster` for a local one, or ctrl+k / `jig kubeconfig` to fetch one"},
-	{"context was not found for specified context", "that Kubernetes context is not in your kubeconfig: `kubectl config get-contexts` lists them, ctrl+k / `jig kubeconfig` fetches one"},
+	{"current-context is not set", "no Kubernetes cluster is set up: `kind create cluster` for a local one, or ctrl+k / `rig kubeconfig` to fetch one"},
+	{"no configuration has been provided", "no Kubernetes cluster is set up: `kind create cluster` for a local one, or ctrl+k / `rig kubeconfig` to fetch one"},
+	{"context was not found for specified context", "that Kubernetes context is not in your kubeconfig: `kubectl config get-contexts` lists them, ctrl+k / `rig kubeconfig` fetches one"},
 	{"The connection to the server", "the Kubernetes cluster does not answer: is it running (`docker start <cluster>-control-plane` for kind) and is the VPN up?"},
-	{"must be logged in to the server", "the cluster refused your credentials: they may have expired, ctrl+k / `jig kubeconfig` fetches new ones"},
-	{"no jig.yaml found", "run `jig init` in the project's directory to write one"},
+	{"must be logged in to the server", "the cluster refused your credentials: they may have expired, ctrl+k / `rig kubeconfig` fetches new ones"},
+	{"no rig.yaml found", "run `rig init` in the project's directory to write one"},
 }
 
 // Hint is what to do about an error a new setup typically hits (a tool not installed, Docker not

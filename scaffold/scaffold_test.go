@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/goxang/jig/spec"
+	"github.com/goxang/rig/spec"
 )
 
 func write(t *testing.T, dir string, files map[string]string) {
@@ -44,10 +44,10 @@ func TestInitFromComposeSourcesAndManifests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "jig.yaml"), raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rig.yaml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	proj, _, err := spec.Load(filepath.Join(dir, "jig.yaml"), "")
+	proj, _, err := spec.Load(filepath.Join(dir, "rig.yaml"), "")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, raw)
 	}

@@ -1,5 +1,5 @@
-// Write jig plugins in TypeScript or JavaScript: register sources, streams, actions and the rest, then
-// serve(). Node only, no dependencies; the protocol (jig/1), not this module, is the contract.
+// Write rig plugins in TypeScript or JavaScript: register sources, streams, actions and the rest, then
+// serve(). Node only, no dependencies; the protocol (rig/1), not this module, is the contract.
 import { createInterface } from "node:readline";
 import { ERRORS, METHODS, VERSION } from "./protocol.js";
 
@@ -9,7 +9,7 @@ const FLUSH_EVERY = 50;
 const FLUSH_ROWS = 500;
 const ACK_WINDOW = 8;
 
-export class JigError extends Error {
+export class RigError extends Error {
   constructor(code, message, hint = "") {
     super(message);
     this.code = code;
@@ -22,7 +22,7 @@ export class JigError extends Error {
   }
 }
 
-export const unavailable = (message, hint) => new JigError(ERRORS.Unavailable, message, hint);
+export const unavailable = (message, hint) => new RigError(ERRORS.Unavailable, message, hint);
 
 const typeOf = (v) =>
   typeof v === "boolean" ? "bool" : Number.isInteger(v) ? "int" : typeof v === "number" ? "number" : typeof v === "string" ? "string" : "json";
@@ -188,14 +188,14 @@ export class Plugin {
       signal?.addEventListener("abort", () => {
         if (this._pending.delete(id)) {
           this._notify("$/cancel", { id });
-          reject(new JigError(ERRORS.Internal, "cancelled"));
+          reject(new RigError(ERRORS.Internal, "cancelled"));
         }
       });
       this._send({ id, method, params });
     });
   }
 
-  // serve speaks jig/1 on stdin and stdout until shutdown or EOF. Log to stderr.
+  // serve speaks rig/1 on stdin and stdout until shutdown or EOF. Log to stderr.
   serve() {
     const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
     const inflight = new Set();
@@ -211,7 +211,7 @@ export class Plugin {
       if (!m.method) {
         const w = this._pending.get(m.id);
         this._pending.delete(m.id);
-        if (w) m.error ? w.reject(new JigError(m.error.code, m.error.message, m.error.data?.hint)) : w.resolve(m.result ?? {});
+        if (w) m.error ? w.reject(new RigError(m.error.code, m.error.message, m.error.data?.hint)) : w.resolve(m.result ?? {});
       } else if (!("id" in m)) {
         this._notification(m.method, m.params ?? {});
       } else if (m.method === "shutdown") {
@@ -240,11 +240,11 @@ export class Plugin {
     this._running.set(m.id, ac);
     try {
       const p = m.params ?? {};
-      if (typeof p !== "object" || Array.isArray(p)) throw new JigError(ERRORS.InvalidParams, "params must be an object");
+      if (typeof p !== "object" || Array.isArray(p)) throw new RigError(ERRORS.InvalidParams, "params must be an object");
       const r = await this._dispatch(m.method, p, ac.signal);
       this._send({ id: m.id, result: r ?? {} });
     } catch (e) {
-      if (e instanceof JigError) this._send({ id: m.id, error: e.wire() });
+      if (e instanceof RigError) this._send({ id: m.id, error: e.wire() });
       else {
         console.error(e);
         this._send({ id: m.id, error: { code: ERRORS.Internal, message: String(e?.message ?? e) } });
@@ -255,13 +255,13 @@ export class Plugin {
   }
 
   _str(p, k) {
-    if (typeof p[k] !== "string") throw new JigError(ERRORS.InvalidParams, `${k} must be a string`);
+    if (typeof p[k] !== "string") throw new RigError(ERRORS.InvalidParams, `${k} must be a string`);
     return p[k];
   }
 
   _find(table, what, name) {
     const fn = table.get(name);
-    if (!fn) throw new JigError(ERRORS.NotFound, `no ${what} "${name}"`);
+    if (!fn) throw new RigError(ERRORS.NotFound, `no ${what} "${name}"`);
     return fn;
   }
 
@@ -269,7 +269,7 @@ export class Plugin {
     const ctx = () => new Ctx(this, p, signal);
     switch (method) {
       case "initialize": {
-        if (!(p.protocols ?? []).includes(VERSION)) throw new JigError(ERRORS.InvalidRequest, `${this.name} speaks ${VERSION}`);
+        if (!(p.protocols ?? []).includes(VERSION)) throw new RigError(ERRORS.InvalidRequest, `${this.name} speaks ${VERSION}`);
         const caps = Object.entries({
           stream: this._streams.size, plan: this._plans.size, render: this._views.size, "widget.render": this._widgets.size,
           complete: this._completers.size, resolve: this._resolve, search: this._search, doctor: this._doctor,
@@ -304,7 +304,7 @@ export class Plugin {
       case "widget.render":
         return this._find(this._widgets, "widget", this._str(p, "widget"))(ctx(), p);
       case "resolve":
-        if (!this._resolve) throw new JigError(ERRORS.NotFound, `no resolver for ${p.ref}`);
+        if (!this._resolve) throw new RigError(ERRORS.NotFound, `no resolver for ${p.ref}`);
         return this._resolve(ctx(), this._str(p, "ref"));
       case "search":
         return { hits: (this._search ? await this._search(ctx(), p) : []) ?? [] };
@@ -314,7 +314,7 @@ export class Plugin {
         if (this._event) await this._event(ctx(), p);
         return {};
     }
-    throw new JigError(ERRORS.MethodNotFound, `${this.name} does not implement ${method}`);
+    throw new RigError(ERRORS.MethodNotFound, `${this.name} does not implement ${method}`);
   }
 
   _startStream(fn, id, p) {
@@ -328,7 +328,7 @@ export class Plugin {
       try {
         await fn(new Ctx(this, p, ac.signal), p.args ?? {}, out);
       } catch (e) {
-        if (e instanceof JigError) err = e.wire();
+        if (e instanceof RigError) err = e.wire();
         else if (!ac.signal.aborted) {
           console.error(e);
           err = { code: ERRORS.Internal, message: String(e?.message ?? e) };

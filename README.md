@@ -1,11 +1,11 @@
-# jig
+# rig
 
-[![ci](https://github.com/goxang/jig/actions/workflows/ci.yml/badge.svg)](https://github.com/goxang/jig/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/goxang/jig)](https://github.com/goxang/jig/releases/latest)
+[![ci](https://github.com/goxang/rig/actions/workflows/ci.yml/badge.svg)](https://github.com/goxang/rig/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/goxang/rig)](https://github.com/goxang/rig/releases/latest)
 
 **The AI-integrated pilot for every service you run.** Manage every part of your software from the terminal:
 services, infrastructure, data, Kubernetes, logs, metrics, tests. Local processes, docker or Kubernetes;
-Go, Python, Node, Java, Rust or anything that runs. Describe it once in `jig.yaml`, then run, watch and tune
+Go, Python, Node, Java, Rust or anything that runs. Describe it once in `rig.yaml`, then run, watch and tune
 it all from one CLI and one terminal UI.
 
 - **Plugin-based**: the core knows no technology. Docker, Kubernetes, SQL, Prometheus, GitLab, Jira and
@@ -18,17 +18,17 @@ it all from one CLI and one terminal UI.
 ## How it is built
 
 ```
- clients   CLI · TUI · MCP server · AI · HTTP/WS server (jig serve)
+ clients   CLI · TUI · MCP server · AI · HTTP/WS server (rig serve)
               │  all through one api.Engine: policy, jobs and audit apply to every caller
  kernel    catalog · sources (data frames) · actions (jobs) · views (widget trees) · events · policy
  engine    environments, dependency order, up/down, svc:// resolution, run state
- host      install, lock, trust, supervisor, sandbox; talks to plugins over jig/1 (JSON-RPC)
- plugins   jig-std (docker, kubernetes, sql, prometheus, ...) · gitlab · jira · terraform · yours
+ host      install, lock, trust, supervisor, sandbox; talks to plugins over rig/1 (JSON-RPC)
+ plugins   rig-std (docker, kubernetes, sql, prometheus, ...) · gitlab · jira · terraform · yours
 ```
 
 A plugin adds **sources** (data), **actions** (verbs, each with an effect: read, write or danger),
 **views** (tabs and panels), **importers** and **contracts** (`metrics/1`, `scm/1`, ...: implement one and
-jig's own screens use your plugin). See [design](docs/design.md) and [plugins](docs/plugins.md).
+rig's own screens use your plugin). See [design](docs/design.md) and [plugins](docs/plugins.md).
 
 ## What it does
 
@@ -37,47 +37,47 @@ jig's own screens use your plugin). See [design](docs/design.md) and [plugins](d
 - **Data**: browse and edit databases, Redis, RabbitMQ, Kafka, key-value config; saved queries on a schedule
 - **Kubernetes**: manifests as a graph, edited field by field, synced from the cluster; HPAs, namespaces
 - **Test and load**: test suites with live results, load generators with rate and instances
-- **AI**: `@` chat on every screen, inline query completions, `@?` plain-language queries; `jig mcp` gives
+- **AI**: `@` chat on every screen, inline query completions, `@?` plain-language queries; `rig mcp` gives
   agents every tool
-- **Any stack**: not just Go; Python, Node, Java, Rust, any image or binary; `jig init` reads compose files,
+- **Any stack**: not just Go; Python, Node, Java, Rust, any image or binary; `rig init` reads compose files,
   manifests and sources
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/goxang/jig/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/goxang/rig/main/install.sh | sh
 ```
 
-Linux and macOS (amd64, arm64). With Go 1.26+: `go install github.com/goxang/jig/cmd/jig@latest`.
+Linux and macOS (amd64, arm64). With Go 1.26+: `go install github.com/goxang/rig/cmd/rig@latest`.
 
-jig itself knows no technology. Runtimes, builders, databases, metrics and the rest come from the
-official plugins in [goxang/jig-plugins](https://github.com/goxang/jig-plugins). A project pins its
-plugins in `jig.lock`, and the first `jig` there installs them after one trust prompt. To install the
+rig itself knows no technology. Runtimes, builders, databases, metrics and the rest come from the
+official plugins in [goxang/rig-plugins](https://github.com/goxang/rig-plugins). A project pins its
+plugins in `rig.lock`, and the first `rig` there installs them after one trust prompt. To install the
 everyday set by hand:
 
 ```bash
-go install github.com/goxang/jig-plugins/cmd/jig-std@latest && jig-std install
+go install github.com/goxang/rig-plugins/cmd/rig-std@latest && rig-std install
 ```
 
-Joining a project that already has a `jig.yaml`: run `jig doctor` there. It names each thing still
-missing on your machine (plugins, workspace trust, a credential such as `jig secret set JIRA_TOKEN`)
-with the command that fixes it; `jig` shows the same list when it opens.
+Joining a project that already has a `rig.yaml`: run `rig doctor` there. It names each thing still
+missing on your machine (plugins, workspace trust, a credential such as `rig secret set JIRA_TOKEN`)
+with the command that fixes it; `rig` shows the same list when it opens.
 
 ## Start
 
 ```bash
-jig init      # jig.yaml from what the project has: compose, manifests, sources
-jig doctor    # what is missing: tools, cluster or daemon, variables, ports, components
-jig up        # everything, in dependency order
-jig           # the terminal UI; ? lists the keys of every screen
+rig init      # rig.yaml from what the project has: compose, manifests, sources
+rig doctor    # what is missing: tools, cluster or daemon, variables, ports, components
+rig up        # everything, in dependency order
+rig           # the terminal UI; ? lists the keys of every screen
 ```
 
-No `jig.yaml` yet? `jig up && jig` still work: jig infers the project in memory as `jig init` would,
-and writes nothing until you run `jig init`.
+No `rig.yaml` yet? `rig up && rig` still work: rig infers the project in memory as `rig init` would,
+and writes nothing until you run `rig init`.
 
-On a project that already has a `jig.yaml`: `jig env` lists its environments, `-e <name>` picks one.
+On a project that already has a `rig.yaml`: `rig env` lists its environments, `-e <name>` picks one.
 
-A small `jig.yaml`:
+A small `rig.yaml`:
 
 ```yaml
 project: shop
@@ -99,53 +99,52 @@ components:
   db: { type: sql, driver: postgres, addr: "svc://db:5432", user: app, password: "${DB_PASSWORD}" }
 ```
 
-Try one of the [examples](examples): `cd examples/shop && jig up && jig`.
+Try one of the [examples](examples): `cd examples/shop && rig up && rig`.
 
 ## Plugins
 
 ```bash
-jig plugin search jira          # the registry index
-jig plugin add pack/gitlab      # install and pin in jig.lock
-jig plugin ls                   # what the project uses, on or off
+rig plugin search jira          # the registry index
+rig plugin add pack/gitlab      # install and pin in rig.lock
+rig plugin ls                   # what the project uses, on or off
 ```
 
 Official ones, a pack each: `pack-std` (local, docker, kubernetes, kind, go and command builders, git,
-compose/godev/rig imports), `pack-data` (sql, redis, rabbitmq, kafka, consul), `pack-observability`
+compose/godev imports), `pack-data` (sql, redis, rabbitmq, kafka, consul), `pack-observability`
 (prometheus, scrape, loki, jaeger, tempo, zipkin, pprof, grafana), `pack-qa` (junit, pytest, jest,
 vitest, hurl, k6, vegeta, ghz), `pack-gitlab`, `pack-github`, `pack-atlassian` (jira, confluence),
 `pack-cloud-aws` (aws, terraform, helm, registry) and `pack-product` (agents that turn specs into
 stories and MRs, every write waiting for approval). Plus `slack`, `mcp-bridge`, `arcade`, `ssh`,
 `delve`, `goland` and importers for just, make, npm scripts, Procfile, dotenv, OpenAPI and CI files.
-`jig-std list` prints them all.
+`rig-std list` prints them all.
 
 Write your own:
 
 ```bash
-jig plugin new sentry --lang yaml   # or bash, python, go, ts
-cd sentry && jig plugin test
-cd ~/my-project && jig plugin dev ~/sentry
+rig plugin new sentry --lang yaml   # or bash, python, go, ts
+cd sentry && rig plugin test
+cd ~/my-project && rig plugin dev ~/sentry
 ```
 
-A plugin is a folder with a `jig-plugin.yaml`. If you can write `jig.yaml`, you can write one; add a
+A plugin is a folder with a `rig-plugin.yaml`. If you can write `rig.yaml`, you can write one; add a
 program only when YAML and shell are not enough. [Plugins](docs/plugins.md) has the whole story, and
-`skills/jig-plugin` lets an AI agent write one for you.
+`skills/rig-plugin` lets an AI agent write one for you.
 
 ## Docs
 
 - [Guide](docs/guide.md): CLI, every screen and its keys, AI, GoLand, agents
-- [Config](docs/config.md): every `jig.yaml` key
+- [Config](docs/config.md): every `rig.yaml` key
 - [CLI](docs/cli.md): every command
 - [Plugins](docs/plugins.md): using and writing plugins; [protocol](docs/protocol.md), [contracts](docs/contracts.md), [views](docs/views.md)
 - [Security](docs/security.md): trust, sandbox, secrets, policy, server, audit
-- [Design](docs/design.md): how jig is built
-- [Migration](docs/migration.md): from rig
-- [Manifests](docs/manifests.md): a manifest layout that works well with jig
+- [Design](docs/design.md): how rig is built
+- [Manifests](docs/manifests.md): a manifest layout that works well with rig
 
-All of it ships in the binary too: `jig docs guide`.
+All of it ships in the binary too: `rig docs guide`.
 
 ## Contributing
 
-New technology support goes into a plugin, not the core: [goxang/jig-plugins](https://github.com/goxang/jig-plugins)
+New technology support goes into a plugin, not the core: [goxang/rig-plugins](https://github.com/goxang/rig-plugins)
 or your own repo. Fixes, screens and docs are welcome here. `go vet ./... && go test -race ./...` must
 pass. Commits follow Conventional Commits; every green push to `main` is released (`feat:` minor,
 anything else patch).
