@@ -30,3 +30,22 @@ func TestStackBorderResizes(t *testing.T) {
 		t.Fatalf("dragged heights %d %d", kids[0].h, kids[1].h)
 	}
 }
+
+func TestPreviewBorderResizes(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	tab := &viewTab{title: "Changes"}
+	list := &wnode{n: protocol.Node{Widget: "table", Props: map[string]any{"preview": map[string]any{"widget": "markdown", "source": "x"}}}, id: 3}
+	m := &model{}
+	tab.draw(m, list, 0, 0, 100, 20)
+	if list.w != 45 || m.borderAt(44, 5) != "view.Changes.3.preview" {
+		t.Fatalf("list width %d, border %q", list.w, m.borderAt(44, 5))
+	}
+	m.splitting = "view.Changes.3.preview"
+	m.splitDrag(mouseEvent{Mouse: tea.Mouse{X: 59, Y: 5}, Action: mouseRelease})
+	m.zones = nil
+	tab.draw(m, list, 0, 0, 100, 20)
+	if list.w != 60 {
+		t.Fatalf("dragged list width %d", list.w)
+	}
+}

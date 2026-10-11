@@ -1014,6 +1014,7 @@ func (t *viewTab) draw(m *model, wn *wnode, x, y, w, h int) string {
 		if pct, err := strconv.Atoi(strings.TrimSuffix(fmt.Sprint(p.n.Props["width"]), "%")); err == nil && pct > 0 && pct < 100 {
 			lw = w - w*pct/100
 		}
+		lw = m.paneSize(fmt.Sprintf("view.%s.%d.preview", t.title, wn.id), splitGeo{start: x, total: w, minA: 20, minB: 20}, lw, x, y, h)
 		left := t.drawLeaf(m, wn, x, y, lw, h)
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, t.drawLeaf(m, p, x+lw, y, w-lw, h))
 	}
