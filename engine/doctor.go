@@ -96,8 +96,8 @@ func (a *App) Doctor(ctx context.Context) []Check {
 	return append(out, a.componentChecks(ctx, fix)...)
 }
 
-// InstallStd installs every official plugin, the runtimes and importers most rig.yaml files use.
-const InstallStd = "go install github.com/goxang/rig-plugins/cmd/rig-std@latest && rig-std install"
+// InstallStd installs the everyday official plugins (runtimes, builders, importers, git) from the registry; rig does it by itself for the types rig.yaml names.
+const InstallStd = "rig plugin add --user pack-std"
 
 // PluginChecks are the plugins this project uses that need a credential nobody has given them yet.
 func (a *App) PluginChecks() []Check {
@@ -128,14 +128,10 @@ func (a *App) PluginChecks() []Check {
 		if len(secrets) == 0 || !m.Relevant(a.Spec.Dir, a.Spec.Plugins) {
 			continue
 		}
-		if p := a.Spec.Plugins[m.Name]; p != nil && (p.Off || p.Config["token"] != nil) {
+		if p := a.Spec.Plugins[m.Name]; p != nil && p.Off {
 			continue
 		}
-		set := slices.ContainsFunc(secrets, func(n string) bool {
-			_, env := os.LookupEnv(n)
-			return known[n] != "" || env
-		})
-		if set {
+		if a.credentialSet(m.Name, secrets, known) {
 			out = append(out, Check{Name: "plugin " + m.Name, Status: CheckOK, Detail: "has its credential"})
 			continue
 		}
@@ -143,6 +139,22 @@ func (a *App) PluginChecks() []Check {
 			Fix: "rig secret set " + secrets[0] + " (kept in your config directory, never in the repository); or rig plugin off " + m.Name})
 	}
 	return out
+}
+
+// CredentialSet is whether plugin has what it needs of secrets: its own token config, or a value for
+// one of them in rig's secrets or the environment. A plugin that asks for none is always set.
+func (a *App) CredentialSet(plugin string, secrets []string) bool {
+	return len(secrets) == 0 || a.credentialSet(plugin, secrets, a.KnownSecrets())
+}
+
+func (a *App) credentialSet(plugin string, secrets []string, known map[string]string) bool {
+	if p := a.Spec.Plugins[plugin]; p != nil && p.Config["token"] != nil {
+		return true
+	}
+	return slices.ContainsFunc(secrets, func(n string) bool {
+		_, env := os.LookupEnv(n)
+		return known[n] != "" || env
+	})
 }
 
 func runtimeFix(typ string) string {

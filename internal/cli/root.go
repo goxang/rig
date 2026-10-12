@@ -224,6 +224,7 @@ func printProjectHelp() {
 }
 
 func open() (*engine.App, error) {
+	ensureOfficial()
 	a, err := engine.Open(g.file, g.env)
 	if err != nil {
 		return nil, err

@@ -53,6 +53,10 @@ type viewTab struct {
 	filtering bool
 	// previewRow is the row the preview panes show, for ${row.x} in their titles
 	previewRow map[string]any
+	// plugin serves the tab and secrets are the credentials it asks for; needSecret is when none is set yet
+	plugin     string
+	secrets    []string
+	needSecret bool
 }
 
 // wnode is a widget of the tree with its live state.
@@ -298,6 +302,7 @@ func (t *viewTab) refresh(m *model) tea.Cmd {
 	if t.root == nil {
 		return nil
 	}
+	t.checkSecret(m)
 	if e := m.eng(); t.eng != e {
 		t.eng, t.fetch = e, &view.Fetcher{Query: e.Query}
 	}
@@ -509,6 +514,9 @@ func (t *viewTab) keyFocused(m *model, k tea.KeyPressMsg) tea.Cmd {
 			}
 		}
 		return nil
+	}
+	if k.String() == "S" && t.needSecret {
+		return t.askSecret(m)
 	}
 	if k.String() == "/" && t.focus != nil && filterable[view.Kind(t.focus.n)] {
 		t.filtering = true
@@ -928,6 +936,9 @@ func (t *viewTab) currentRow(wn *wnode) map[string]any {
 // hints lead with the focused widget's own actions: the footer shows only the first few.
 func (t *viewTab) hints() [][2]string {
 	var h [][2]string
+	if t.needSecret {
+		h = append(h, [2]string{"S", "set " + t.secrets[0]})
+	}
 	if t.focus != nil {
 		acts, _ := t.focus.n.Props["actions"].([]any)
 		for _, a := range acts {
@@ -979,11 +990,15 @@ func (t *viewTab) view(m *model, w, h int) string {
 		return ""
 	}
 	t.order = t.order[:0]
-	out := t.draw(m, t.root, 0, 0, w, h)
+	banner, y := "", 0
+	if t.needSecret && h > 2 {
+		banner, y, h = t.secretBanner(m, w)+"\n", 1, h-1
+	}
+	out := t.draw(m, t.root, 0, y, w, h)
 	if t.focus == nil && len(t.order) > 0 {
 		t.focus = t.order[0]
 	}
-	return out
+	return banner + out
 }
 
 // draw lays wn out in exactly w×h cells at x, y of the body.
@@ -1191,6 +1206,9 @@ func (t *viewTab) click(m *model, h hit) tea.Cmd {
 }
 
 func (t *viewTab) clickAt(m *model, h hit) tea.Cmd {
+	if h.id == secretZone && t.needSecret {
+		return t.askSecret(m)
+	}
 	var id, sub int
 	if n, _ := fmt.Sscanf(h.id, "viewtab:%d:%d", &id, &sub); n == 2 {
 		var cmd tea.Cmd
@@ -1244,6 +1262,7 @@ func addViews(a *engine.App, all map[string]tab) []tab {
 	var home []protocol.Node
 	servedBy := map[*viewTab]string{}
 	rank, ranks := 20, map[tab]int{}
+	var owner *host.Manifest
 	add := func(key, title string, v *view.View, dir, remote string) {
 		if v.Slot == "home" {
 			tile := v.Root
@@ -1266,6 +1285,9 @@ func addViews(a *engine.App, all map[string]tab) []tab {
 			t.remote = remote
 			all[key] = t
 		}
+		if owner != nil {
+			t.plugin, t.secrets = owner.Name, owner.Permissions.Secrets
+		}
 		if plugin, _, ok := strings.Cut(strings.TrimPrefix(key, "view:"), "/"); ok {
 			t.title = cmp.Or(v.Title, title)
 			servedBy[t] = plugin
@@ -1287,6 +1309,7 @@ func addViews(a *engine.App, all map[string]tab) []tab {
 			continue
 		}
 		showTabs := m.ShowsTab(a.Spec.Dir, a.Spec.Plugins)
+		owner = m
 		rank = viewRank(m, a.Spec.Dir)
 		names := make([]string, 0, len(m.Views))
 		for n := range m.Views {

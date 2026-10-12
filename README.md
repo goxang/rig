@@ -51,13 +51,17 @@ curl -fsSL https://raw.githubusercontent.com/goxang/rig/main/install.sh | sh
 Linux and macOS (amd64, arm64). With Go 1.26+: `go install github.com/goxang/rig/cmd/rig@latest`.
 
 rig itself knows no technology. Runtimes, builders, databases, metrics and the rest come from the
-official plugins in [goxang/rig-plugins](https://github.com/goxang/rig-plugins). A project pins its
-plugins in `rig.lock`, and the first `rig` there installs them after one trust prompt. To install the
+official plugins in [goxang/rig-plugins](https://github.com/goxang/rig-plugins), prebuilt: no Go needed.
+The first `rig` in a project installs the ones its `rig.yaml` names (for you, in `~/.config/rig`) and
+the ones `rig.lock` pins (after one trust prompt). `rig upgrade` updates rig itself. To install the
 everyday set by hand:
 
 ```bash
-go install github.com/goxang/rig-plugins/cmd/rig-std@latest && rig-std install
+rig plugin add --user pack-std
 ```
+
+A plugin that needs a token (Jira, Confluence, GitLab) shows it on its tab: press `S` there, or click
+the banner, to paste the token; it is kept in `~/.config/rig`, never in the repository.
 
 Joining a project that already has a `rig.yaml`: run `rig doctor` there. It names each thing still
 missing on your machine (plugins, workspace trust, a credential such as `rig secret set JIRA_TOKEN`)

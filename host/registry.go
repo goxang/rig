@@ -61,7 +61,10 @@ type Registry struct {
 
 // UserRegistry is the registry the user config, or $RIG_REGISTRY, points at.
 func UserRegistry() *Registry {
-	r := &Registry{Mirror: os.Getenv("RIG_REGISTRY"), Client: &http.Client{Timeout: 5 * time.Minute}}
+	// the default 10s TLS handshake is too short through a slow proxy
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSHandshakeTimeout = time.Minute
+	r := &Registry{Mirror: os.Getenv("RIG_REGISTRY"), Client: &http.Client{Timeout: 5 * time.Minute, Transport: tr}}
 	if r.Mirror == "" {
 		var c struct {
 			Registry string `yaml:"registry"`
