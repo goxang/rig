@@ -101,6 +101,7 @@ Every command; `rig <command> --help` has its flags. Generated from the code.
 | `report watch` | measure and publish each report with a schedule: when it comes due, over the time since its last run |
 | `restart <service\|group...>` | restart services (e.g. to reload their configuration) |
 | `resume [session\|last]` | continue an AI conversation or a saved UI session (S); without an id, pick one (d closes it) |
+| `rollback` | restore the rig version that was installed before the last upgrade (run again to go forward) |
 | `scale <service\|group...> <replicas\|+n\|-n>` | set replica counts, or move them up or down: rig scale core +1 |
 | `schema` | print rig.yaml's JSON Schema (editors: # yaml-language-server: $schema=https://raw.githubusercontent.com/goxang/rig/main/spec/rig.schema.json) |
 | `secret [ls \| set NAME [VALUE] \| rm NAME]` | secrets rig.yaml uses as ${NAME}: kept in your config dir (0600), never in the repo; the environment wins |
@@ -115,7 +116,6 @@ Every command; `rig <command> --help` has its flags. Generated from the code.
 | `test [suite \| ./pkg/...]` | run a test suite from rig.yaml, or packages without one (go test -json): --failed reruns the last run's failures; without arguments, list the suites |
 | `test report [run\|last]` | a saved run as a report: failures with output, slowest tests, benchmarks, coverage |
 | `test runs [suite]` | saved test runs, newest first |
-| `rollback` | restore the rig version installed before the last upgrade (run again to go forward) |
 | `theme [name]` | list the UI's colour themes, pick one, or --save a copy to edit (ctrl+p in the UI) |
 | `traces [trace-id]` | recent traces, or one trace as a waterfall |
 | `trust` | let this project's plugins run and install (workspace trust) |
