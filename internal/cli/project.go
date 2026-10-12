@@ -401,7 +401,7 @@ Ingress→Service, HPA→workload, workload→ConfigMap/Secret/PVC/ServiceAccoun
 
 	version := &cobra.Command{Use: "version", Short: "print the version", Run: func(*cobra.Command, []string) { fmt.Println("rig", Version) }}
 
-	return []*cobra.Command{initCmd, env, vars, secret, nsCommand(), infraCommand(), task, source, manifests, hosts, mcpCommand(), version, upgradeCommand(), uninstallCommand(), migrateCommand(), lintCommand()}
+	return []*cobra.Command{initCmd, env, vars, secret, nsCommand(), infraCommand(), task, source, manifests, hosts, mcpCommand(), version, upgradeCommand(), rollbackCommand(), uninstallCommand(), migrateCommand(), lintCommand()}
 }
 
 func projectManifestDirs() []string {

@@ -115,6 +115,7 @@ Every command; `rig <command> --help` has its flags. Generated from the code.
 | `test [suite \| ./pkg/...]` | run a test suite from rig.yaml, or packages without one (go test -json): --failed reruns the last run's failures; without arguments, list the suites |
 | `test report [run\|last]` | a saved run as a report: failures with output, slowest tests, benchmarks, coverage |
 | `test runs [suite]` | saved test runs, newest first |
+| `rollback` | restore the rig version installed before the last upgrade (run again to go forward) |
 | `theme [name]` | list the UI's colour themes, pick one, or --save a copy to edit (ctrl+p in the UI) |
 | `traces [trace-id]` | recent traces, or one trace as a waterfall |
 | `trust` | let this project's plugins run and install (workspace trust) |

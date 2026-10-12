@@ -284,7 +284,7 @@ func withApp(f func(ctx context.Context, a *engine.App, args []string) error) fu
 var commandGroups = map[string]string{
 	"serve": "team", "login": "team", "logout": "team", "whoami": "team", "admin": "team", "inbox": "team",
 	"agent": "team", "lock": "team", "unlock": "team", "call": "team", "mcp": "team",
-	"plugin": "tool", "trust": "tool", "purge": "tool", "uninstall": "tool", "upgrade": "tool", "version": "tool",
+	"plugin": "tool", "trust": "tool", "purge": "tool", "uninstall": "tool", "upgrade": "tool", "rollback": "tool", "version": "tool",
 	"theme": "tool", "skill": "tool", "docs": "tool", "schema": "tool", "migrate": "tool",
 }
 
