@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/plugin"
+	"github.com/goxang/rig/spec"
 )
 
 func TestRoutes(t *testing.T) {
@@ -28,9 +31,16 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
+// stubRuntime satisfies the runtime kind; the secret check never reaches its methods.
+type stubRuntime struct{ core.Runtime }
+
+func init() {
+	plugin.Register(core.KindRuntime, "webtest", "test runtime", func(core.Env, *spec.Component) (any, error) { return stubRuntime{}, nil })
+}
+
 func TestSecretOnlyForAskedNames(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "rig.yaml")
-	os.WriteFile(file, []byte("project: w\nenvironments:\n  dev: { runtime: local }\nservices:\n  api: { run: { command: [sleep, \"60\"] } }\n"), 0o644)
+	os.WriteFile(file, []byte("project: w\nenvironments:\n  dev: { runtime: webtest }\nservices:\n  api: { run: { command: [sleep, \"60\"] } }\n"), 0o644)
 	h := &Handler{File: file, Token: "t", Open: engine.Open}
 	defer h.Close()
 	srv := httptest.NewServer(h.Routes())
