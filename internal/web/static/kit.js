@@ -460,14 +460,14 @@ function groupedList({ groups, render, text, id = x => x.name, cur, onPick, acco
       const open = isOpen(g);
       return [
         h('button', { class: 'glist-h' + (open ? '' : ' closed'), type: 'button', onclick: () => setOpen(g, !open), title: g.sub || '' },
-          icon('chev', 'chev'), h('span', { class: 'grow ellipsis' }, g.title || 'Other'), h('span', { class: 'n' }, items.length)),
+          icon('chev', 'chev'), h('span', { class: 'grow ellipsis' }, g.title || 'Other')),
         open && h('div', { class: 'glist-b' }, items.map(x => {
           const it = h('div', { class: 'item' + (id(x) === sel ? ' sel' : ''), onclick: () => pick(x) }, render(x));
           if (menu) it.addEventListener('contextmenu', e => { e.preventDefault(); sel = id(x); paint(); ctxMenu({ x: e.clientX, y: e.clientY }, menu(x)); });
           it._x = x;
           return it;
         })),
-      ];
+      ].filter(Boolean);
     }));
     if (!parts.length) el.append(h('div', { class: 'empty' }, filter ? 'Nothing matches' : empty));
     el.querySelector('.item.sel')?.scrollIntoView({ block: 'nearest' });

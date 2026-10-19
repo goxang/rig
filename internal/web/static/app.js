@@ -73,14 +73,14 @@ function renderChrome() {
         h('button', { class: 'nav-h', type: 'button', onclick: e => {
           collapsed.has(g.id) ? collapsed.delete(g.id) : collapsed.add(g.id); store.set('nav.collapsed', [...collapsed]);
           e.currentTarget.parentElement.classList.toggle('closed');
-        } }, icon('chev', 'chev'), groupTitle(g), h('span', { class: 'n' }, pages.length)),
+        } }, icon('chev', 'chev'), groupTitle(g)),
         h('div', { class: 'nav-items' }, pages.map(p => link(p))));
     })),
     h('div', { class: 'side-foot' }, h('button', { class: 'btn ghost side-ai', onclick: toggleAI, type: 'button' }, icon('ai'), 'Assistant', h('span', { class: 'kbd' }, '@'))));
   const curGroup = curPage?.group;
   const top = h('header', { class: 'topbar' }, ibtn('menu', () => document.body.classList.toggle('nav-open'), 'Screens', 'nav-btn'), brand(),
     h('nav', { class: 'topnav' }, groups.map(({ g, pages }) => h('a', { href: '#/' + (pages.find(p => p.id === store.get('last.' + g.id)) || pages[0]).id, class: g.id === curGroup ? 'on' : '', 'data-group': g.id },
-      groupTitle(g), pages.length > 1 && h('span', { class: 'gn' }, pages.length)))),
+      groupTitle(g)))),
     h('div', { class: 'crumb' }, curPage ? [groupTitle(GROUPS.find(g => g.id === curGroup) || {}), h('span', { class: 'sep' }, '/'), curPage.title] : ''),
     h('div', { class: 'spacer' }),
     h('button', { class: 'palette-btn', onclick: () => openPalette(), type: 'button', title: 'Search (ctrl+k) · : runs a command' }, icon('search'), h('span', { class: 'ellipsis' }, 'Search or :command'), h('span', { class: 'kbd' }, navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K')),

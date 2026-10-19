@@ -47,18 +47,18 @@ function pageLogs(ctx) {
   const groups = sectionGroups(all);
   const svcList = h('div', { class: 'svc-pick' });
   const drawPick = (f = '') => svcList.replaceChildren(
-    h('button', { class: 'pick-all' + (picked.size === 0 ? ' on' : ''), type: 'button', onclick: () => { picked.clear(); restart(); } }, 'All services', h('span', { class: 'n' }, all.length)),
+    h('button', { class: 'pick-all' + (picked.size === 0 ? ' on' : ''), type: 'button', onclick: () => { picked.clear(); restart(); } }, 'All services'),
     ...groups.map(g => {
       const items = g.items.filter(x => matchText(x.name, f));
       if (!items.length) return null;
       const allOn = items.every(x => picked.has(x.name));
       return h('div', { class: 'pick-g' },
-        h('button', { class: 'pick-gh', type: 'button', title: 'pick the whole section', onclick: () => { items.forEach(x => allOn ? picked.delete(x.name) : picked.add(x.name)); restart(); } }, g.title, h('span', { class: 'n' }, items.length)),
+        h('button', { class: 'pick-gh', type: 'button', title: 'pick the whole section', onclick: () => { items.forEach(x => allOn ? picked.delete(x.name) : picked.add(x.name)); restart(); } }, g.title),
         items.map(x => h('label', { class: 'pick' + (picked.has(x.name) ? ' on' : ''), style: { '--c': colorOf(x.name) } },
           h('input', { type: 'checkbox', checked: picked.has(x.name), onchange: e => { e.target.checked ? picked.add(x.name) : picked.delete(x.name); restart(); } }),
           h('span', { class: 'dot' }), h('span', { class: 'ellipsis', ondblclick: e => { e.preventDefault(); picked.clear(); picked.add(x.name); restart(); } }, x.name))));
     }));
-  const pickFilter = h('input', { type: 'search', placeholder: 'services…', oninput: e => drawPick(e.target.value) });
+  const pickBox = searchBox('Filter services', v => drawPick(v)), pickFilter = pickBox.querySelector('input');
   const toggle = (label, on, f, title) => { const b = btn(label, () => { b.classList.toggle('on', f()); }, 'sm' + (on ? ' on' : ''), title); return b; };
   const pauseBtn = btn([icon('pause'), 'Pause'], () => togglePause(), 'sm', 'p / space');
   const wrapBtn = toggle([icon('wrap'), 'Wrap'], S.info?.logs?.Wrap ?? true, () => lv.wrap(), 'w');
@@ -106,7 +106,7 @@ function pageLogs(ctx) {
       ibtn('copy', () => copy(lv.shown.map(r => `${r.time || ''} ${r.service} ${String(r.text).replace(ANSI_RE, '')}`).join('\n')), 'Copy shown (y)', 'sm'),
       ibtn('ext', () => zoom(ctx.el.querySelector('.logs-layout')), 'Full screen (z)', 'sm')),
     box);
-  const side = h('div', { class: 'logs-side' }, pickFilter, svcList);
+  const side = h('div', { class: 'logs-side' }, pickBox, svcList);
   ctx.el.append(pageHead('Logs', 'Lines from the services you pick, read into fields: double-click or enter inspects one'),
     h('div', { class: 'logs-layout' }, splitPane(side, logPane, { key: 'logs.side', size: 230, min: 150 })));
   restart();
@@ -195,7 +195,8 @@ function pageMetrics(ctx) {
       const v = d.Vars[name];
       varBar.append(h('label', { class: 'var' }, h('span', { class: 'muted' }, '$' + name),
         h('select', { onchange: e => { vars[name] = [e.target.value]; refresh(); } },
-          v.All && h('option', { value: '$__all', selected: v._def === '$__all' }, 'All'), v._values.map(x => h('option', { value: x, selected: x === v._def }, x)))));
+          v.All && h('option', { value: '$__all', selected: v._def === '$__all' }, 'All'), v._values.map(x => h('option', { value: x, selected: x === v._def }, x)),
+          !v.All && !v._values.length && h('option', { value: '', disabled: true, selected: true }, 'no values'))));
     }
   }
   const panelHeight = p => p.Height ? Math.max(4, p.Height) * 30 : ['stat', 'gauge'].includes(p.Kind) ? 150 : 300;
@@ -763,7 +764,7 @@ function pageSettings(ctx) {
   }
   function draw() {
     store.set('settings.tab', tab);
-    nav.replaceChildren(...tabs.map(([id, t, d]) => h('div', { class: 'item' + (id === tab ? ' sel' : ''), onclick: () => { tab = id; draw(); } }, h('div', { class: 'n' }, t), h('div', { class: 'd' }, d))));
+    nav.replaceChildren(...tabs.map(([id, t, d]) => h('div', { class: 'item' + (id === tab ? ' sel' : ''), onclick: () => { tab = id; draw(); } }, h('div', { class: 'n' }, t))));
     const [, title, desc] = tabs.find(t => t[0] === tab);
     pane.replaceChildren(h('div', { class: 'settings-head' }, h('h2', {}, title), h('p', { class: 'muted' }, desc)),
       ...(tab === 'look' ? look() : tab === 'ai' ? [h('div', { class: 'card card-b' }, aiSettings())] : tab === 'keys' ? [shortcutsTable()] : about()));

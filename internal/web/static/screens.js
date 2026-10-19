@@ -58,12 +58,11 @@ function pageServices(ctx) {
   const columns = [
     { check: true, onchange: () => drawBulk() },
     { key: 'service', label: 'Service', render: r => h('span', { class: 'svc-name' }, r.service, r.role && !['service', 'app'].includes(r.role) && h('span', { class: 'muted small' }, ' ' + r.role)) },
-    { key: 'state', label: 'State', render: r => stateBadge(r.state) },
+    { key: 'state', label: 'State', render: r => h('span', { title: r.message || '' }, stateBadge(r.state)) },
     { key: 'ready', label: 'Ready', num: true, sortBy: r => r.ready ?? 0, render: r => h('span', { class: r.desired > 0 && r.ready < r.desired ? 'amber' : 'muted' }, `${r.ready ?? 0}/${r.desired ?? 0}`) },
     { key: 'pods', label: 'Pods', sort: false, render: podDots },
-    { key: 'restarts', label: 'Restarts', num: true, render: r => r.restarts ? h('span', { class: r.restarts > 3 ? 'red' : 'amber' }, r.restarts) : '' },
-    { key: 'image', label: 'Image', cls: 'mono muted', render: r => h('span', { title: r.image }, shortImage(r.image)) },
-    { key: 'message', label: '', cls: 'muted msg', render: r => h('span', { class: 'ellipsis', title: r.message }, firstLine(r.message)) },
+    { key: 'restarts', label: 'Restarts', num: true, render: r => h('span', { class: !r.restarts ? 'dim' : r.restarts > 3 ? 'red' : 'amber' }, r.restarts || 0) },
+    { key: 'image', label: 'Image', cls: 'mono muted', render: r => r.message && !isUp(r) && r.state !== 'stopped' ? h('span', { class: 'amber', title: r.message }, firstLine(r.message)) : h('span', { title: r.image }, shortImage(r.image)) },
     { act: true, label: '', render: r => h('div', { class: 'row hover-acts' },
       ibtn('play', () => act('env.up', { targets: [r.service] }, 'start ' + r.service).then(reload), 'Start (s)', 'sm'), ibtn('stop', () => act('env.down', { targets: [r.service] }, 'stop ' + r.service).then(reload), 'Stop (x)', 'sm'),
       ibtn('restart', () => act('runtime.restart', { service: r.service }, 'restart ' + r.service).then(reload), 'Restart (r)', 'sm'), ibtn('logs', () => go('logs', { svc: r.service }), 'Logs (l)', 'sm')) },
@@ -78,7 +77,7 @@ function pageServices(ctx) {
     const shown = rows.filter(r => inState(r, stateF));
     S.statusSection = Object.fromEntries(rows.map(r => [r.service, r.section]));
     summary.replaceChildren(...STATE_FILTERS.map(([v, l]) => h('button', { class: 'chip' + (stateF === v ? ' on' : ''), type: 'button', onclick: () => { stateF = v; history.replaceState(null, '', '#/services' + (v ? '?state=' + v : '')); draw(); } },
-      v && h('span', { class: 'dot', style: { background: { running: 'var(--green)', problem: 'var(--amber)', stopped: 'var(--dim)' }[v] } }), l, h('span', { class: 'n' }, v ? rows.filter(r => inState(r, v)).length : rows.length))));
+      v && h('span', { class: 'dot', style: { background: { running: 'var(--green)', problem: 'var(--amber)', stopped: 'var(--dim)' }[v] } }), l)));
     const groups = sections.map(s => ({ ...s, rows: shown.filter(r => (r.section || 'other') === s.name) })).filter(g => g.rows.length);
     const els = groups.map(g => {
       let t = tables.get(g.name);
@@ -441,7 +440,8 @@ function pageKV(ctx) {
       menu: r => [{ label: 'Edit', icon: 'edit', key: 'enter', run: () => edit(r) }, { label: 'Copy the key', icon: 'copy', run: () => copy(r.key) }, { label: 'Copy the value', icon: 'copy', run: () => copy(r.value) },
         String(r.key).endsWith('/') && { label: 'List under it', run: () => { prefix = r.key; draw(); } },
         '-', { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (await confirmBox('Delete ' + r.key, cur, 'Delete', true) && await act('kv.delete', { component: cur, keys: [r.key] }, 'delete ' + r.key)) draw(); } }],
-      columns: [{ check: true, onchange: () => del.hidden = !sel.size }, { key: 'key', cls: 'mono' }, { key: 'value', cls: 'mono muted', render: r => h('span', { class: 'ellipsis' }, isJSON(r.value) && h('span', { class: 'tag' }, 'json'), firstLine(r.value)) }, { key: 'size', num: true }] });
+      columns: [{ check: true, onchange: () => del.hidden = !sel.size }, { key: 'key', cls: 'mono' }, { key: 'value', cls: 'mono muted', render: r => [isJSON(r.value) && h('span', { class: 'tag' }, 'json'), ' ', isJSON(r.value) ? JSON.stringify(JSON.parse(r.value)) : firstLine(r.value)] }, { key: 'size', num: true }] });
+    t.el.classList.add('kv-t');
     t.update(frameRows(f));
     box.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, t.visible.length + ' keys'), h('span', { class: 'muted' }, 'click a key to edit'), h('span', { class: 'spacer' }), del, searchBox('Filter', v => t.filter(v))), t.el);
   }
@@ -556,15 +556,16 @@ function pageLoad(ctx) {
     hs.push({ t: now, sent: r.sent || 0, failed: r.failed || 0, rps: sent, fps: failed, p50: r.p50 || 0, p95: r.p95 || 0, p99: r.p99 || 0 });
     if (hs.length > 600) hs.shift();
     c.head.replaceChildren(h('b', {}, r.name), r.running ? badge('running', 'green pulse', true) : badge('idle', ''), r.replicas != null && h('span', { class: 'muted small' }, r.replicas + ' instances'), h('span', { class: 'spacer' }),
-      ...ops(r).filter(x => x && ['s', 'x', 'r'].includes(x.key)).map(x => btn([x.icon && icon(x.icon), x.label], e => { e.stopPropagation(); x.run(); }, x.key === 's' ? 'primary sm' : 'sm')),
+      ...ops(r).filter(x => x && ['s', 'x', 'r'].includes(x.key)).map(x => btn([x.icon && icon(x.icon), x.key === 'r' ? 'Rate…' : x.label], e => { e.stopPropagation(); x.run(); }, x.key === 's' ? 'primary sm' : 'sm')),
       ibtn('ext', e => { e.stopPropagation(); zoom(c.el, () => setTimeout(() => drawCharts(r.name), 30)); }, 'Full size (z)', 'sm'));
     c.stats.replaceChildren(...[['target', fmtNum(r.rate) + '/s'], ['sent', sent == null ? fmtNum(r.sent) : fmtNum(sent) + '/s'], ['failed', fmtNum(r.failed)], ['p50', fmtMs((r.p50 || 0) * 1000)], ['p95', fmtMs((r.p95 || 0) * 1000)], ['p99', fmtMs((r.p99 || 0) * 1000)]]
       .map(([k, v]) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' + (k === 'failed' && r.failed ? ' red' : '') }, v))), r.error ? h('div', { class: 'err small', style: { gridColumn: '1/-1' } }, r.error) : '');
+    c.charts.hidden = !r.running && !hs.some(x => x.rps > 0);
     drawCharts(r.name);
   }
   function drawCharts(name) {
     const c = cards.get(name), hs = hist.get(name) || [];
-    if (!c || hs.length < 2) return;
+    if (!c || c.charts.hidden || hs.length < 2) return;
     const s = (n, f) => ({ name: n, pts: hs.filter(x => f(x) != null).map(x => [x.t, f(x)]) });
     lineChart(c.rateBox, [s('sent', x => x.rps), s('failed', x => x.fps), s('target', () => c.row.rate || 0)], { unit: '/s', fit: true, legend: 'none' });
     lineChart(c.latBox, [s('p50', x => x.p50), s('p95', x => x.p95), s('p99', x => x.p99)], { unit: 's', fit: true, legend: 'none' });
@@ -706,7 +707,7 @@ function pagePlugins(ctx) {
     const v = views()[r.name];
     const el = h('div', { class: 'plug' + (r.state === 'off' ? ' dim' : '') },
       icon('plugin'), h('div', { class: 'grow' }, h('div', { class: 'row' }, h('b', {}, r.name), r.version && h('span', { class: 'muted small mono' }, r.version), r.state === 'off' && badge('off'), r.kind && h('span', { class: 'tag' }, r.kind)),
-        r.description && h('div', { class: 'muted small ellipsis', title: r.description }, firstLine(r.description)),
+        r.description && h('div', { class: 'muted small clamp2', title: r.description }, r.description),
         v && h('div', { class: 'row wrap small' }, v.map(t => h('a', { href: '#/v-' + slug(t) }, t)))),
       h('div', { class: 'row hover-acts' }, ...ops(r).filter(Boolean).slice(0, 2).map(x => btn(x.label, x.run, 'sm'))));
     onMenu(el, () => ops(r));
@@ -714,7 +715,7 @@ function pagePlugins(ctx) {
   };
   function shelf(title, sub, list, extra) {
     const shown = list.filter(r => matchText(r.name + ' ' + (r.description || '') + ' ' + (r.kind || ''), filter));
-    return h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'grow' }, title, h('span', { class: 'muted small', style: { fontWeight: 400, marginLeft: '8px' } }, sub)), h('span', { class: 'n muted' }, shown.length), extra),
+    return h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'grow' }, title, h('span', { class: 'muted small', style: { fontWeight: 400, marginLeft: '8px' } }, sub)), extra),
       h('div', { class: 'plug-list' }, shown.length ? shown.map(row) : h('div', { class: 'empty small' }, list.length ? 'None match' : 'None')));
   }
   function draw() {
