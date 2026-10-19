@@ -83,7 +83,7 @@ function pageServices(ctx) {
     const els = groups.map(g => {
       let t = tables.get(g.name);
       if (!t) {
-        t = dataTable({ columns, key: 'svc', rowKey: r => r.service, selected: marked, onRow: (r, e) => { cursor = r.service; mark(); if (e?.key === 'Enter' || e?.detail === 2) openService(r.service); },
+        t = dataTable({ columns, key: 'svc', rowKey: r => r.service, selected: marked, onRow: (r, e) => { cursor = r.service; mark(); if (e?.key === 'Enter') openService(r.service); },
           menu: r => { cursor = r.service; mark(); return svcOps(marked.size && marked.has(r.service) ? [...marked] : [r.service], r, reload); }, rowClass: r => r.service === cursor ? 'cur' : '' });
         t.el.addEventListener('dblclick', e => { const tr = e.target.closest('tbody tr'); const r = tr && t.visible[[...tr.parentNode.children].indexOf(tr)]; if (r && !e.target.closest('button,input')) openService(r.service); });
         tables.set(g.name, t);
@@ -140,7 +140,9 @@ function pageServices(ctx) {
 // brief is a spec struct's set fields as k: v, for a glance.
 const brief = o => o && Object.entries(o).filter(([, v]) => v != null && v !== '' && v !== false && !(Array.isArray(v) && !v.length)).map(([k, v]) => `${k.toLowerCase()}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
 // openService is the TUI's service view: its pods, env vars, requests and limits, autoscaler and log.
+let svcDrawer = null;
 function openService(name, tab = 'pods') {
+  if (svcDrawer?.isConnected) svcDrawer.close();
   const sp = specOf('service', name) || {};
   const ctrl = new AbortController();
   let row = null;
@@ -204,6 +206,7 @@ function openService(name, tab = 'pods') {
     h('span', { class: 'spacer' }), btn('More…', e => ctxMenu(e.currentTarget, svcOps([name], row, loadStatus).filter(x => x && x.key !== 'enter')), 'sm')),
     status, seg, pane,
   ], () => { clearInterval(timer); ctrl.abort(); ctrl.logs?.abort(); });
+  svcDrawer = d;
   d.classList.add('wide');
   d.addEventListener('keydown', e => {
     if (e.target.closest('input,textarea,select')) return;
@@ -613,7 +616,7 @@ function pageHosts(ctx) {
   const ops = r => [{ label: 'Shell', icon: 'term', key: 'enter', run: () => shell(r) }, { label: 'Run a command…', key: 'c', run: () => runCmd(r) }, { label: 'Pods on it', icon: 'services', key: 'p', run: () => pods(r) },
     { label: 'Copy the name', icon: 'copy', key: 'y', run: () => copy(r.host) }];
   const bar = (v, label) => v == null ? '' : h('span', { class: 'row', title: label }, h('span', { class: 'meter' }, h('i', { style: { width: Math.min(100, v * 100) + '%', background: v > 0.9 ? 'var(--red)' : v > 0.7 ? 'var(--amber)' : '' } })), h('span', { class: 'mono small' }, Math.round(v * 100) + '%'));
-  const t = dataTable({ key: 'hosts', empty: 'No hosts', onRow: (r, e) => { if (e?.key === 'Enter' || e?.detail === 2 || e?.type === 'click') shell(r); }, menu: r => ops(r), columns: [
+  const t = dataTable({ key: 'hosts', empty: 'No hosts', onRow: (r, e) => { if (e?.key === 'Enter' || (e?.type === 'click' && e.detail === 1)) shell(r); }, menu: r => ops(r), columns: [
     { key: 'host', render: r => h('span', {}, h('b', {}, r.host), r.addr && h('span', { class: 'muted small' }, ' ' + r.addr)) },
     { key: 'ready', render: r => r.ready === false ? badge('not ready', 'red', true) : badge('ready', 'green', true) },
     { key: 'roles', cls: 'muted' }, { key: 'cpu', render: r => bar(r.cpu, 'cpu') }, { key: 'mem', render: r => bar(r.mem, 'memory') }, { key: 'disk', render: r => bar(r.disk, 'disk') },

@@ -161,11 +161,26 @@ and System (activity, inbox, plugins, the API by domain, settings). The link car
 `<state dir>/web-token`, so a bookmark keeps working.
 
 The TUI's keys work: `:` runs a command (`restart api`, `env staging`, `open Logs`, or any `rig`
-command, streamed), `@` opens the assistant beside any screen, `.` the screen's menu, `!` activity,
-`T` a task, `ctrl+e` the environment, `ctrl+p` the theme, `ctrl+k` search, `1`-`9` and `shift+←→`
-screens, `[ ]` sub-tabs, `?` the rest. Settings pick the theme, light or dark, density, font, the
-layout (sidebar, top bar or terminal-like) and the assistant (`rig ai config`). Actions go through the
-same policy as the CLI and ask before dangerous ones; the assistant's changes wait for your yes.
+command, streamed), `@` opens the assistant beside any screen, `.` or right-click the menu of what is
+under the cursor, `!` activity, `T` a task, `ctrl+e` the environment, `ctrl+p` the theme, `ctrl+k`
+search, `tab`/`shift+tab` or `shift+←→` screens, `ctrl+←→` or `[ ]` sub-tabs, `backspace` back, `esc`
+closes the top layer, `z` a panel full screen, `?` the rest. On Services the TUI's service keys
+(`s x r l + - $ R h e d b m F K`) act on the cursor or the marked rows, and a row opens its pods, env,
+requests and limits, autoscaler, log and spec; `K` kills the local processes holding its ports.
+
+Lists filter as the TUI's do: fuzzy over names and values, `*glob*`, `col=v`, `col!=v`, `col~text`
+(logs add `/regex/` and `field.path=value`). Columns and panes resize by dragging their edge (a
+double-click resets). Host rows, a service's shell (`e`) and terminal widgets open a real terminal in
+the page; closing it ends the session. Query and prompt inputs complete with the assistant (`tab`
+takes the grey suggestion, `@?` writes the text from a description), and `/` lists the chat's
+commands. Metrics pick a range (or drag across a chart to zoom, `Z` back), sort a legend by last,
+max, mean or min, and lazy-load panels as they scroll in. Plugins show what the project uses apart
+from what is installed but unused (one button turns those off for this project) and the registry;
+the API page leaves out domains of plugins the project does not use.
+
+Settings pick the theme, light or dark, density, font, the layout (sidebar, top bar or
+terminal-like) and the assistant (`rig ai config`). Actions go through the same policy as the CLI and
+ask before dangerous ones; the assistant's changes wait for your yes.
 
 ## AI
 

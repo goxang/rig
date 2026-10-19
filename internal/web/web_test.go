@@ -52,3 +52,24 @@ func TestSecretOnlyForAskedNames(t *testing.T) {
 		t.Fatalf("a secret no view asks for was written: %v %v", err, res)
 	}
 }
+
+func TestUsedPlugins(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "rig.yaml")
+	os.WriteFile(file, []byte(`project: u
+plugins: { jira: {}, slack: { off: true } }
+environments:
+  dev: { runtime: local }
+components:
+  cache: { type: redis }
+services:
+  api: { build: { go: ./cmd/api }, run: { command: [api] } }
+`), 0o644)
+	p, _, err := spec.Load(file, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(used(p), " ")
+	if got != "delve go goland jira local redis" {
+		t.Fatalf("used: %s", got)
+	}
+}

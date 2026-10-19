@@ -505,10 +505,11 @@ tbody tr.cur td:first-child { box-shadow: inset 3px 0 var(--accent); }
 @media (max-width: 1100px) { .shell.ai-open { padding-right: 0; } .ai-panel { width: min(420px, 100vw); box-shadow: var(--shadow); } }
 .svc-group table { table-layout: fixed; }
 .svc-group th.chk, .svc-group td.chk { width: 40px; }
-.svc-group th:nth-child(2) { width: 34%; }
+.svc-group th:nth-child(2) { width: 30%; }
 .svc-group th:nth-child(3) { width: 120px; }
 .svc-group th:nth-child(4) { width: 70px; }
-.svc-group th:nth-child(5) { width: 18%; }
+.svc-group th:nth-child(5) { width: 14%; }
+.svc-group th:nth-child(6) { width: 96px; }
 .svc-group th:last-child { width: 136px; }
 .svc-group td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel .body { display: flex; flex-direction: column; overflow: hidden; }
