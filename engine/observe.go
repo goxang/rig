@@ -86,7 +86,7 @@ func (l *Local) observe() {
 	l.about["metrics.query"] = protocol.SourceSpec{Description: "a PromQL query over a range (range: 15m, step) or instant, on the metrics component named by source (the first by default); vars fill $variables",
 		Args: protocol.Schema{"type": "object", "required": []any{"query"}, "properties": map[string]any{
 			"query": map[string]any{"type": "string"}, "source": map[string]any{"type": "string"}, "range": map[string]any{"type": "string"},
-			"step": map[string]any{"type": "string"}, "instant": map[string]any{"type": "boolean"}, "vars": map[string]any{"type": "object"}}}}
+			"step": map[string]any{"type": "string"}, "end": map[string]any{"type": "string", "description": "RFC 3339; the range ends here instead of now"}, "instant": map[string]any{"type": "boolean"}, "vars": map[string]any{"type": "object"}}}}
 	l.sources["metrics.query"] = func(ctx context.Context, args protocol.Args) (*protocol.Frame, error) {
 		src, _ := args["source"].(string)
 		m, _, err := Get[core.Metrics](l.App, core.KindMetrics, src)

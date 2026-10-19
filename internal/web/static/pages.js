@@ -1,26 +1,68 @@
+'use strict';
+
+// ---------- logs ----------
+// sectionGroups buckets service names by rig.yaml's sections, as the Services screen shows them.
+function sectionGroups(names) {
+  const sec = n => specOf('service', n)?.Section || S.statusSection?.[n] || '';
+  const order = (S.info.sections || []).map(s => s.name);
+  return group(names.map(n => ({ name: n })), x => sec(x.name), { sort: false })
+    .sort((a, b) => (order.indexOf(a.id) + 1 || 999) - (order.indexOf(b.id) + 1 || 999) || a.id.localeCompare(b.id))
+    .map(g => ({ ...g, title: g.id || 'other' }));
+}
 function pageLogs(ctx) {
   const all = serviceNames();
   const picked = new Set((ctx.q.get('svc') || '').split(',').filter(n => all.includes(n)));
-  let text = '', level = '', paused = false, held = [], ctrl;
+  let text = '', level = store.get('logs.level', ''), paused = false, held = [], ctrl, instance = ctx.q.get('i') || '';
   const levelRank = { trace: 0, debug: 1, info: 2, warn: 3, error: 4, fatal: 5, panic: 5 };
   const box = h('div', { class: 'logs' });
+  let match = () => true;
+  const setText = v => {
+    text = v;
+    if (v.length > 2 && v.startsWith('/') && v.endsWith('/')) {
+      try { const re = new RegExp(v.slice(1, -1), 'i'); match = r => re.test(String(r.text)); } catch { match = () => true; }
+      return;
+    }
+    // a.b=value reaches into the line's fields; other words match the line or its service
+    const terms = splitTerms(v.replace(/\s*(!=|=|~)\s*/g, '$1'));
+    const conds = terms.map(t => {
+      const m = /^([\w.\-@]+)(!=|=|~)(.*)$/.exec(t);
+      if (m) {
+        const path = m[1].split('.'), want = m[3].replace(/^"|"$/g, '').toLowerCase();
+        return r => {
+          let x = parsed(r).tree; for (const p of path) x = x?.[p];
+          const got = cellText(x).toLowerCase();
+          return m[2] === '~' ? got.includes(want) : m[2] === '!=' ? got !== want : (want.includes('*') ? globRe(want).test(got) : got === want);
+        };
+      }
+      const w = t.toLowerCase();
+      return r => String(r.text).toLowerCase().includes(w) || String(r.service).toLowerCase().includes(w);
+    });
+    match = r => conds.every(c => c(r));
+  };
   const lv = logView(box, { filter: r => {
-    if (level && (levelRank[parseLine(String(r.text)).level] ?? 2) < levelRank[level]) return false;
-    if (!text) return true;
-    if (text.length > 2 && text.startsWith('/') && text.endsWith('/')) { try { return new RegExp(text.slice(1, -1), 'i').test(r.text); } catch { return true; } }
-    return String(r.text).toLowerCase().includes(text.toLowerCase()) || String(r.service).toLowerCase().includes(text.toLowerCase());
+    if (level && (levelRank[parsed(r).level] ?? 2) < levelRank[level]) return false;
+    return !text || match(r);
   } });
-  const status = h('span', { class: 'muted' });
-  const chips = h('div', { class: 'chips' });
-  const drawChips = () => chips.replaceChildren(
-    h('button', { class: 'chip' + (picked.size === 0 ? ' on' : ''), onclick: () => { picked.clear(); restart(); } }, 'All services'),
-    ...all.map(n => h('button', { class: 'chip' + (picked.has(n) ? ' on' : ''), style: { '--c': colorOf(n) }, onclick: e => {
-      if (!(e.ctrlKey || e.metaKey || e.shiftKey)) { const only = picked.size === 1 && picked.has(n); picked.clear(); if (!only) picked.add(n); }
-      else picked.has(n) ? picked.delete(n) : picked.add(n);
-      restart();
-    }, title: 'click: only this · ctrl/shift-click: add' }, h('span', { class: 'dot' }), n)));
-  const pauseBtn = btn([icon('pause'), 'Pause'], () => togglePause());
-  const wrapBtn = btn([icon('wrap'), 'Wrap'], () => wrapBtn.classList.toggle('on', lv.wrap()), 'on');
+  const status = h('span', { class: 'muted small' });
+  const groups = sectionGroups(all);
+  const svcList = h('div', { class: 'svc-pick' });
+  const drawPick = (f = '') => svcList.replaceChildren(
+    h('button', { class: 'pick-all' + (picked.size === 0 ? ' on' : ''), type: 'button', onclick: () => { picked.clear(); restart(); } }, 'All services', h('span', { class: 'n' }, all.length)),
+    ...groups.map(g => {
+      const items = g.items.filter(x => matchText(x.name, f));
+      if (!items.length) return null;
+      const allOn = items.every(x => picked.has(x.name));
+      return h('div', { class: 'pick-g' },
+        h('button', { class: 'pick-gh', type: 'button', title: 'pick the whole section', onclick: () => { items.forEach(x => allOn ? picked.delete(x.name) : picked.add(x.name)); restart(); } }, g.title, h('span', { class: 'n' }, items.length)),
+        items.map(x => h('label', { class: 'pick' + (picked.has(x.name) ? ' on' : ''), style: { '--c': colorOf(x.name) } },
+          h('input', { type: 'checkbox', checked: picked.has(x.name), onchange: e => { e.target.checked ? picked.add(x.name) : picked.delete(x.name); restart(); } }),
+          h('span', { class: 'dot' }), h('span', { class: 'ellipsis', ondblclick: e => { e.preventDefault(); picked.clear(); picked.add(x.name); restart(); } }, x.name))));
+    }));
+  const pickFilter = h('input', { type: 'search', placeholder: 'services…', oninput: e => drawPick(e.target.value) });
+  const toggle = (label, on, f, title) => { const b = btn(label, () => { b.classList.toggle('on', f()); }, 'sm' + (on ? ' on' : ''), title); return b; };
+  const pauseBtn = btn([icon('pause'), 'Pause'], () => togglePause(), 'sm', 'p / space');
+  const wrapBtn = toggle([icon('wrap'), 'Wrap'], S.info?.logs?.Wrap ?? true, () => lv.wrap(), 'w');
+  const rawBtn = toggle('Raw', !!S.info?.logs?.Raw, () => lv.raw(), 's: structured or raw');
   function togglePause() {
     paused = !paused;
     pauseBtn.replaceChildren(icon(paused ? 'play' : 'pause'), paused ? 'Resume' : 'Pause');
@@ -29,15 +71,15 @@ function pageLogs(ctx) {
     status.textContent = paused ? 'paused' : 'following';
   }
   function restart() {
-    drawChips();
+    drawPick(pickFilter.value);
     ctrl?.abort();
     ctrl = new AbortController();
     lv.clear(); held = [];
     const q = [...picked].join(',');
-    history.replaceState(null, '', '#/logs' + (q ? '?svc=' + encodeURIComponent(q) : ''));
+    history.replaceState(null, '', '#/logs' + (q ? '?svc=' + encodeURIComponent(q) + (instance ? '&i=' + encodeURIComponent(instance) : '') : ''));
     status.textContent = 'connecting…';
     const c = ctrl;
-    stream('services.logs', { services: [...picked], tail: 300 }, b => {
+    stream('services.logs', { services: [...picked], tail: 300, instance: picked.size === 1 ? instance : '' }, b => {
       if (c.signal.aborted) return;
       status.textContent = paused ? 'paused' : 'following';
       const rows = frameRows(b.frame);
@@ -45,125 +87,202 @@ function pageLogs(ctx) {
       if (b.done) status.textContent = 'ended';
     }, c.signal).catch(e => { if (e.name !== 'AbortError') { status.textContent = ''; box.append(h('div', { class: 'ln err' }, h('span'), h('span'), h('span'), h('span', { class: 'msg' }, e.message))); } });
   }
-  const refilter = debounce(() => lv.refilter(), 150);
-  ctx.el.append(
-    pageHead('Logs', 'Live lines from the services you pick; click a line to inspect it',
-      status, searchBox('Filter: text or /regex/', v => { text = v; refilter(); }),
-      h('select', { onchange: e => { level = e.target.value; lv.refilter(); }, 'aria-label': 'minimum level' },
-        [['', 'All levels'], ['debug', 'Debug+'], ['info', 'Info+'], ['warn', 'Warn+'], ['error', 'Errors']].map(([v, l]) => h('option', { value: v }, l))),
-      pauseBtn, wrapBtn, ibtn('trash', () => lv.clear(), 'Clear'),
-      ibtn('copy', () => copy(lv.lines.map(r => `${r.time || ''} ${r.service} ${r.text}`).join('\n')), 'Copy all')),
-    h('div', { class: 'toolbar' }, chips), box);
+  async function pickInstance() {
+    if (picked.size !== 1) { toast('Pick one service first'); return; }
+    const n = [...picked][0];
+    const r = frameRows(await query('services.status', { services: [n] }))[0];
+    const ids = (r?.instances || []).map(i => i.id);
+    if (!ids.length) { toast(n + ' has no instances'); return; }
+    const v = await ask('Instance of ' + n, { value: instance, placeholder: 'empty: every instance', choices: ids });
+    if (v != null) { instance = v; restart(); }
+  }
+  const levelSel = h('select', { onchange: e => { level = e.target.value; store.set('logs.level', level); lv.refilter(); }, 'aria-label': 'minimum level' },
+    [['', 'All levels'], ['debug', 'Debug+'], ['info', 'Info+'], ['warn', 'Warn+'], ['error', 'Errors']].map(([v, l]) => h('option', { value: v, selected: v === level }, l)));
+  const refilter = debounce(() => lv.refilter(), 120);
+  const logPane = h('div', { class: 'logs-main' },
+    h('div', { class: 'toolbar' }, searchBox('Filter: words, /regex/, a.b=value', v => { setText(v); refilter(); }), levelSel, status, h('span', { class: 'spacer' }),
+      rawBtn, btn('Fields', () => pickFields(lv), 'sm', 'h: fields shown'), wrapBtn, pauseBtn,
+      ibtn('down', () => lv.follow(), 'Follow (G)', 'sm'), ibtn('trash', () => lv.clear(), 'Clear (c)', 'sm'),
+      ibtn('copy', () => copy(lv.shown.map(r => `${r.time || ''} ${r.service} ${String(r.text).replace(ANSI_RE, '')}`).join('\n')), 'Copy shown (y)', 'sm'),
+      ibtn('ext', () => zoom(ctx.el.querySelector('.logs-layout')), 'Full screen (z)', 'sm')),
+    box);
+  const side = h('div', { class: 'logs-side' }, pickFilter, svcList);
+  ctx.el.append(pageHead('Logs', 'Lines from the services you pick, read into fields: double-click or enter inspects one'),
+    h('div', { class: 'logs-layout' }, splitPane(side, logPane, { key: 'logs.side', size: 230, min: 150 })));
   restart();
   ctx.onCleanup(() => ctrl?.abort());
+  ctx.menu([
+    { key: 'p', label: 'Pause or follow', run: togglePause }, { key: 's', label: 'Structured or raw', run: () => rawBtn.click() },
+    { key: 'h', label: 'Fields shown', run: () => pickFields(lv) }, { key: 'w', label: 'Wrap lines', run: () => wrapBtn.click() },
+    { key: 'i', label: 'Pick an instance', run: pickInstance }, { key: 'c', label: 'Clear', run: () => lv.clear() },
+    { key: 'Y', label: 'Copy every line', run: () => copy(lv.lines.map(r => `${r.time || ''} ${r.service} ${String(r.text).replace(ANSI_RE, '')}`).join('\n')) },
+  ]);
   ctx.onKey(e => {
-    if (e.key === ' ') { togglePause(); return true; }
-    if (e.key === 'w') { wrapBtn.click(); return true; }
-    if (e.key === 'c') { lv.clear(); return true; }
+    if (lv.keys(e)) return true;
+    switch (e.key) {
+      case ' ': case 'p': togglePause(); return true;
+      case 'w': wrapBtn.click(); return true;
+      case 's': case 'S': rawBtn.click(); return true;
+      case 'h': pickFields(lv); return true;
+      case 'i': pickInstance(); return true;
+      case 'c': lv.clear(); return true;
+      case 'f': pickFilter.focus(); return true;
+      case 'z': zoom(ctx.el.querySelector('.logs-layout')); return true;
+      case 'Y': copy(lv.lines.map(r => String(r.text).replace(ANSI_RE, '')).join('\n')); return true;
+    }
     return false;
   });
 }
 
+// ---------- metrics ----------
+// A time window is a length (range) ending now or at end; drag on a chart zooms, Z zooms out.
 function pageMetrics(ctx) {
   const dashes = resources('dashboard').map(r => r.Name).sort();
-  let cur = ctx.rest[0] && (dashes.includes(ctx.rest[0]) || ctx.rest[0] === '_query') ? ctx.rest[0] : (dashes[0] || '_query');
-  let range = store.get('metrics.range', '15m'), every = store.get('metrics.every', 30), timer, vars = {};
-  const body = h('div', {});
-  const tabs = h('div', { class: 'seg' });
+  let cur = ctx.rest[0] && (dashes.includes(ctx.rest[0]) || ctx.rest[0] === '_query') ? ctx.rest[0] : (store.get('metrics.dash') && dashes.includes(store.get('metrics.dash')) ? store.get('metrics.dash') : dashes[0] || '_query');
+  let range = store.get('metrics.range', '15m'), end = null, every = store.get('metrics.every', 30), timer, vars = {}, gen = 0;
+  const zooms = [];
+  const body = h('div', { class: 'dash-body' });
+  const tabs = h('div', { class: 'dash-tabs' });
   const varBar = h('div', { class: 'row wrap' });
-  // a long row of dashboards becomes a picker, like the TUI's
-  const drawTabs = () => dashes.length > 5
-    ? tabs.replaceChildren(h('select', { 'aria-label': 'dashboard', onchange: e => go('metrics/' + e.target.value) },
-      dashes.map(d => h('option', { value: d, selected: d === cur }, d)), h('option', { value: '_query', selected: cur === '_query' }, 'Query…')))
-    : tabs.replaceChildren(...dashes.map(d => h('button', { class: d === cur ? 'on' : '', onclick: () => go('metrics/' + d) }, d)),
-      h('button', { class: cur === '_query' ? 'on' : '', onclick: () => go('metrics/_query') }, 'Query'));
-  const charts = [];
-  const resize = debounce(() => charts.forEach(c => c.draw()), 120);
+  const winLabel = h('span', { class: 'muted small mono' });
+  const ms = r => { const m = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(r); return m ? +m[1] * { ms: 1, s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[m[2]] : 9e5; };
+  const showWin = () => {
+    rangeSel.value = RANGES.includes(range) && !end ? range : 'custom';
+    const to = end ? new Date(end) : null;
+    winLabel.textContent = end ? `${new Date(to - ms(range)).toLocaleString([], { hour12: false })} → ${to.toLocaleString([], { hour12: false })}` : '';
+    zoomOut.hidden = !zooms.length && !end;
+  };
+  const setWin = (r, e, push = true) => { if (push) zooms.push([range, end]); range = r; end = e; if (!e) store.set('metrics.range', r); showWin(); refresh(); };
+  const onZoom = (t0, t1) => setWin(Math.max(10, Math.round((t1 - t0) / 1000)) + 's', new Date(t1).toISOString());
+  const unzoom = () => { const z = zooms.pop(); if (z) setWin(z[0], z[1], false); else setWin(range, null, false); };
+  const shift = d => { const len = ms(range), to = (end ? new Date(end).getTime() : Date.now()) + d * len / 2; setWin(range, to >= Date.now() ? null : new Date(to).toISOString()); };
+  const drawTabs = () => tabs.replaceChildren(
+    ...(dashes.length > 7
+      ? [h('select', { 'aria-label': 'dashboard', onchange: e => go('metrics/' + e.target.value) }, dashes.map(d => h('option', { value: d, selected: d === cur }, d)), h('option', { value: '_query', selected: cur === '_query' }, 'Ad-hoc query'))]
+      : [h('div', { class: 'subtabs' }, dashes.map(d => h('button', { class: d === cur ? 'on' : '', type: 'button', onclick: () => go('metrics/' + d) }, d)),
+        h('button', { class: cur === '_query' ? 'on' : '', type: 'button', onclick: () => go('metrics/_query') }, 'Ad-hoc query'))]));
+  const charts = new Set();
+  const resize = debounce(() => charts.forEach(c => c.isConnected ? c._draw?.() : charts.delete(c)), 100);
   window.addEventListener('resize', resize);
-  ctx.onCleanup(() => { window.removeEventListener('resize', resize); clearInterval(timer); const t = document.querySelector('.tip'); if (t) t.hidden = true; });
-  const setTimer = () => { clearInterval(timer); if (every) timer = setInterval(() => !document.hidden && refresh(), every * 1000); };
+  const ro = new ResizeObserver(resize);
+  ro.observe(body);
+  // panels load when they scroll into view, at most four at once; a new screen or window drops the rest
+  const queue = [];
+  let running = 0;
+  const pump = () => { while (running < 4 && queue.length) { const f = queue.shift(); running++; f().finally(() => { running--; pump(); }); } };
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting && e.target._due) { e.target._due = false; queue.push(e.target._load); pump(); } }), { rootMargin: '200px' });
+  let ctrl = new AbortController();
+  ctx.onCleanup(() => { window.removeEventListener('resize', resize); ro.disconnect(); io.disconnect(); ctrl.abort(); clearInterval(timer); const t = document.querySelector('.tip'); if (t) t.hidden = true; });
+  const setTimer = () => { clearInterval(timer); if (every) timer = setInterval(() => !document.hidden && !end && refresh(), every * 1000); };
   async function loadVars(d) {
     varBar.replaceChildren();
     vars = {};
     const order = d.VarOrder?.length ? d.VarOrder : Object.keys(d.Vars || {});
-    for (const name of order) {
+    await Promise.all(order.map(async name => {
       const v = d.Vars[name];
       let values = v.Values || [];
       if (!values.length && v.Query) {
         try {
-          const rows = frameRows(await query('metrics.query', { query: v.Query, source: v.Source || '', instant: true }));
+          const rows = frameRows(await query('metrics.query', { query: v.Query, source: v.Source || d.Source || '', instant: true }, ctrl.signal));
           values = [...new Set(rows.map(r => Object.fromEntries(String(r.series).split(',').map(p => p.split('=')))[v.Label]).filter(Boolean))].sort();
         } catch { /* leave it empty */ }
       }
       const def = v.Default && (!values.length || values.includes(v.Default)) ? v.Default : v.All ? '$__all' : values[0];
       vars[name] = def ? [def] : [];
-      varBar.append(h('label', { class: 'row' }, h('span', { class: 'muted' }, '$' + name),
+      v._values = values; v._def = def;
+    }));
+    for (const name of order) {
+      const v = d.Vars[name];
+      varBar.append(h('label', { class: 'var' }, h('span', { class: 'muted' }, '$' + name),
         h('select', { onchange: e => { vars[name] = [e.target.value]; refresh(); } },
-          v.All && h('option', { value: '$__all', selected: def === '$__all' }, 'All'), values.map(x => h('option', { value: x, selected: x === def }, x)))));
+          v.All && h('option', { value: '$__all', selected: v._def === '$__all' }, 'All'), v._values.map(x => h('option', { value: x, selected: x === v._def }, x)))));
     }
   }
-  async function panelEl(p) {
+  const panelHeight = p => p.Height ? Math.max(4, p.Height) * 30 : ['stat', 'gauge'].includes(p.Kind) ? 150 : 300;
+  function panelEl(p, d) {
     const kind = p.Kind || 'line';
     const width = p.Width || (kind === 'stat' || kind === 'gauge' ? 6 : 12);
-    const bodyEl = h('div', { class: 'body' }, h('div', { class: 'muted', style: { padding: '30px 0', textAlign: 'center' } }, h('span', { class: 'spin' })));
-    const el = h('div', { class: 'panel', style: { gridColumn: `span ${Math.min(24, width)}` } },
-      h('div', { class: 'ph' }, h('span', { class: 'ellipsis' }, p.Title || firstLine(p.Query)), p.Help && h('span', { class: 'help', title: p.Help }, 'ⓘ')), bodyEl);
+    const bodyEl = h('div', { class: 'body' }, h('div', { class: 'pmsg' }, h('span', { class: 'spin' })));
     const targets = p.Queries?.length ? p.Queries : p.Query ? [{ Query: p.Query, Legend: p.Legend }] : [];
+    const el = h('div', { class: 'panel kind-' + kind, tabindex: '0', style: { gridColumn: `span ${Math.min(24, width)}`, height: panelHeight(p) + 'px' } },
+      h('div', { class: 'ph' }, h('span', { class: 'ellipsis grow', title: p.Title }, p.Title || firstLine(p.Query)), p.Help && h('span', { class: 'help', title: p.Help }, 'ⓘ'),
+        ibtn('copy', () => copy(targets.map(t => t.Query).join('\n')), 'Copy query (y)', 'sm ph-btn'), ibtn('ext', () => view(), 'View full screen (v)', 'sm ph-btn')), bodyEl);
+    const view = () => zoom(el, on => { el.style.height = on ? '' : panelHeight(p) + 'px'; });
+    el._view = view;
+    onMenu(el, () => [
+      { label: el.classList.contains('zoomed') ? 'Back to the dashboard' : 'View full screen', icon: 'ext', key: 'v', run: view },
+      { label: 'Refresh', icon: 'refresh', key: 'r', run: () => { queue.push(el._load); pump(); } },
+      { label: 'Copy query', icon: 'copy', key: 'y', run: () => copy(targets.map(t => t.Query).join('\n')) },
+      { label: 'Open as ad-hoc query', icon: 'queries', key: 'e', run: () => { store.set('metrics.adhoc', targets[0]?.Query || ''); go('metrics/_query'); } },
+    ]);
+    el.addEventListener('dblclick', e => { if (e.target.closest('.ph')) view(); });
+    const my = gen;
     el._load = async () => {
+      if (my !== gen) return;
       try {
-        const lists = await Promise.all(targets.map(async t => groupSeries(frameRows(await query('metrics.query', { query: t.Query, source: p.Source || '', range, vars, instant: kind !== 'line' && kind !== 'stat' })), t.Legend)));
+        const args = t => ({ query: t.Query, source: p.Source || d?.Source || '', range, end: end || undefined, vars, instant: kind !== 'line' && kind !== 'stat' });
+        const lists = await Promise.all(targets.map(async t => groupSeries(frameRows(await query('metrics.query', args(t), ctrl.signal)), t.Legend)));
+        if (my !== gen) return;
         const list = lists.flat();
         const last = x => x.pts.at(-1)?.[1];
         const colorFor = v => p.Crit != null && v >= p.Crit ? 'var(--red)' : p.Warn != null && v >= p.Warn ? 'var(--amber)' : 'var(--green)';
-        if (!list.length) { bodyEl.replaceChildren(h('div', { class: 'empty', style: { padding: '30px 0' } }, 'No data')); return; }
+        if (!list.length) { bodyEl.replaceChildren(h('div', { class: 'pmsg' }, 'No data')); return; }
         if (kind === 'stat') {
           const v = last(list[0]);
-          const spark = h('div', {});
+          const spark = h('div', { class: 'spark' });
           bodyEl.replaceChildren(h('div', { class: 'bigv', style: { color: p.Warn != null || p.Crit != null ? colorFor(v) : 'var(--text)' } }, fmtNum(v, p.Unit)), spark);
-          lineChart(spark, [list[0]], { unit: p.Unit, height: 50 });
-          spark.querySelector('.legend')?.remove();
+          const c = lineChart(spark, [list[0]], { unit: p.Unit, fit: true, legend: 'none' });
           spark.querySelectorAll('.grid').forEach(g => g.remove());
+          spark._draw = () => { c.draw(); spark.querySelectorAll('.grid').forEach(g => g.remove()); };
+          charts.add(spark);
         } else if (kind === 'gauge') {
           const v = last(list[0]);
           const max = p.Max ?? (p.Unit === '%' ? 100 : Math.max(...list.map(last), 1));
-          bodyEl.replaceChildren(gauge(v, p.Min ?? 0, max, colorFor(v), p.Unit));
+          bodyEl.replaceChildren(h('div', { class: 'gauge-box' }, gauge(v, p.Min ?? 0, max, colorFor(v), p.Unit)));
         } else if (kind === 'bar' || kind === 'table') {
           const vals = list.map(x => ({ name: x.name, v: last(x) })).sort((a, b) => b.v - a.v);
           const max = Math.max(...vals.map(x => x.v), 1e-9);
           bodyEl.replaceChildren(kind === 'bar'
             ? h('div', { class: 'bars' }, vals.map((x, i) => h('div', { class: 'b' }, h('span', { class: 'ellipsis', title: x.name }, x.name),
               h('div', { class: 'track' }, h('div', { class: 'fill', style: { width: (100 * x.v / max) + '%', background: p.Warn != null || p.Crit != null ? colorFor(x.v) : series()[i % series().length] } })), h('span', { class: 'mono' }, fmtNum(x.v, p.Unit)))))
-            : (() => { const t = dataTable({ columns: [{ key: 'name', label: 'Series' }, { key: 'v', label: 'Value', num: true, render: r => fmtNum(r.v, p.Unit) }] }); t.update(vals); return t.el; })());
+            : (() => { const t = dataTable({ key: 'mt', columns: [{ key: 'name', label: 'Series' }, { key: 'v', label: 'Value', num: true, render: r => fmtNum(r.v, p.Unit) }] }); t.update(vals); return t.el; })());
         } else {
-          const c = lineChart(bodyEl, list, { unit: p.Unit, stack: p.Stack, height: p.Height ? Math.max(120, p.Height * 22) : 190 });
-          el._chart = c;
-          const i = charts.findIndex(x => x.el === el);
-          if (i >= 0) charts[i] = { el, draw: c.draw }; else charts.push({ el, draw: c.draw });
+          const c = lineChart(bodyEl, list, { unit: p.Unit, stack: p.Stack, fit: true, onZoom });
+          bodyEl._draw = c.draw;
+          charts.add(bodyEl);
         }
-      } catch (e) { bodyEl.replaceChildren(h('div', { class: 'err', style: { padding: '12px 0' } }, e.message)); }
+      } catch (e) { if (e.name !== 'AbortError') bodyEl.replaceChildren(h('div', { class: 'pmsg err' }, e.message)); }
     };
     return el;
   }
   let panels = [];
   async function show() {
+    gen++; ctrl.abort(); ctrl = new AbortController(); queue.length = 0;
+    store.set('metrics.dash', cur);
     drawTabs();
-    charts.length = 0;
+    charts.clear();
     if (cur === '_query') return showQuery();
     const d = specOf('dashboard', cur) || {};
+    body.replaceChildren(loading());
     await loadVars(d);
     const grid = h('div', { class: 'dash' });
     panels = [];
     let rowPanels = null;
+    const closedRows = new Set(store.get('metrics.rows.' + cur, []));
     for (const p of d.Panels || []) {
       if (p.Row && !p.Title && !p.Query && !p.Queries?.length) {
-        const members = [];
-        const hd = h('div', { class: 'rowh', onclick: () => { hd.classList.toggle('closed'); members.forEach(m => { m.hidden = hd.classList.contains('closed'); }); if (!hd.classList.contains('closed')) charts.forEach(c => c.draw()); } }, icon('chev', 'chev'), p.Row);
+        const members = [], name = p.Row;
+        const hd = h('div', { class: 'rowh' + (closedRows.has(name) ? ' closed' : ''), onclick: () => {
+          const shut = !hd.classList.toggle('closed') ? false : true;
+          shut ? closedRows.add(name) : closedRows.delete(name); store.set('metrics.rows.' + cur, [...closedRows]);
+          members.forEach(m => { m.hidden = shut; });
+        } }, icon('chev', 'chev'), name, h('span', { class: 'muted small' }, ''));
         grid.append(hd);
         rowPanels = members;
         continue;
       }
-      const el = await panelEl(p);
-      rowPanels?.push(el);
+      const el = panelEl(p, d);
+      if (rowPanels) { rowPanels.push(el); el.hidden = grid.lastElementChild && [...grid.querySelectorAll('.rowh')].at(-1)?.classList.contains('closed'); }
       grid.append(el);
       panels.push(el);
     }
@@ -171,61 +290,108 @@ function pageMetrics(ctx) {
     if (!panels.length) body.replaceChildren(emptyState('This dashboard has no panels'));
     refresh();
   }
-  function refresh() { panels.forEach(p => p._load()); }
+  function refresh() {
+    gen++;
+    ctrl.abort(); ctrl = new AbortController(); queue.length = 0;
+    const my = gen;
+    for (const p of panels) {
+      const load = p._load;
+      p._load = () => my === gen ? load() : Promise.resolve();
+      p._due = true;
+      io.unobserve(p); io.observe(p);
+    }
+  }
   function showQuery() {
     varBar.replaceChildren();
     const comps = resources('component').filter(r => (r.Spec?.Kind || '') === 'metrics').map(r => r.Name);
     const src = h('select', {}, h('option', { value: '' }, 'default metrics'), comps.map(c => h('option', { value: c }, c)));
-    const ta = h('textarea', { rows: 3, placeholder: 'PromQL, such as sum by (service) (rate(http_requests_total[1m]))', value: store.get('metrics.adhoc', '') });
-    const out = h('div', { class: 'panel' }, h('div', { class: 'muted' }, 'Run a query to chart it'));
+    const ta = h('textarea', { rows: 3, class: 'mono', spellcheck: false, placeholder: 'PromQL, such as sum by (service) (rate(http_requests_total[1m]))  ·  ctrl+enter runs' }, store.get('metrics.adhoc', ''));
+    const ghost = aiAssist(ta, () => 'a PromQL query for Prometheus; the dashboards use: ' + resources('dashboard').flatMap(r => (r.Spec?.Panels || []).map(p => p.Query).filter(Boolean)).slice(0, 8).join(' ; '));
+    const out = h('div', { class: 'panel', style: { height: '420px' } }, h('div', { class: 'pmsg' }, 'Run a query to chart it'));
     const runQ = async () => {
       store.set('metrics.adhoc', ta.value);
-      out.replaceChildren(h('span', { class: 'spin' }));
+      out.replaceChildren(h('div', { class: 'pmsg' }, h('span', { class: 'spin' })));
       try {
-        const list = groupSeries(frameRows(await query('metrics.query', { query: ta.value, source: src.value, range })), '');
-        if (!list.length) { out.replaceChildren(h('div', { class: 'empty' }, 'No data')); return; }
-        const c = lineChart(out, list, {});
-        charts.splice(0, charts.length, { el: out, draw: c.draw });
-      } catch (e) { out.replaceChildren(h('div', { class: 'err' }, e.message)); }
+        const list = groupSeries(frameRows(await query('metrics.query', { query: ta.value, source: src.value, range, end: end || undefined }, ctrl.signal)), '');
+        if (!list.length) { out.replaceChildren(h('div', { class: 'pmsg' }, 'No data')); return; }
+        const b = h('div', { class: 'body' });
+        out.replaceChildren(h('div', { class: 'ph' }, h('span', { class: 'grow ellipsis mono' }, ta.value), ibtn('ext', () => zoom(out), 'Full screen', 'sm ph-btn')), b);
+        const c = lineChart(b, list, { fit: true, onZoom });
+        b._draw = c.draw; charts.add(b);
+      } catch (e) { if (e.name !== 'AbortError') out.replaceChildren(h('div', { class: 'pmsg err' }, e.message)); }
     };
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQ(); } });
-    panels = [{ _load: () => ta.value && runQ() }];
-    body.replaceChildren(h('div', { class: 'card card-b', style: { marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '10px' } }, ta,
-      h('div', { class: 'row' }, src, h('span', { class: 'spacer' }), h('span', { class: 'muted' }, 'ctrl+enter runs'), btn('Run query', runQ, 'primary'))), out);
+    panels = [];
+    refreshQuery = () => ta.value && runQ();
+    body.replaceChildren(h('div', { class: 'card card-b col', style: { marginBottom: '14px' } }, ta, ghost,
+      h('div', { class: 'row' }, src, h('span', { class: 'spacer' }), h('span', { class: 'muted small' }, 'ctrl+enter runs · tab takes the AI\'s completion · @? describes it'), btn([icon('play'), 'Run query'], runQ, 'primary'))), out);
     if (ta.value) runQ();
   }
-  const rangeSel = h('select', { onchange: e => { range = e.target.value; store.set('metrics.range', range); refresh(); }, 'aria-label': 'time range' },
-    RANGES.map(r => h('option', { value: r, selected: r === range }, 'Last ' + r)));
+  let refreshQuery = null;
+  const rangeSel = h('select', { 'aria-label': 'time range', onchange: async e => {
+    if (e.target.value !== 'custom') { zooms.length = 0; setWin(e.target.value, null, false); return; }
+    const pad = n => String(n).padStart(2, '0'), loc = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const to = end ? new Date(end) : new Date(), from = new Date(to - ms(range));
+    const fi = h('input', { type: 'datetime-local', value: loc(from) }), ti = h('input', { type: 'datetime-local', value: loc(to) });
+    const ok = await modal('Time range', h('div', { class: 'row wrap' }, h('label', { class: 'field' }, 'From', fi), h('label', { class: 'field' }, 'To', ti)), [['Cancel', false, 'ghost'], ['Apply', true, 'primary']]);
+    if (!ok) { showWin(); return; }
+    const a = new Date(fi.value), b = new Date(ti.value);
+    if (!(b > a)) { toast('From must come before To', 'bad'); showWin(); return; }
+    setWin(Math.round((b - a) / 1000) + 's', b >= Date.now() - 5000 ? null : b.toISOString());
+  } }, RANGES.map(r => h('option', { value: r, selected: r === range }, 'Last ' + r)), h('option', { value: 'custom' }, 'Custom…'));
+  const zoomOut = btn('Zoom out', unzoom, 'sm', 'Z');
   const everySel = h('select', { onchange: e => { every = +e.target.value; store.set('metrics.every', every); setTimer(); }, 'aria-label': 'refresh' },
-    [[0, 'Off'], [10, '10s'], [30, '30s'], [60, '1m']].map(([v, l]) => h('option', { value: v, selected: v === every }, '⟳ ' + l)));
-  ctx.el.append(pageHead('Metrics', null, varBar, rangeSel, everySel, ibtn('refresh', refresh, 'Refresh')),
-    h('div', { class: 'toolbar' }, tabs), body);
+    [[0, 'Off'], [10, '10s'], [30, '30s'], [60, '1m'], [300, '5m']].map(([v, l]) => h('option', { value: v, selected: v === every }, '⟳ ' + l)));
+  const doRefresh = () => cur === '_query' ? refreshQuery?.() : refresh();
+  ctx.el.append(pageHead('Metrics', null, winLabel, ibtn('back', () => shift(-1), 'Earlier (,)', 'sm'), rangeSel, ibtn('right', () => shift(1), 'Later (.)', 'sm'), zoomOut, everySel,
+    ibtn('refresh', doRefresh, 'Refresh (R)'), ibtn('ext', () => browserFull(), 'Full screen')),
+  h('div', { class: 'toolbar dash-bar' }, tabs, h('span', { class: 'spacer' }), varBar), body);
+  showWin();
   if (!dashes.length && !resources('component').length) { body.append(emptyState('No dashboards', 'Add dashboards: to rig.yaml, or run a query')); }
   show();
   setTimer();
+  const focused = () => document.activeElement?.closest?.('.panel') || panels.find(p => p.matches(':hover'));
   ctx.onKey(e => {
-    if (e.key === 'r') { refresh(); return true; }
     const all = [...dashes, '_query'], i = all.indexOf(cur);
-    if (e.key === ']') { go('metrics/' + all[(i + 1) % all.length]); return true; }
-    if (e.key === '[') { go('metrics/' + all[(i - 1 + all.length) % all.length]); return true; }
+    switch (e.key) {
+      case 'r': case 'R': doRefresh(); return true;
+      case ']': go('metrics/' + all[(i + 1) % all.length]); return true;
+      case '[': go('metrics/' + all[(i - 1 + all.length) % all.length]); return true;
+      case 'Z': unzoom(); return true;
+      case ',': shift(-1); return true;
+      case '.': shift(1); return true;
+      case 't': rangeSel.focus(); rangeSel.showPicker?.(); return true;
+      case 'v': case 'z': case 'Enter': { const p = focused(); if (p?._view) { p._view(); return true; } return false; }
+      case 'ArrowRight': case 'ArrowDown': case 'ArrowLeft': case 'ArrowUp': {
+        const vis = panels.filter(p => !p.hidden); if (!vis.length) return false;
+        const at = vis.indexOf(focused());
+        vis[Math.max(0, Math.min(vis.length - 1, at + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1)))].focus();
+        return true;
+      }
+      case '+': panels.forEach(p => { p.hidden = false; }); document.querySelectorAll('.rowh').forEach(r => r.classList.remove('closed')); return true;
+      case '-': document.querySelectorAll('.rowh:not(.closed)').forEach(r => r.click()); return true;
+    }
     return false;
   });
+  ctx.subTab = d => { const all = [...dashes, '_query'], i = all.indexOf(cur); go('metrics/' + all[(i + d + all.length) % all.length]); };
 }
 
 // ---------- tasks ----------
 function taskList() {
   return Object.entries(S.provides.actions || {}).filter(([n]) => n.startsWith('task.')).map(([n, a]) => {
     const name = n.slice(5), sp = specOf('task', name) || {};
-    return { name, action: n, help: a.description || sp.Help || '', readonly: a.effect === 'read', spec: sp, group: sp.Group || '' };
+    return { name, action: n, help: a.description || sp.Help || '', readonly: a.effect === 'read', spec: sp, group: sp.Group || taskGroup(name) };
   }).sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
 }
+// taskGroup is the category a task without group: belongs to: its name's prefix (db:seed, test-unit).
+const taskGroup = n => { const m = /^([a-z0-9]+)[:/._-]/i.exec(n); return m ? m[1] : ''; };
 async function runTask(t) {
   const sp = t.spec;
   const fields = (sp.Args || []).map(a => {
     const input = a.Choices?.length
       ? h('select', {}, a.Choices.map(c => h('option', { value: c, selected: c === a.Default }, c)))
-      : h('input', { value: a.Default || '', placeholder: a.Help || '' });
-    return { a, input, el: h('label', { class: 'field' }, a.Name + (a.Help ? ' — ' + a.Help : ''), input) };
+      : h('input', { value: a.Default || '', placeholder: a.Help || a.Name });
+    return { a, input, el: h('label', { class: 'field' }, h('span', {}, h('b', {}, a.Name), a.Help && h('span', { class: 'muted' }, ' — ' + a.Help)), input) };
   });
   const extra = h('input', { placeholder: 'more arguments (optional)' });
   if (fields.length || sp.Confirm || (sp.Steps || []).length) {
@@ -263,84 +429,119 @@ function watchJob(action, since) {
 }
 function pageTasks(ctx) {
   const tasks = taskList();
-  const grid = h('div', {});
-  const draw = f => {
-    const list = tasks.filter(t => !f || (t.name + ' ' + t.help + ' ' + t.group).toLowerCase().includes(f.toLowerCase()));
-    const groups = [...new Set(list.map(t => t.group))];
-    grid.replaceChildren(...groups.map(g => h('div', { class: 'section' }, g && h('h3', {}, g),
-      h('div', { class: 'grid cards' }, list.filter(t => t.group === g).map(t => h('div', { class: 'card task' },
-        h('div', { class: 'n' }, t.name, t.readonly && badge('read-only', 'accent'), t.spec.Confirm && badge('confirm', 'amber')),
-        h('div', { class: 'd' }, firstLine(t.help) || h('span', { class: 'muted' }, 'no description')),
-        h('div', { class: 'foot' }, (t.spec.Args || []).length > 0 && h('span', { class: 'muted' }, t.spec.Args.length + ' args'), h('span', { class: 'spacer' }),
-          btn([icon('play'), 'Run'], () => runTask(t), 'primary sm'))))))));
-    if (!list.length) grid.replaceChildren(emptyState(tasks.length ? 'No task matches' : 'No tasks', tasks.length ? '' : 'Add tasks: to rig.yaml'));
-  };
-  ctx.el.append(pageHead('Tasks', 'The project\'s tasks for this environment', searchBox('Filter tasks', draw)), grid);
-  draw('');
+  let cur = ctx.rest[0] || store.get('tasks.cur', tasks[0]?.name);
+  const groups = group(tasks, t => t.group, { title: k => k ? k[0].toUpperCase() + k.slice(1) : 'General' });
+  const detail = h('div', { class: 'grow' });
+  const list = groupedList({ groups, key: 'tasks', cur, text: t => t.name + ' ' + t.help + ' ' + t.group, id: t => t.name,
+    render: t => [h('div', { class: 'n' }, h('span', { class: 'ellipsis' }, t.name), t.readonly && badge('read', 'accent'), t.spec.Confirm && badge('confirm', 'amber')), h('div', { class: 'd' }, firstLine(t.help) || 'no description')],
+    onPick: t => { cur = t.name; store.set('tasks.cur', cur); drawDetail(); },
+    menu: t => [{ label: 'Run', icon: 'play', key: 'enter', run: () => runTask(t) }, { label: 'Copy the command', icon: 'copy', run: () => copy('rig do ' + t.name) }],
+    empty: 'No tasks: add tasks: to rig.yaml' });
+  function drawDetail() {
+    const t = tasks.find(x => x.name === cur);
+    history.replaceState(null, '', '#/tasks' + (t ? '/' + encodeURIComponent(t.name) : ''));
+    if (!t) { detail.replaceChildren(emptyState(tasks.length ? 'Pick a task' : 'No tasks', tasks.length ? '' : 'Add tasks: to rig.yaml')); return; }
+    const sp = t.spec;
+    detail.replaceChildren(h('div', { class: 'card' },
+      h('div', { class: 'card-h' }, h('span', { class: 'grow' }, h('span', { class: 'muted small' }, (t.group || 'general') + ' / '), t.name), t.readonly && badge('read-only', 'accent'), sp.Confirm && badge('asks first', 'amber'),
+        btn([icon('play'), 'Run'], () => runTask(t), sp.Confirm ? 'danger solid' : 'primary')),
+      h('div', { class: 'card-b col' },
+        t.help ? h('div', { style: { whiteSpace: 'pre-wrap' } }, t.help) : h('div', { class: 'muted' }, 'No description'),
+        (sp.Args || []).length > 0 && h('div', {}, h('h4', {}, 'Arguments'), h('table', { class: 'plain' }, h('tbody', {}, sp.Args.map(a => h('tr', {}, h('td', { class: 'mono' }, a.Name), h('td', { class: 'muted' }, a.Help || ''), h('td', { class: 'mono muted' }, a.Default ? 'default ' + a.Default : a.Choices?.length ? a.Choices.join(' | ') : '')))))),
+        (sp.Steps || []).length > 0 && h('div', {}, h('h4', {}, sp.Steps.length + ' steps'), h('pre', { class: 'out' }, sp.Steps.map((s, i) => `${i + 1}. ${s}`).join('\n'))),
+        (sp.Needs || sp.DependsOn || []).length > 0 && h('div', { class: 'muted' }, 'needs ' + (sp.Needs || sp.DependsOn).join(', ')),
+        h('div', { class: 'muted small mono' }, 'rig do ' + t.name))));
+  }
+  ctx.el.append(pageHead('Tasks', `${tasks.length} tasks in ${groups.length} groups for ${S.info.env} · enter runs the picked one`, searchBox('Filter tasks', v => list.filter(v))),
+    splitPane(h('div', { class: 'side-col' }, list.el), detail, { key: 'tasks.side', size: 340 }));
+  drawDetail();
+  ctx.onKey(e => {
+    if (list.keys(e)) return true;
+    if (e.key === 'Enter' || e.key === 'r') { const t = tasks.find(x => x.name === cur); if (t) runTask(t); return true; }
+    return false;
+  });
 }
 
 // ---------- queries ----------
 function pageQueries(ctx) {
-  const qs = resources('query').sort((a, b) => (a.Spec?.Group || '').localeCompare(b.Spec?.Group || '') || a.Name.localeCompare(b.Name));
-  const comps = resources('component').map(r => r.Name).sort();
-  let cur = ctx.rest[0] || qs[0]?.Name || '_adhoc';
-  const list = h('div', { class: 'card list' });
-  const right = h('div', {});
-  const drawList = () => {
-    let group = null;
-    list.replaceChildren(...qs.flatMap(q => {
-      const out = [];
-      if ((q.Spec?.Group || '') !== group) { group = q.Spec?.Group || ''; if (group) out.push(h('div', { class: 'group-h' }, group)); }
-      out.push(h('div', { class: 'item' + (q.Name === cur ? ' sel' : ''), onclick: () => { cur = q.Name; drawList(); drawRight(); } },
-        h('div', { class: 'n' }, q.Name, h('span', { class: 'muted', style: { fontWeight: 400, fontSize: '12px' } }, q.Spec?.Source)), h('div', { class: 'd' }, firstLine(q.Spec?.Help) || firstLine(q.Spec?.Query))));
-      return out;
-    }), h('div', { class: 'item' + (cur === '_adhoc' ? ' sel' : ''), onclick: () => { cur = '_adhoc'; drawList(); drawRight(); } }, h('div', { class: 'n' }, 'Ad-hoc query'), h('div', { class: 'd' }, 'any component that answers queries')));
-  };
+  const qs = resources('query').sort((a, b) => a.Name.localeCompare(b.Name));
+  const comps = frameRowsCache.components || [];
+  let cur = ctx.rest[0] || store.get('queries.cur', qs[0]?.Name || '_adhoc');
+  if (cur !== '_adhoc' && !qs.some(q => q.Name === cur)) cur = qs[0]?.Name || '_adhoc';
+  const groups = [...group(qs, q => q.Spec?.Group || q.Spec?.Source || '', { title: k => k || 'Other' }), { id: '~adhoc', title: 'Ad hoc', items: [{ Name: '_adhoc', adhoc: true }] }];
+  const right = h('div', { class: 'grow' });
+  const list = groupedList({ groups, key: 'queries', cur, id: q => q.Name, text: q => q.adhoc ? 'ad-hoc query' : q.Name + ' ' + (q.Spec?.Help || '') + ' ' + (q.Spec?.Query || '') + ' ' + (q.Spec?.Source || ''),
+    render: q => q.adhoc ? [h('div', { class: 'n' }, 'Ad-hoc query'), h('div', { class: 'd' }, 'any component that answers queries')]
+      : [h('div', { class: 'n' }, h('span', { class: 'ellipsis' }, q.Name), q.Spec?.Source && h('span', { class: 'tag' }, q.Spec.Source)), h('div', { class: 'd' }, firstLine(q.Spec?.Help) || firstLine(q.Spec?.Query))],
+    onPick: q => { cur = q.Name; store.set('queries.cur', cur); drawRight(); },
+    menu: q => q.adhoc ? null : [{ label: 'Run', icon: 'play', run: () => { cur = q.Name; drawRight(true); } }, { label: 'Copy the query', icon: 'copy', run: () => copy(q.Spec?.Query || '') }, { label: 'Edit as ad hoc', icon: 'edit', run: () => { store.set('queries.adhoc', { comp: q.Spec?.Source, text: q.Spec?.Query }); cur = '_adhoc'; list.set(cur); drawRight(); } }] });
+  let ctrl;
   function result(promise) {
-    const out = h('div', {}, h('span', { class: 'spin' }));
-    promise.then(f => {
-      const t = frameTable(f);
-      const rows = frameRows(f), cols = (f.fields || []).map(x => x.name);
-      out.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, rows.length + ' rows'), f.meta?.notice && h('span', { class: 'muted' }, f.meta.notice), h('span', { class: 'spacer' }),
-        searchBox('Filter rows', v => t.filter(v)), btn([icon('copy'), 'CSV'], () => copy(toCSV(rows, cols)), 'sm'),
-        btn([icon('copy'), 'JSON'], () => copy(JSON.stringify(rows, null, 2)), 'sm')), t.el);
-    }, e => out.replaceChildren(h('div', { class: 'card card-b err' }, e.message)));
+    const out = h('div', {}, loading());
+    promise.then(f => out.replaceChildren(resultTable(f, { key: 'q.' + cur })), e => { if (e.name !== 'AbortError') out.replaceChildren(errBox(e)); });
     return out;
   }
-  function drawRight() {
+  const langOf = c => frameRowsCache.components?.find(x => x.name === c)?.language || '';
+  function drawRight(autorun) {
+    ctrl?.abort(); ctrl = new AbortController();
     history.replaceState(null, '', '#/queries/' + encodeURIComponent(cur));
     if (cur === '_adhoc') {
-      const comp = h('select', {}, comps.map(c => h('option', { value: c }, c)));
-      const ta = h('textarea', { rows: 6, placeholder: 'the component\'s query language: SQL, PromQL, a Redis command…' });
+      const saved = store.get('queries.adhoc', {});
+      const queryable = comps.filter(c => /query/.test(c.caps || ''));
+      const comp = h('select', { onchange: () => { ta.placeholder = ph(); } }, (queryable.length ? queryable : comps).map(c => h('option', { value: c.name, selected: c.name === saved.comp }, c.name + (c.type ? ' · ' + c.type : ''))));
+      const ph = () => `${langOf(comp.value) || 'the component\'s query language'} for ${comp.value}: SQL, PromQL, a Redis command…  ·  ctrl+enter runs`;
+      const ta = h('textarea', { rows: 6, class: 'mono', spellcheck: false, placeholder: '' }, saved.text || '');
+      ta.placeholder = ph();
+      const ghost = aiAssist(ta, () => `a ${langOf(comp.value) || 'query'} for the ${comp.value} component (${comps.find(c => c.name === comp.value)?.type || ''}); saved queries on it: ` + qs.filter(q => q.Spec?.Source === comp.value).map(q => q.Spec.Query).slice(0, 5).join(' ; '));
       const res = h('div', {});
-      const run = () => res.replaceChildren(result(query('queries.run', { component: comp.value, text: ta.value })));
+      const run = () => { store.set('queries.adhoc', { comp: comp.value, text: ta.value }); res.replaceChildren(result(query('queries.run', { component: comp.value, text: ta.value }, ctrl.signal))); };
       ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } });
-      right.replaceChildren(h('div', { class: 'card card-b', style: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' } },
-        h('div', { class: 'row' }, h('b', {}, 'Ad-hoc query'), h('span', { class: 'spacer' }), comp), ta,
-        h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('span', { class: 'muted' }, 'ctrl+enter runs'), btn([icon('play'), 'Run'], run, 'primary'))), res);
+      right.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'grow' }, 'Ad-hoc query'), comp),
+        h('div', { class: 'card-b col' }, ta, ghost, h('div', { class: 'row' }, h('span', { class: 'muted small' }, 'tab takes the AI\'s completion · @? then words: the AI writes the query'), h('span', { class: 'spacer' }), btn([icon('play'), 'Run'], run, 'primary')))), res);
+      setTimeout(() => ta.focus(), 30);
       return;
     }
     const q = qs.find(x => x.Name === cur);
     if (!q) { right.replaceChildren(emptyState('No saved queries', 'Add queries: to rig.yaml, or use an ad-hoc query')); return; }
-    const params = Object.entries(q.Spec?.Params || {}).map(([k, d]) => ({ k, input: h('input', { value: d || '', placeholder: k }) }));
+    const sp = q.Spec || {};
+    const used = [...new Set([...(sp.Query || '').matchAll(/[$:@]\{?(\w+)\}?|\{\{\s*\.?(\w+)\s*\}\}/g)].map(m => m[1] || m[2]))];
+    const params = Object.entries(sp.Params || {}).map(([k, d]) => {
+      const desc = typeof d === 'object' && d ? d : { Default: d };
+      const input = h('input', { value: store.get(`q.${q.Name}.${k}`, desc.Default ?? ''), placeholder: desc.Help || desc.Description || (desc.Default != null && desc.Default !== '' ? 'default ' + desc.Default : 'value of ' + k), class: 'mono',
+        onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); run(); } } });
+      const ghost = aiAssist(input, () => `a value for the ${k} parameter of the query ${q.Name}: ${sp.Query}`);
+      return { k, input, el: h('label', { class: 'field' }, h('span', { class: 'mono' }, k), input, ghost) };
+    });
     const res = h('div', {});
-    const run = () => res.replaceChildren(result(query('queries.run', { name: q.Name, params: Object.fromEntries(params.map(p => [p.k, p.input.value])) })));
-    right.replaceChildren(h('div', { class: 'card card-b', style: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' } },
-      h('div', { class: 'row' }, h('b', { style: { fontSize: '15px' } }, q.Name), badge(q.Spec?.Source || 'query', 'accent'), h('span', { class: 'spacer' }), btn([icon('play'), 'Run'], run, 'primary')),
-      q.Spec?.Help && h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap' } }, q.Spec.Help),
-      h('pre', { class: 'out' }, q.Spec?.Query || ''),
-      params.length > 0 && h('div', { class: 'row wrap' }, params.map(p => h('label', { class: 'field' }, p.k, p.input)))), res);
-    if (!params.length) run();
+    const run = () => {
+      params.forEach(p => store.set(`q.${q.Name}.${p.k}`, p.input.value));
+      res.replaceChildren(result(query('queries.run', { name: q.Name, params: Object.fromEntries(params.map(p => [p.k, p.input.value])) }, ctrl.signal)));
+    };
+    right.replaceChildren(h('div', { class: 'card' },
+      h('div', { class: 'card-h' }, h('span', { class: 'grow' }, h('span', { class: 'muted small' }, (sp.Group || sp.Source || 'query') + ' / '), q.Name), sp.Source && badge(sp.Source, 'accent'),
+        btn([icon('copy'), 'Copy'], () => copy(sp.Query || ''), 'sm ghost'), btn([icon('edit'), 'Edit as ad hoc'], () => { store.set('queries.adhoc', { comp: sp.Source, text: sp.Query }); cur = '_adhoc'; list.set(cur); drawRight(); }, 'sm ghost'),
+        btn([icon('play'), 'Run'], run, 'primary')),
+      h('div', { class: 'card-b col' },
+        sp.Help && h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap' } }, sp.Help),
+        h('pre', { class: 'out' }, sp.Query || ''),
+        params.length > 0 && h('div', { class: 'params' }, params.map(p => p.el)),
+        !params.length && used.length > 0 && h('div', { class: 'muted small' }, 'uses ' + used.join(', ')))), res);
+    if (!params.length || autorun) run();
   }
-  ctx.el.append(pageHead('Queries', 'Saved queries from rig.yaml, and ad-hoc ones'), h('div', { class: 'split' }, list, right));
-  drawList(); drawRight();
+  ctx.el.append(pageHead('Queries', `${qs.length} saved queries from rig.yaml by group, and ad-hoc ones`, searchBox('Filter queries', v => list.filter(v))),
+    splitPane(h('div', { class: 'side-col' }, list.el), right, { key: 'queries.side', size: 320 }));
+  drawRight();
+  ctx.onCleanup(() => ctrl?.abort());
+  ctx.onKey(e => list.keys(e));
 }
+// frameRowsCache keeps the components frame the boot read, for screens that only need names and types.
+const frameRowsCache = {};
 
 // ---------- jobs ----------
 function pageJobs(ctx) {
   let cur = null;
-  const list = h('div', { class: 'card list', style: { maxHeight: 'calc(100vh - 180px)', overflow: 'auto' } });
-  const right = h('div', {});
+  const list = h('div', { class: 'card list jobs-list' });
+  const right = h('div', { class: 'grow' });
   const draw = () => {
     const jobs = [...S.jobs].reverse();
     if (!cur && jobs[0]) cur = jobs[0].id;
@@ -357,11 +558,18 @@ function pageJobs(ctx) {
       h('span', { class: 'muted' }, duration(j)), h('span', { class: 'spacer' }), btn([icon('copy'), 'Copy'], () => copy((j.output || []).join('\n')), 'sm')), out);
     if (stick) out.scrollTop = out.scrollHeight; else out.scrollTop = pre.scrollTop;
   };
-  ctx.el.append(pageHead('Activity', 'What ran from this page in this session: actions, tasks and their output'), h('div', { class: 'split' }, list, right));
+  ctx.el.append(pageHead('Activity', 'What ran from this page in this session: actions, tasks and their output'), splitPane(list, right, { key: 'jobs.side', size: 320 }));
   document.addEventListener('rig:jobs', draw);
   ctx.onCleanup(() => document.removeEventListener('rig:jobs', draw));
   refreshJobs().then(draw);
   ctx.every(1500, () => refreshJobs());
+  ctx.onKey(e => {
+    const jobs = [...S.jobs].reverse(), i = jobs.findIndex(j => j.id === cur);
+    if (e.key === 'ArrowDown' || e.key === 'j') { cur = jobs[Math.min(jobs.length - 1, i + 1)]?.id; draw(); return true; }
+    if (e.key === 'ArrowUp' || e.key === 'k') { cur = jobs[Math.max(0, i - 1)]?.id; draw(); return true; }
+    if (e.key === 'y') { const j = jobs[i]; if (j) copy((j.output || []).join('\n')); return true; }
+    return false;
+  });
 }
 
 // ---------- inbox ----------
@@ -372,11 +580,11 @@ function pageInbox(ctx) {
     box.replaceChildren(...items.map(it => h('div', { class: 'card', style: { opacity: it.status === 'pending' ? 1 : 0.65 } },
       h('div', { class: 'card-h' }, h('span', { class: 'mono' }, it.action), badge(it.status, { pending: 'amber', approved: 'green', done: 'green', rejected: 'red', failed: 'red' }[it.status] || '', true),
         h('span', { class: 'spacer' }), h('span', { class: 'muted', style: { fontWeight: 400 } }, toDate(it.time).toLocaleString())),
-      h('div', { class: 'card-b', style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+      h('div', { class: 'card-b col' },
         h('dl', { class: 'kv' }, h('dt', {}, 'Asked by'), h('dd', {}, `${it.subject?.name || ''} (${it.subject?.kind || ''})`),
           it.env && [h('dt', {}, 'Environment'), h('dd', {}, it.env)], it.why && [h('dt', {}, 'Why'), h('dd', {}, it.why)],
           it.by && [h('dt', {}, 'Decided by'), h('dd', {}, it.by)], it.result && [h('dt', {}, 'Result'), h('dd', {}, it.result)]),
-        it.args && Object.keys(it.args).length > 0 && h('pre', { class: 'out' }, JSON.stringify(it.args, null, 2)),
+        it.args && Object.keys(it.args).length > 0 && jsonTree(it.args),
         it.plan?.message && h('div', {}, h('b', {}, 'Plan: '), it.plan.message),
         it.status === 'pending' && h('div', { class: 'row' }, h('span', { class: 'spacer' }),
           btn('Reject', () => decide(it, false), 'danger'), btn([icon('check'), 'Approve and run'], () => decide(it, true), 'primary'))))));
@@ -395,17 +603,20 @@ function pageInbox(ctx) {
 // ---------- api explorer ----------
 function schemaForm(schema) {
   const props = schema?.properties || {}, req = new Set(schema?.required || []);
+  const comps = (frameRowsCache.components || []).map(c => c.name);
   const fields = Object.entries(props).map(([k, p]) => {
     const t = p.type || 'string';
     let input;
     if (p.enum) input = h('select', {}, h('option', { value: '' }, ''), p.enum.map(v => h('option', { value: v }, v)));
     else if (t === 'boolean') input = h('input', { type: 'checkbox' });
-    else if (t === 'integer' || t === 'number') input = h('input', { type: 'number', step: t === 'integer' ? 1 : 'any' });
-    else if (t === 'object') input = h('textarea', { rows: 3, placeholder: '{ }' });
+    else if (t === 'integer' || t === 'number') input = h('input', { type: 'number', step: t === 'integer' ? 1 : 'any', placeholder: p.description || k });
+    else if (t === 'object') input = h('textarea', { rows: 3, placeholder: '{ "key": "value" }', class: 'mono' });
     else if (k === 'service' || (t === 'array' && k === 'services') || (t === 'array' && k === 'targets')) {
       input = t === 'array' ? h('select', { multiple: true, style: { height: '90px' } }, serviceNames().map(n => h('option', { value: n }, n)))
         : h('select', {}, h('option', { value: '' }, ''), serviceNames().map(n => h('option', { value: n }, n)));
-    } else input = h('input', { placeholder: t === 'array' ? 'comma separated' : p.description || '' });
+    } else if (k === 'component' && comps.length) {
+      input = h('select', {}, h('option', { value: '' }, ''), comps.map(n => h('option', { value: n }, n)));
+    } else input = h('input', { placeholder: t === 'array' ? 'comma separated' : p.description || k });
     const get = () => {
       if (t === 'boolean') return input.checked || undefined;
       if (input.multiple) { const v = [...input.selectedOptions].map(o => o.value); return v.length ? v : undefined; }
@@ -416,11 +627,11 @@ function schemaForm(schema) {
       if (t === 'object') return JSON.parse(v);
       return v;
     };
-    return { k, get, el: h('label', { class: 'field' }, h('span', {}, k, req.has(k) && h('span', { style: { color: 'var(--red)' } }, ' *'), p.description && h('span', { class: 'muted' }, ' — ' + p.description)), input) };
+    return { k, get, el: h('label', { class: 'field' }, h('span', {}, h('span', { class: 'mono' }, k), req.has(k) && h('span', { style: { color: 'var(--red)' } }, ' *'), h('span', { class: 'muted' }, ' ' + t), p.description && h('span', { class: 'muted' }, ' — ' + p.description)), input) };
   });
-  const raw = h('textarea', { rows: 4, placeholder: 'extra arguments as JSON, merged over the fields' });
+  const raw = h('textarea', { rows: 4, class: 'mono', placeholder: 'extra arguments as JSON, merged over the fields' });
   return {
-    el: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, fields.map(f => f.el), h('details', {}, h('summary', { class: 'muted' }, 'JSON arguments'), raw)),
+    el: h('div', { class: 'col' }, fields.map(f => f.el), h('details', {}, h('summary', { class: 'muted' }, 'JSON arguments'), raw)),
     value() {
       const out = {};
       for (const f of fields) { const v = f.get(); if (v !== undefined) out[f.k] = v; }
@@ -429,31 +640,31 @@ function schemaForm(schema) {
     },
   };
 }
+// CORE_DOMAINS are the engine's own; any other first part names a plugin, shown only when the project uses it.
+const CORE_DOMAINS = new Set(['services', 'runtime', 'env', 'metrics', 'traces', 'logs', 'hosts', 'load', 'data', 'kv', 'queries', 'manifests', 'tests', 'task', 'plugin', 'plugins', 'component', 'components',
+  'jobs', 'inbox', 'catalog', 'alerts', 'views', 'secret', 'secrets', 'deploy', 'build', 'git', 'ai', 'docs', 'project', 'doctor', 'audit']);
+function apiEntries() {
+  const used = new Set(S.info?.used || []);
+  const plugins = new Set((frameRowsCache.plugins || []).map(p => p.name));
+  const keep = n => { const d = n.split('.')[0]; return CORE_DOMAINS.has(d) || !plugins.has(d) || used.has(d); };
+  const srcs = Object.entries(S.provides.sources || {}).filter(([n]) => keep(n)).map(([n, x]) => ({ kind: 'source', name: n, ...x }));
+  const acts = Object.entries(S.provides.actions || {}).filter(([n]) => keep(n) && !n.startsWith('task.')).map(([n, x]) => ({ kind: 'action', name: n, ...x }));
+  return [...srcs, ...acts].sort((a, b) => a.name.localeCompare(b.name));
+}
 function pageAPI(ctx) {
-  const srcs = Object.entries(S.provides.sources || {}).map(([n, x]) => ({ kind: 'source', name: n, ...x }));
-  const acts = Object.entries(S.provides.actions || {}).map(([n, x]) => ({ kind: 'action', name: n, ...x }));
-  const all = [...srcs, ...acts].sort((a, b) => a.name.localeCompare(b.name));
-  let cur = ctx.rest.join('/') || all[0]?.name, filter = '', ctrl;
-  const list = h('div', { class: 'card list', style: { maxHeight: 'calc(100vh - 180px)', overflow: 'auto' } });
-  const right = h('div', {});
+  const all = apiEntries();
+  let cur = ctx.rest.join('/') || store.get('api.cur', all[0]?.name), ctrl;
+  if (!all.some(x => x.name === cur)) cur = all[0]?.name;
+  const right = h('div', { class: 'grow' });
   ctx.onCleanup(() => ctrl?.abort());
   const effectBadge = e => badge(e || 'read', { read: 'accent', write: 'amber', danger: 'red' }[e || 'read']);
-  // grouped by domain (services, metrics, a plugin's name): a group opens on a click, or while filtering
-  const open = new Set(store.get('api.open', []));
   const domain = n => n.split('.')[0];
-  const drawList = () => {
-    const f = filter.toLowerCase();
-    const m = x => !f || (x.name + ' ' + (x.description || '')).toLowerCase().includes(f);
-    const groups = new Map();
-    for (const x of all.filter(m)) { const d = domain(x.name); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(x); }
-    list.replaceChildren(...[...groups].sort(([a], [b]) => a.localeCompare(b)).flatMap(([d, items]) => {
-      const shown = f || open.has(d) || domain(cur || '') === d;
-      return [h('button', { class: 'group-h click' + (shown ? '' : ' closed'), type: 'button', onclick: () => { open.has(d) ? open.delete(d) : open.add(d); store.set('api.open', [...open]); drawList(); } },
-        icon('chev', 'chev'), d, h('span', { class: 'spacer' }), h('span', { class: 'muted' }, items.filter(x => x.kind === 'source').length + ' · ' + items.filter(x => x.kind === 'action').length)),
-      ...(shown ? items : []).map(x => h('div', { class: 'item' + (x.name === cur ? ' sel' : ''), onclick: () => { cur = x.name; drawList(); drawRight(); } },
-        h('div', { class: 'n mono', style: { fontSize: '13px' } }, x.name.slice(d.length + 1) || x.name, x.kind === 'action' ? effectBadge(x.effect) : badge(x.stream ? 'stream' : 'source', x.stream ? 'purple' : '')), h('div', { class: 'd' }, firstLine(x.description))))];
-    }));
-  };
+  const groups = group(all, x => domain(x.name)).map(g => ({ ...g, sub: `${g.items.filter(x => x.kind === 'source').length} sources · ${g.items.filter(x => x.kind === 'action').length} actions` }));
+  // the open group is the current entry's: opening another closes it
+  store.set('gl.api', groups.filter(g => g.id !== domain(cur || '')).map(g => g.id));
+  const list = groupedList({ groups, key: 'api', accordion: true, cur, id: x => x.name, text: x => x.name + ' ' + (x.description || ''),
+    render: x => [h('div', { class: 'n mono', style: { fontSize: '13px' } }, h('span', { class: 'ellipsis' }, x.name.slice(domain(x.name).length + 1) || x.name), x.kind === 'action' ? effectBadge(x.effect) : badge(x.stream ? 'stream' : 'source', x.stream ? 'purple' : '')), h('div', { class: 'd' }, firstLine(x.description))],
+    onPick: x => { cur = x.name; store.set('api.cur', cur); drawRight(); } });
   function drawRight() {
     ctrl?.abort();
     const x = all.find(y => y.name === cur);
@@ -461,14 +672,10 @@ function pageAPI(ctx) {
     history.replaceState(null, '', '#/api/' + x.name);
     const form = schemaForm(x.args);
     const res = h('div', {});
-    const runIt = async (live) => {
+    const runIt = async live => {
       let args;
       try { args = form.value(); } catch (e) { toast('arguments: ' + e.message, 'bad'); return; }
-      if (x.kind === 'action') {
-        const r = await act(x.name, args, x.name);
-        res.replaceChildren(r ? h('div', { class: 'card card-b' }, h('b', {}, r.result?.message || 'done'), r.result?.refs?.length > 0 && h('div', { class: 'muted' }, r.result.refs.join(' ')), r.job?.output?.length > 0 && h('pre', { class: 'out', style: { marginTop: '10px' } }, r.job.output.join('\n'))) : '');
-        return;
-      }
+      if (x.kind === 'action') { res.replaceChildren(runResult(await act(x.name, args, x.name))); return; }
       if (live) {
         ctrl?.abort(); ctrl = new AbortController();
         const rows = [];
@@ -477,7 +684,7 @@ function pageAPI(ctx) {
         res.replaceChildren(h('div', { class: 'toolbar' }, status, h('span', { class: 'spacer' }), btn([icon('stop'), 'Stop'], () => { ctrl.abort(); status.textContent = 'stopped'; }, 'sm')));
         stream(x.name, args, b => {
           if (b.frame) {
-            if (!t) { t = frameTable(b.frame); res.append(t.el); rows.length = 0; }
+            if (!t) { t = frameTable(b.frame, { key: 'api.' + x.name }); res.append(t.el); rows.length = 0; }
             rows.push(...frameRows(b.frame)); if (rows.length > 2000) rows.splice(0, rows.length - 2000);
             t.update(rows);
           }
@@ -486,63 +693,106 @@ function pageAPI(ctx) {
         }, ctrl.signal).catch(e => { if (e.name !== 'AbortError') res.append(h('div', { class: 'err' }, e.message)); });
         return;
       }
-      res.replaceChildren(h('span', { class: 'spin' }));
-      try {
-        const f = await query(x.name, args);
-        const t = frameTable(f), rows = frameRows(f), cols = (f.fields || []).map(c => c.name);
-        res.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, rows.length + ' rows'), f.meta?.notice && h('span', { class: 'muted' }, f.meta.notice), h('span', { class: 'spacer' }),
-          searchBox('Filter rows', v => t.filter(v)), btn([icon('copy'), 'CSV'], () => copy(toCSV(rows, cols)), 'sm'), btn([icon('copy'), 'JSON'], () => copy(JSON.stringify(rows, null, 2)), 'sm')), t.el);
-      } catch (e) { res.replaceChildren(h('div', { class: 'card card-b err' }, e.message)); }
+      ctrl?.abort(); ctrl = new AbortController();
+      res.replaceChildren(loading());
+      try { res.replaceChildren(resultTable(await query(x.name, args, ctrl.signal), { key: 'api.' + x.name })); } catch (e) { if (e.name !== 'AbortError') res.replaceChildren(errBox(e)); }
     };
-    right.replaceChildren(h('div', { class: 'card card-b', style: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '14px' } },
-      h('div', { class: 'row' }, h('b', { class: 'mono', style: { fontSize: '15px' } }, x.name), x.kind === 'action' ? effectBadge(x.effect) : badge('source', 'accent'), x.stream && badge('stream', 'purple'), h('span', { class: 'spacer' }),
-        x.kind === 'source' && x.stream && btn([icon('play'), 'Stream'], () => runIt(true)),
+    right.replaceChildren(h('div', { class: 'card' },
+      h('div', { class: 'card-h' }, h('b', { class: 'mono grow' }, x.name), x.kind === 'action' ? effectBadge(x.effect) : badge('source', 'accent'), x.stream && badge('stream', 'purple'),
+        x.kind === 'source' && x.stream && btn([icon('play'), 'Stream'], () => runIt(true), 'sm'),
         btn([icon('play'), x.kind === 'action' ? 'Run' : 'Query'], () => runIt(false), x.effect === 'danger' ? 'danger solid' : 'primary')),
-      x.description && h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap' } }, x.description), form.el), res);
+      h('div', { class: 'card-b col' }, x.description && h('div', { class: 'muted', style: { whiteSpace: 'pre-wrap' } }, x.description), form.el)), res);
   }
-  ctx.el.append(pageHead('API', 'What the engine serves, by domain: the same calls the CLI, the MCP server and the assistant make; a group shows sources · actions', searchBox('Filter', v => { filter = v; drawList(); })),
-    h('div', { class: 'split' }, list, right));
-  drawList(); drawRight();
+  ctx.el.append(pageHead('API', 'What the engine serves, by domain: the calls the CLI, the MCP server and the assistant make. Plugins the project does not use are left out.', searchBox('Filter', v => list.filter(v))),
+    splitPane(h('div', { class: 'side-col' }, list.el), right, { key: 'api.side', size: 340 }));
+  drawRight();
+  ctx.onKey(e => list.keys(e));
 }
 
 // ---------- settings ----------
 const LAYOUTS = [
   { id: 'side', t: 'Sidebar', d: 'Navigation down the left: a standard web app', pv: [['a', 0, 0, 22, 100], ['', 28, 8, 66, 10], ['', 28, 26, 66, 60]] },
   { id: 'top', t: 'Top bar', d: 'Navigation across the top, the page full width', pv: [['a', 0, 0, 100, 14], ['', 6, 22, 88, 10], ['', 6, 38, 88, 52]] },
-  { id: 'terminal', t: 'Terminal', d: 'The TUI\'s look: monospace, numbered tabs, key hints, keys first', pv: [['a', 0, 0, 30, 10], ['', 32, 0, 20, 10], ['', 3, 16, 94, 70], ['', 0, 92, 100, 8]] },
+  { id: 'terminal', t: 'Terminal', d: 'The TUI\'s look: monospace, tabs, key hints, keys first', pv: [['a', 0, 0, 30, 10], ['', 32, 0, 20, 10], ['', 3, 16, 94, 70], ['', 0, 92, 100, 8]] },
 ];
+const DEFAULT_PREFS = { theme: '', scheme: 'auto', layout: 'side', density: 'comfortable', font: 'sans' };
 function pageSettings(ctx) {
-  const themes = S.info?.themes || {};
-  const light = document.documentElement.dataset.scheme === 'light';
-  const seg = (k, opts) => h('div', { class: 'seg' }, opts.map(([v, l]) => h('button', { class: S.prefs[k] === v ? 'on' : '', onclick: () => setPref(k, v) }, l)));
-  ctx.el.append(pageHead('Settings', 'Saved in this browser'),
-    h('div', { class: 'section' }, h('h3', {}, 'Layout'), h('div', { class: 'layouts' }, LAYOUTS.map(l => h('button', { class: 'layout-opt' + (S.prefs.layout === l.id ? ' on' : ''), onclick: () => setPref('layout', l.id) },
-      h('div', { class: 'pv' }, l.pv.map(([c, x, y, w, hh]) => h('b', { class: c, style: { left: x + '%', top: y + '%', width: w + '%', height: hh + '%' } }))),
-      h('div', { class: 't' }, l.t), h('div', { class: 'd' }, l.d))))),
-    h('div', { class: 'section' }, h('h3', {}, 'Theme'), h('p', { class: 'muted', style: { marginTop: 0 } }, 'The terminal UI\'s themes (rig theme), your own files in ~/.config/rig/themes included'),
-      h('div', { class: 'themes' }, Object.keys(themes).sort().map(n => {
-        const t = themes[n], sh = light ? t.Light : t;
-        return h('button', { class: 'theme' + (S.themeName === n ? ' on' : ''), onclick: () => setPref('theme', n) },
-          h('div', { class: 'pv', style: { background: sh.Bar } },
-            h('div', { class: 'sb', style: { background: `color-mix(in srgb, ${sh.Bar}, ${sh.Text} 5%)` } }, h('i', { style: { background: t.Accent } }), h('i', { style: { background: sh.Panel } }), h('i', { style: { background: sh.Panel } })),
-            h('div', { class: 'mn' }, h('i', { style: { background: sh.Text, width: '60%', opacity: 0.8 } }), h('i', { style: { background: sh.Dim, width: '85%' } }),
-              h('div', { class: 'row', style: { gap: '4px' } }, (t.Series || []).slice(0, 5).map(c => h('i', { style: { background: c, width: '18%', height: '14px' } }))))),
-          h('div', { class: 'nm' }, n, S.info?.theme === n && h('span', { class: 'muted', style: { fontWeight: 400, fontSize: '12px' } }, 'tui'),
-            h('span', { class: 'sw' }, [t.Accent, t.Green, t.Amber, t.Red].map(c => h('i', { style: { background: c } })))));
-      }))),
-    h('div', { class: 'section' }, h('h3', {}, 'Appearance'), h('div', { class: 'row wrap', style: { gap: '18px' } },
-      h('label', { class: 'field' }, 'Mode', seg('scheme', [['auto', 'System'], ['dark', 'Dark'], ['light', 'Light']])),
-      h('label', { class: 'field' }, 'Density', seg('density', [['comfortable', 'Comfortable'], ['compact', 'Compact']])),
-      h('label', { class: 'field' }, 'Font', seg('font', [['sans', 'Sans'], ['mono', 'Monospace']])))),
-    h('div', { class: 'section', id: 'set-ai' }, h('h3', {}, 'Assistant'), h('p', { class: 'muted', style: { marginTop: 0 } }, 'rig ai config: shared with the terminal UI, the CLI and the MCP server'), aiSettings()),
-    h('div', { class: 'section' }, h('h3', {}, 'Keyboard'), shortcutsTable()),
-    h('div', { class: 'section' }, btn('Reset to defaults', () => { S.prefs = { theme: '', scheme: 'auto', layout: 'side', density: 'comfortable', font: 'sans' }; store.set('prefs', S.prefs); applyPrefs(); renderChrome(); route(); }, 'ghost')));
-  if (ctx.q.get('s') === 'ai') setTimeout(() => $('#set-ai')?.scrollIntoView({ block: 'start' }), 50);
+  const tabs = [['look', 'Appearance', 'Layout, theme, mode, density and font'], ['ai', 'Assistant', 'rig ai config: shared with the terminal UI, the CLI and the MCP server'],
+    ['keys', 'Keyboard', 'The keys every screen shares, then each screen\'s own'], ['about', 'About', 'This page, the project and the browser storage']];
+  let tab = ctx.q.get('s') || store.get('settings.tab', 'look');
+  if (!tabs.some(t => t[0] === tab)) tab = 'look';
+  const pane = h('div', { class: 'grow settings-pane' });
+  const nav = h('div', { class: 'card list settings-nav' });
+  const setting = (title, help, control) => h('div', { class: 'setting' }, h('div', { class: 'grow' }, h('div', { class: 'st' }, title), help && h('div', { class: 'muted small' }, help)), control);
+  const seg = (k, opts) => h('div', { class: 'seg' }, opts.map(([v, l]) => h('button', { class: S.prefs[k] === v ? 'on' : '', type: 'button', onclick: () => setPref(k, v) }, l)));
+  function look() {
+    const themes = S.info?.themes || {};
+    const light = document.documentElement.dataset.scheme === 'light';
+    return [
+      h('div', { class: 'card' }, h('div', { class: 'card-h' }, 'Layout'), h('div', { class: 'card-b' }, h('div', { class: 'layouts' }, LAYOUTS.map(l => h('button', { class: 'layout-opt' + (S.prefs.layout === l.id ? ' on' : ''), type: 'button', onclick: () => setPref('layout', l.id) },
+        h('div', { class: 'pv' }, l.pv.map(([c, x, y, w, hh]) => h('b', { class: c, style: { left: x + '%', top: y + '%', width: w + '%', height: hh + '%' } }))),
+        h('div', { class: 't' }, l.t), h('div', { class: 'd' }, l.d)))))),
+      h('div', { class: 'card' }, h('div', { class: 'card-h' }, 'Display'), h('div', { class: 'card-b col settings-rows' },
+        setting('Mode', 'Follow the system, or always dark or light', seg('scheme', [['auto', 'System'], ['dark', 'Dark'], ['light', 'Light']])),
+        setting('Density', 'Row height and padding', seg('density', [['comfortable', 'Comfortable'], ['compact', 'Compact']])),
+        setting('Font', 'The terminal layout is always monospace', seg('font', [['sans', 'Sans'], ['mono', 'Monospace']])))),
+      h('div', { class: 'card' }, h('div', { class: 'card-h' }, 'Theme', h('span', { class: 'muted small', style: { fontWeight: 400 } }, 'the terminal UI\'s themes (rig theme), your own in ~/.config/rig/themes included · ctrl+p')),
+        h('div', { class: 'card-b' }, h('div', { class: 'themes' }, Object.keys(themes).sort().map(n => {
+          const t = themes[n], sh = light ? t.Light : t;
+          return h('button', { class: 'theme' + (S.themeName === n ? ' on' : ''), type: 'button', onclick: () => setPref('theme', n) },
+            h('div', { class: 'pv', style: { background: sh.Bar } },
+              h('div', { class: 'sb', style: { background: `color-mix(in srgb, ${sh.Bar}, ${sh.Text} 5%)` } }, h('i', { style: { background: t.Accent } }), h('i', { style: { background: sh.Panel } }), h('i', { style: { background: sh.Panel } })),
+              h('div', { class: 'mn' }, h('i', { style: { background: sh.Text, width: '60%', opacity: 0.8 } }), h('i', { style: { background: sh.Dim, width: '85%' } }),
+                h('div', { class: 'row', style: { gap: '4px' } }, (t.Series || []).slice(0, 5).map(c => h('i', { style: { background: c, width: '18%', height: '14px' } }))))),
+            h('div', { class: 'nm' }, n, S.info?.theme === n && h('span', { class: 'muted', style: { fontWeight: 400, fontSize: '12px' } }, 'tui'),
+              h('span', { class: 'sw' }, [t.Accent, t.Green, t.Amber, t.Red].map(c => h('i', { style: { background: c } })))));
+        })))),
+    ];
+  }
+  function about() {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('rig.web.'));
+    return [h('div', { class: 'card' }, h('div', { class: 'card-h' }, 'This page'), h('div', { class: 'card-b' }, h('dl', { class: 'kv' },
+      h('dt', {}, 'Project'), h('dd', {}, S.info?.project), h('dt', {}, 'Environment'), h('dd', {}, S.info?.env), h('dt', {}, 'Runtime'), h('dd', {}, S.info?.runtime),
+      h('dt', {}, 'Version'), h('dd', {}, 'rig ' + (S.info?.version || '')), h('dt', {}, 'Plugins in use'), h('dd', {}, (S.info?.used || []).join(', '))))),
+    h('div', { class: 'card' }, h('div', { class: 'card-h' }, 'Saved in this browser'), h('div', { class: 'card-b col settings-rows' },
+      setting('Look', 'Layout, theme, mode, density and font', btn('Reset', () => { S.prefs = { ...DEFAULT_PREFS }; store.set('prefs', S.prefs); applyPrefs(); renderChrome(); route(); }, 'sm')),
+      setting('Everything else', `${keys.length} entries: column widths, pane sizes, picks, filters, history`, btn('Clear', async () => {
+        if (!await confirmBox('Clear saved state', 'Column widths, pane sizes, the last picks and history go; the sign-in token stays.', 'Clear', true)) return;
+        keys.filter(k => k !== 'rig.web.token').forEach(k => localStorage.removeItem(k)); location.reload();
+      }, 'sm danger'))))];
+  }
+  function draw() {
+    store.set('settings.tab', tab);
+    nav.replaceChildren(...tabs.map(([id, t, d]) => h('div', { class: 'item' + (id === tab ? ' sel' : ''), onclick: () => { tab = id; draw(); } }, h('div', { class: 'n' }, t), h('div', { class: 'd' }, d))));
+    const [, title, desc] = tabs.find(t => t[0] === tab);
+    pane.replaceChildren(h('div', { class: 'settings-head' }, h('h2', {}, title), h('p', { class: 'muted' }, desc)),
+      ...(tab === 'look' ? look() : tab === 'ai' ? [h('div', { class: 'card card-b' }, aiSettings())] : tab === 'keys' ? [shortcutsTable()] : about()));
+  }
+  ctx.el.append(pageHead('Settings', 'Saved in this browser, except the assistant\'s, which rig ai config keeps'), h('div', { class: 'settings' }, nav, pane));
+  draw();
+  ctx.onKey(e => {
+    const i = tabs.findIndex(t => t[0] === tab);
+    if (e.key === 'ArrowDown' || e.key === 'j') { tab = tabs[Math.min(tabs.length - 1, i + 1)][0]; draw(); return true; }
+    if (e.key === 'ArrowUp' || e.key === 'k') { tab = tabs[Math.max(0, i - 1)][0]; draw(); return true; }
+    return false;
+  });
+  ctx.subTab = d => { const i = tabs.findIndex(t => t[0] === tab); tab = tabs[(i + d + tabs.length) % tabs.length][0]; draw(); };
 }
-function shortcutsTable() {
-  const rows = [['1 – 9', 'go to a screen'], ['Shift ← →', 'previous / next screen'], ['Ctrl/⌘ K', 'search and run anything'], [':', 'run a command: rig\'s own (start api, env staging, theme) or any rig command'],
-    ['@', 'the assistant'], ['.', 'what this screen can do'], ['!', 'activity'], ['T', 'run a task'], ['Ctrl E', 'switch environment'], ['Ctrl P', 'pick a theme'],
-    ['[ ]', 'previous / next sub-tab'], ['/', 'focus the page\'s filter'], ['?', 'this help'], ['Esc', 'close a panel or dialog'],
-    ...PAGES.filter(p => p.keys).flatMap(p => p.keys.map(([k, d]) => [k, p.title + ': ' + d]))];
-  return h('div', { class: 'table-wrap' }, h('table', {}, h('tbody', {}, rows.map(([k, d]) => h('tr', {}, h('td', { style: { width: '160px' } }, h('kbd', {}, k)), h('td', {}, d))))));
+const GLOBAL_KEYS = [
+  ['Commands', [[':', 'command line: rig\'s own verbs (restart parser, open Logs, env k8s) or any rig command'], ['Ctrl/⌘ K', 'search screens, services, tasks, dashboards, queries'], ['T', 'run a task'],
+    ['.  right-click', 'this screen\'s actions as a menu'], ['@', 'the assistant (/ in its box: commands)']]],
+  ['Move around', [['Tab  ⇧Tab  ⇧← →  Alt+← →', 'next, previous screen'], ['Ctrl+← →  [ ]', 'switch the sub-tab or dashboard inside a screen'], ['↑↓  j k', 'move'], ['enter  dbl-click', 'open, run'],
+    ['esc  ⌫', 'back: closes what is open, then returns to the screen you came from'], ['drag a border', 'resize panes and columns (kept for next time)']]],
+  ['Lists and tables', [['/', 'filter: words (fuzzy), *glob*, column=value, column!=value, column~text'], ['click a header', 'sort; drag its edge to resize'], ['+ - ←→', 'expand all, fold all, fold a group'], ['z  v', 'full screen panel']]],
+  ['Environment and look', [['Ctrl E', 'switch environment'], ['Ctrl P', 'pick a theme'], ['F11', 'browser full screen'], ['! ', 'activity'], ['? F1', 'this help']]],
+];
+function shortcutsTable(filter = '') {
+  const page = pageOf(parseRoute().id);
+  const groups = [...GLOBAL_KEYS, ...PAGES.filter(p => p.keys).map(p => [p.title + (p === page ? ' (this screen)' : ''), p.keys])];
+  if (page?.keys) groups.unshift(groups.splice(groups.findIndex(g => g[0].endsWith('(this screen)')), 1)[0]);
+  return h('div', { class: 'keys-grid' }, groups.map(([title, rows]) => {
+    const shown = rows.filter(([k, d]) => matchText(k + ' ' + d + ' ' + title, filter));
+    return shown.length > 0 && h('div', { class: 'card' }, h('div', { class: 'card-h' }, title),
+      h('table', { class: 'plain keys-t' }, h('tbody', {}, shown.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))))));
+  }));
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ func NewLocal(a *App, jm *jobs.Manager) *Local {
 	}
 	l.builtins()
 	l.observe()
+	l.serviceExtras()
 	l.components()
 	l.leases()
 	l.pluginActions()
@@ -181,14 +183,25 @@ func (l *Local) builtins() {
 					sec = "infra"
 				}
 			}
-			rows = append(rows, map[string]any{"service": st.Service, "state": string(st.State), "ready": st.Ready, "desired": st.Desired, "image": st.Image, "message": st.Message,
-				"section": sec, "role": role})
+			restarts, insts := 0, []map[string]any{}
+			for _, in := range st.Instances {
+				restarts += in.Restarts
+				insts = append(insts, map[string]any{"id": in.ID, "host": in.Host, "ip": in.IP, "state": string(in.State), "ready": in.Ready,
+					"restarts": in.Restarts, "started": in.Started, "cpu": in.CPU, "memory": in.Memory})
+			}
+			row := map[string]any{"service": st.Service, "state": string(st.State), "ready": st.Ready, "desired": st.Desired, "image": st.Image, "message": st.Message,
+				"section": sec, "role": role, "restarts": restarts, "instances": insts}
+			if b := st.Autoscale; b != nil {
+				row["autoscale"] = map[string]any{"min": b.Min, "max": b.Max, "cpu": b.CPU, "memory": b.Memory}
+			}
+			rows = append(rows, row)
 		}
 		return frames.FromRows([]protocol.Field{
 			{Name: "service", Type: protocol.TypeString, Ref: "svc://{service}"}, {Name: "state", Type: protocol.TypeString},
 			{Name: "ready", Type: protocol.TypeInt}, {Name: "desired", Type: protocol.TypeInt},
 			{Name: "image", Type: protocol.TypeString}, {Name: "message", Type: protocol.TypeString},
 			{Name: "section", Type: protocol.TypeString}, {Name: "role", Type: protocol.TypeString},
+			{Name: "restarts", Type: protocol.TypeInt}, {Name: "instances", Type: protocol.TypeJSON}, {Name: "autoscale", Type: protocol.TypeJSON},
 		}, rows), nil
 	}
 	l.about["plugins"] = protocol.SourceSpec{Description: "installed plugins: version, state, what they implement"}
@@ -329,6 +342,9 @@ func metricsFrame(ctx context.Context, m core.Metrics, text string, args protoco
 		step = max(rng/240, time.Second)
 	}
 	end := time.Now()
+	if t, err := time.Parse(time.RFC3339, str(args["end"])); err == nil && t.Before(end) {
+		end = t
+	}
 	ss, err := m.Range(ctx, text, end.Add(-rng), end, step)
 	if err != nil {
 		return nil, err
@@ -343,7 +359,16 @@ func metricsFrame(ctx context.Context, m core.Metrics, text string, args protoco
 }
 
 func dur(v any, def time.Duration) time.Duration {
-	if d, err := time.ParseDuration(fmt.Sprint(v)); err == nil && v != nil {
+	if v == nil {
+		return def
+	}
+	text := fmt.Sprint(v)
+	if days, ok := strings.CutSuffix(text, "d"); ok {
+		if n, err := strconv.ParseFloat(days, 64); err == nil {
+			return time.Duration(n * float64(24*time.Hour))
+		}
+	}
+	if d, err := time.ParseDuration(text); err == nil {
 		return d
 	}
 	return def

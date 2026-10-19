@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goxang/rig/core"
@@ -282,30 +283,38 @@ func (l *Local) components() {
 			{Name: "name", Type: protocol.TypeString}, {Name: "start", Type: protocol.TypeTime}, {Name: "duration", Type: protocol.TypeDuration}, {Name: "error", Type: protocol.TypeBool}, {Name: "tags", Type: protocol.TypeString}}, rows), nil
 	})
 
-	src("load.status", "every load generator: running, rate, sent, failed, latency, replicas", func(ctx context.Context, _ protocol.Args) (*protocol.Frame, error) {
-		var rows []map[string]any
-		for _, n := range a.Names(core.KindLoad) {
-			r := map[string]any{"name": n}
-			g, _, err := Get[core.LoadGenerator](a, core.KindLoad, n)
-			if err == nil {
-				c, cancel := context.WithTimeout(ctx, 5*time.Second)
-				var st core.LoadStatus
-				if st, err = g.Status(c); err == nil {
-					r["running"], r["rate"], r["sent"], r["failed"] = st.Running, st.Rate, st.Sent, st.Failed
-					r["p50"], r["p95"], r["p99"] = st.Latency.P50.Seconds(), st.Latency.P95.Seconds(), st.Latency.P99.Seconds()
-				}
-				if ls, ok := core.As[core.LoadScaler](g); ok {
-					if n, err := ls.Replicas(c); err == nil {
-						r["replicas"] = n
+	src("load.status", "every load generator (or component's): running, rate, sent, failed, latency, replicas", func(ctx context.Context, args protocol.Args) (*protocol.Frame, error) {
+		names := a.Names(core.KindLoad)
+		if c := str(args["component"]); c != "" {
+			names = []string{c}
+		}
+		rows := make([]map[string]any, len(names))
+		var wg sync.WaitGroup
+		for i, n := range names {
+			wg.Go(func() {
+				r := map[string]any{"name": n}
+				rows[i] = r
+				g, _, err := Get[core.LoadGenerator](a, core.KindLoad, n)
+				if err == nil {
+					c, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
+					var st core.LoadStatus
+					if st, err = g.Status(c); err == nil {
+						r["running"], r["rate"], r["sent"], r["failed"] = st.Running, st.Rate, st.Sent, st.Failed
+						r["p50"], r["p95"], r["p99"] = st.Latency.P50.Seconds(), st.Latency.P95.Seconds(), st.Latency.P99.Seconds()
+					}
+					if ls, ok := core.As[core.LoadScaler](g); ok {
+						if n, err := ls.Replicas(c); err == nil {
+							r["replicas"] = n
+						}
 					}
 				}
-				cancel()
-			}
-			if err != nil {
-				r["error"] = err.Error()
-			}
-			rows = append(rows, r)
+				if err != nil {
+					r["error"] = err.Error()
+				}
+			})
 		}
+		wg.Wait()
 		return frames.FromRows([]protocol.Field{{Name: "name", Type: protocol.TypeString}, {Name: "running", Type: protocol.TypeBool}, {Name: "rate", Type: protocol.TypeNumber},
 			{Name: "sent", Type: protocol.TypeInt}, {Name: "failed", Type: protocol.TypeInt}, {Name: "p50", Type: protocol.TypeDuration}, {Name: "p95", Type: protocol.TypeDuration},
 			{Name: "p99", Type: protocol.TypeDuration}, {Name: "replicas", Type: protocol.TypeInt}, {Name: "error", Type: protocol.TypeString}}, rows), nil

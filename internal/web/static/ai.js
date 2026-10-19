@@ -23,15 +23,37 @@ async function aiLoadInfo() {
 }
 function aiPanel() {
   const msgs = h('div', { class: 'ai-msgs' }), pend = h('div', { class: 'ai-pending' });
-  const input = h('textarea', { rows: 2, placeholder: 'Ask about this project · enter sends, shift+enter a new line',
-    onkeydown: e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aiSend(input.value); } } });
+  const cmds = h('div', { class: 'ai-cmds', hidden: true });
+  let pick = 0;
+  const matches = () => { const v = input.value; return /^\/\S*$/.test(v) ? AI_COMMANDS.filter(c => c[0].startsWith(v.split(' ')[0])) : []; };
+  const drawCmds = () => {
+    const m = matches();
+    cmds.hidden = !m.length;
+    pick = Math.min(pick, Math.max(0, m.length - 1));
+    cmds.replaceChildren(...m.map(([c, a, d], i) => h('button', { class: 'menu-item' + (i === pick ? ' on' : ''), type: 'button', onclick: () => { input.value = c + (a ? ' ' : ''); drawCmds(); input.focus(); if (!a) aiSend(input.value); } },
+      h('b', { class: 'mono' }, c), a && h('span', { class: 'muted mono' }, a), h('span', { class: 'muted small ellipsis grow' }, d))));
+  };
+  const input = h('textarea', { rows: 2, placeholder: 'Ask about this project · / commands · enter sends, shift+enter a new line',
+    oninput: () => drawCmds(),
+    onkeydown: e => {
+      const m = matches();
+      if (m.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); pick = (pick + (e.key === 'ArrowDown' ? 1 : -1) + m.length) % m.length; drawCmds(); return; }
+      if (m.length && e.key === 'Tab') { e.preventDefault(); input.value = m[pick][0] + (m[pick][1] ? ' ' : ''); drawCmds(); return; }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (m.length && m[pick][0] !== input.value.trim() && !m.some(c => c[0] === input.value.trim())) { input.value = m[pick][0] + (m[pick][1] ? ' ' : ''); drawCmds(); if (m[pick][1]) return; }
+        aiSend(input.value); drawCmds();
+      }
+    } });
+  const ghost = aiAssist(input, () => 'a question or request for the assistant of the rig project ' + (S.info?.project || '') + ', on the screen ' + (pageOf(parseRoute().id)?.title || ''));
   const sessions = h('select', { 'aria-label': 'conversation', onchange: e => aiOpenSession(e.target.value) });
   const status = h('span', { class: 'muted small ellipsis' });
   const sendBtn = ibtn('send', () => aiState.busy ? aiState.ctrl?.abort() : aiSend(input.value), 'Send (enter)');
   const el = h('aside', { class: 'ai-panel' },
     h('div', { class: 'ai-h' }, icon('ai'), h('b', {}, 'Assistant'), sessions, h('span', { class: 'spacer' }),
       ibtn('plus', () => aiOpenSession(''), 'New conversation'), ibtn('settings', () => go('settings', { s: 'ai' }), 'AI settings'), ibtn('x', toggleAI, 'Close (esc)')),
-    status, msgs, pend, h('div', { class: 'ai-in' }, input, sendBtn));
+    status, msgs, pend, cmds, h('div', { class: 'ai-in' }, h('div', { class: 'grow col', style: { gap: '2px' } }, input, ghost), sendBtn));
+  edgeResize(el, 'ai', 420, w => { el.style.width = w + 'px'; document.documentElement.style.setProperty('--ai-w', w + 'px'); });
   aiEls = { el, msgs, pend, input, sessions, status, sendBtn };
   if (!aiState.info) aiLoadInfo(); else aiDraw();
   return el;
@@ -69,7 +91,9 @@ async function aiOpenSession(id) {
 // aiSend runs a turn; approvals the assistant asks for show above the input while it runs.
 async function aiSend(text) {
   text = String(text || '').trim();
-  if (!text || aiState.busy) return;
+  if (!text) return;
+  if (text.startsWith('/')) { if (aiEls) aiEls.input.value = ''; aiCommand(text); return; }
+  if (aiState.busy) return;
   if (!aiOpen) toggleAI();
   if (aiEls) aiEls.input.value = '';
   const me = { role: 'user', text }, bot = { role: 'assistant', text: '', tools: [], busy: true };
@@ -107,6 +131,40 @@ async function aiPending() {
 async function aiAnswer(id, ok, always = false) {
   try { await web('ai/approve', { id, ok, always }); } catch (e) { toast(e.message, 'bad'); }
   aiPending();
+}
+
+// AI_COMMANDS are the TUI chat's / commands.
+const AI_COMMANDS = [
+  ['/new', '', 'start a new conversation'], ['/sessions', '', 'pick a conversation'], ['/close', '', 'forget this conversation'], ['/stop', '', 'stop the running turn'],
+  ['/why', '<service or symptom>', 'gather an incident\'s logs, traces, metrics and changes; ask for its root cause and a fix'],
+  ['/connect', '', 'use your installed opencode or Claude Code'], ['/model', '', 'the chat\'s model'], ['/effort', '', 'the chat\'s reasoning level'], ['/fast', '', 'the model of completions while typing'],
+  ['/autocomplete', '', 'suggestions while typing: on or off'], ['/redact', '', 'masking of secrets in what the model sees: on or off'], ['/help', '', 'these commands'],
+];
+async function aiSet(k, v) {
+  try { const r = await web('ai/config', { [k]: v }); toast(k + ' ' + (v || 'default') + ' · ' + r.describe, 'ok'); aiState.info = null; aiEnabled = null; aiLoadInfo(); } catch (e) { toast(e.message, 'bad', 8000); }
+}
+async function aiCommand(line) {
+  const [cmd, ...rest] = line.split(/\s+/), arg = rest.join(' ');
+  const cfg = aiState.info?.config || {};
+  const note = text => { aiState.msgs.push({ role: 'assistant', text }); aiDraw(); };
+  switch (cmd) {
+    case '/new': return aiOpenSession('');
+    case '/stop': aiState.ctrl?.abort(); return;
+    case '/close':
+      if (aiState.busy) return toast('A turn is running: /stop first');
+      if (aiState.session) { try { await web('ai/close', { id: aiState.session }); } catch (e) { return toast(e.message, 'bad'); } }
+      aiState.info = null; await aiOpenSession(''); aiLoadInfo(); return toast('Conversation closed');
+    case '/sessions': aiEls?.sessions.focus(); aiEls?.sessions.showPicker?.(); return;
+    case '/why': if (!arg) return note('Say what to look into: /why checkout, /why 502s on the gateway'); return aiSend(`Why is this happening: ${arg}? Gather its logs, traces, metrics and recent changes, find the root cause and propose a fix. Do not change anything until I answer fix.`);
+    case '/connect': { const v = await ask('Connect', { label: 'backend', value: cfg.backend || '', choices: ['opencode', 'claude', ''] }); if (v != null) aiSet('backend', v); return; }
+    case '/model': case '/fast': { const k = cmd === '/fast' ? 'fast_model' : 'model'; const v = arg || await ask(cmd === '/fast' ? 'Completion model' : 'Chat model', { value: cfg[k] || '', placeholder: 'provider/model · empty: default' }); if (v != null) aiSet(k, v); return; }
+    case '/effort': { const v = arg || await ask('Reasoning level', { value: cfg.effort || '', choices: ['low', 'medium', 'high', 'max', ''] }); if (v != null) aiSet('effort', v); return; }
+    case '/autocomplete': return aiSet('autocomplete', cfg.autocomplete === 'false' ? 'true' : 'false');
+    case '/redact': return aiSet('redact', cfg.redact === 'false' ? 'true' : 'false');
+    case '/help': case '/?': return note(AI_COMMANDS.map(([c, a, d]) => `- \`${c}${a ? ' ' + a : ''}\` ${d}`).join('\n'));
+  }
+  const near = AI_COMMANDS.find(c => c[0].startsWith(cmd.slice(0, 3)));
+  note('Unknown command ' + cmd + '.' + (near ? ' Did you mean ' + near[0] + '?' : '') + ' /help lists them.');
 }
 
 // aiSettings is Settings' Assistant section: rig ai config, in a form.

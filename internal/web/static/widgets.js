@@ -214,7 +214,7 @@ function renderWidget(n, scope, st) {
   const tools = h('div', { class: 'row ptools' });
   const content = h('div', { class: 'pbody' });
   const panel = h('div', { class: 'panel vpanel' + (P(n, 'border') === false ? ' bare' : ''), style: sizeStyle(n) },
-    (title || w === 'table' || w === 'board') && h('div', { class: 'ph' }, h('span', { class: 'ellipsis' }, title || ''), status, h('span', { class: 'spacer' }), tools), content);
+    (title || w === 'table' || w === 'board' || w === 'terminal') && h('div', { class: 'ph' }, h('span', { class: 'ellipsis' }, title || ''), status, h('span', { class: 'spacer' }), tools), content);
   const ctl = { actions: (P(n, 'actions') || []).filter(usable), rows: () => [], row: () => null, marked: () => [], refresh: () => load() };
   if (!st.focus && (w === 'table' || w === 'board')) st.focus = ctl;
   panel.addEventListener('mousedown', () => { st.focus = ctl; });
@@ -238,7 +238,15 @@ function renderWidget(n, scope, st) {
   }[w];
   if (mk) draw = mk();
   else draw = f => content.replaceChildren(simpleWidget(w, n, f));
-  if (w === 'terminal') { content.replaceChildren(h('div', { class: 'card-b muted' }, 'A terminal runs in the terminal UI (rig): ', h('code', {}, [].concat(P(n, 'command') || '$SHELL').join(' ')))); return panel; }
+  if (w === 'terminal') {
+    const box = h('div', { class: 'term-host' });
+    // the PTY starts when the panel is clicked, so a view never spawns processes nobody looks at
+    const start = () => { box.replaceChildren(); scope.onCleanup(termView(box, { kind: 'command', command: P(n, 'command'), dir: P(n, 'dir'), env: P(n, 'env') }, { onExit: () => box.append(h('div', { class: 'muted small pad' }, 'exited · ', h('a', { href: '#', onclick: e => { e.preventDefault(); start(); } }, 'run again'))) })); };
+    box.append(h('button', { class: 'term-start', type: 'button', onclick: start }, icon('term'), h('code', {}, [].concat(P(n, 'command') || '$SHELL').join(' ')), h('span', { class: 'muted' }, 'click to start')));
+    content.replaceChildren(box);
+    tools.append(ibtn('ext', () => zoom(panel), 'Full screen', 'sm'));
+    return panel;
+  }
   if (!bind?.source) { draw(null); return panel; }
   if (!mk) content.replaceChildren(loading());
   if (P(n, 'stream')) {

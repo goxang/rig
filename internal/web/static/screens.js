@@ -6,7 +6,42 @@ function stateBadge(st) {
   return badge(st || 'unknown', cls, true);
 }
 const STATE_FILTERS = [['', 'All'], ['running', 'Running'], ['problem', 'Problems'], ['stopped', 'Stopped']];
-const stateClass = st => st === 'running' ? 'running' : ['failed', 'degraded', 'starting'].includes(st) ? 'problem' : 'stopped';
+// degraded still serves (some pods are up), so it counts as running and as a problem
+const isUp = r => r.state === 'running' || r.state === 'degraded' || (r.ready ?? 0) > 0;
+const inState = (r, f) => !f || (f === 'running' ? isUp(r) : f === 'problem' ? ['failed', 'degraded', 'starting'].includes(r.state) || (r.desired > 0 && r.ready < r.desired) : !isUp(r) && !['failed', 'starting'].includes(r.state));
+const ago = t => { const d = toDate(t); if (!t || isNaN(d) || d.getFullYear() < 2000) return ''; const s = (Date.now() - d) / 1000; return s < 60 ? Math.round(s) + 's' : s < 3600 ? Math.round(s / 60) + 'm' : s < 86400 ? (s / 3600).toFixed(1) + 'h' : Math.round(s / 86400) + 'd'; };
+function podDots(r) {
+  const ins = r.instances || [];
+  if (!ins.length) return '';
+  return h('span', { class: 'pods' }, ins.slice(0, 12).map(i => h('i', { class: 'pod ' + (i.ready ? 'ok' : i.state === 'failed' || /crash|error|backoff/i.test(i.state) ? 'bad' : 'wait'), title: `${i.id} · ${i.state}${i.restarts ? ' · ' + i.restarts + ' restarts' : ''}${i.host ? ' · ' + i.host : ''}` })), ins.length > 12 && h('span', { class: 'muted small' }, '+' + (ins.length - 12)));
+}
+// svcOps are what the TUI's service keys do, as menu items over one or more services.
+function svcOps(names, row, after = () => {}) {
+  const one = names.length === 1 ? names[0] : null, label = names.join(', ');
+  const run = (a, args, l) => act(a, args, l).then(after);
+  const scale = d => run('runtime.scale', { service: one, replicas: Math.max(0, (row?.desired ?? 1) + d) }, `scale ${one} to ${Math.max(0, (row?.desired ?? 1) + d)}`);
+  return [
+    one && { label: 'Open', icon: 'ext', key: 'enter', run: () => openService(one) },
+    { label: 'Start', icon: 'play', key: 's', run: () => run('env.up', { targets: names }, 'start ' + label) },
+    { label: 'Stop', icon: 'stop', key: 'x', run: () => run('env.down', { targets: names }, 'stop ' + label) },
+    { label: 'Restart', icon: 'restart', key: 'r', run: () => Promise.all(names.map(n => act('runtime.restart', { service: n }, 'restart ' + n))).then(after) },
+    { label: 'Logs', icon: 'logs', key: 'l', run: () => go('logs', { svc: names.join(',') }) },
+    one && '-',
+    one && { label: 'Scale up', icon: 'plus', key: '+', run: () => scale(1) },
+    one && { label: 'Scale down', key: '-', run: () => scale(-1), disabled: (row?.desired ?? 0) < 1 },
+    one && { label: 'Scale to…', run: async () => { const v = await ask('Replicas of ' + one, { value: row?.desired ?? 1 }); if (v != null && v !== '') run('runtime.scale', { service: one, replicas: +v }, `scale ${one} to ${v}`); } },
+    one && { label: 'Env vars', key: '$', run: () => openService(one, 'env') },
+    one && { label: 'Requests and limits', key: 'R', run: () => openService(one, 'resources') },
+    one && { label: 'Autoscaler', key: 'h', run: () => openService(one, 'autoscale') },
+    one && { label: 'Shell', icon: 'term', key: 'e', run: () => openTerminal(one, 'shell in ' + one, { kind: 'service', service: one }) },
+    '-',
+    { label: 'Deploy an image tag…', key: 'd', run: async () => { const t = await ask('Deploy ' + label, { label: 'image tag in the registry', placeholder: 'master-20261003' }); if (t) cliRun(`deploy ${names.join(' ')} -t ${t}`); } },
+    { label: 'Build, push and deploy', key: 'b', run: async () => { if (await confirmBox('Build ' + label, 'Build from the working tree, push and roll out.', 'Build')) cliRun(`deploy ${names.join(' ')} --build`); } },
+    { label: 'Metrics', icon: 'metrics', key: 'm', run: () => go('metrics') },
+    { label: 'Manifests', key: 'F', run: () => go('manifests') },
+    { label: 'Kill what holds its ports', key: 'K', danger: true, run: () => run('runtime.kill-ports', { services: names }, 'kill ports of ' + label) },
+  ];
+}
 function pageServices(ctx) {
   const marked = new Set(), closed = new Set(store.get('svc.closed', []));
   let rows = [], cursor = null, filterText = '', stateF = ctx.q.get('state') || '';
@@ -16,46 +51,46 @@ function pageServices(ctx) {
   const bulk = h('div', { class: 'bulk', hidden: true });
   const tables = new Map();
   const reload = () => load();
-  const svcAct = (verb, names) => names.length === 1 && verb !== 'start' && verb !== 'stop'
-    ? act('runtime.' + verb, { service: names[0] }, verb + ' ' + names[0]).then(reload)
-    : verb === 'start' ? act('env.up', { targets: names }, 'start ' + names.join(', ')).then(reload)
-      : verb === 'stop' ? act('env.down', { targets: names }, 'stop ' + names.join(', ')).then(reload)
-        : Promise.all(names.map(n => act('runtime.' + verb, { service: n }, verb + ' ' + n))).then(reload);
+  const rowOf = n => rows.find(r => r.service === n);
   const visible = () => sections.flatMap(s => closed.has(s.name) && !filterText ? [] : tables.get(s.name)?.visible || []);
   const targets = () => marked.size ? [...marked] : cursor ? [cursor] : [];
+  const ops = () => svcOps(targets(), rowOf(targets()[0]), reload);
   const columns = [
     { check: true, onchange: () => drawBulk() },
     { key: 'service', label: 'Service', render: r => h('span', { class: 'svc-name' }, r.service, r.role && !['service', 'app'].includes(r.role) && h('span', { class: 'muted small' }, ' ' + r.role)) },
     { key: 'state', label: 'State', render: r => stateBadge(r.state) },
-    { key: 'ready', label: 'Ready', num: true, render: r => h('span', { class: r.desired > 0 && r.ready < r.desired ? 'amber' : 'muted' }, `${r.ready ?? 0}/${r.desired ?? 0}`) },
+    { key: 'ready', label: 'Ready', num: true, sortBy: r => r.ready ?? 0, render: r => h('span', { class: r.desired > 0 && r.ready < r.desired ? 'amber' : 'muted' }, `${r.ready ?? 0}/${r.desired ?? 0}`) },
+    { key: 'pods', label: 'Pods', sort: false, render: podDots },
+    { key: 'restarts', label: 'Restarts', num: true, render: r => r.restarts ? h('span', { class: r.restarts > 3 ? 'red' : 'amber' }, r.restarts) : '' },
     { key: 'image', label: 'Image', cls: 'mono muted', render: r => h('span', { title: r.image }, shortImage(r.image)) },
     { key: 'message', label: '', cls: 'muted msg', render: r => h('span', { class: 'ellipsis', title: r.message }, firstLine(r.message)) },
     { act: true, label: '', render: r => h('div', { class: 'row hover-acts' },
-      ibtn('play', () => svcAct('start', [r.service]), 'Start (s)', 'sm'), ibtn('stop', () => svcAct('stop', [r.service]), 'Stop (x)', 'sm'),
-      ibtn('restart', () => svcAct('restart', [r.service]), 'Restart (r)', 'sm'), ibtn('logs', () => go('logs', { svc: r.service }), 'Logs (l)', 'sm')) },
+      ibtn('play', () => act('env.up', { targets: [r.service] }, 'start ' + r.service).then(reload), 'Start (s)', 'sm'), ibtn('stop', () => act('env.down', { targets: [r.service] }, 'stop ' + r.service).then(reload), 'Stop (x)', 'sm'),
+      ibtn('restart', () => act('runtime.restart', { service: r.service }, 'restart ' + r.service).then(reload), 'Restart (r)', 'sm'), ibtn('logs', () => go('logs', { svc: r.service }), 'Logs (l)', 'sm')) },
   ];
   function drawBulk() {
     bulk.hidden = !marked.size;
-    bulk.replaceChildren(h('b', {}, marked.size + ' marked'), h('span', { class: 'spacer' }),
-      btn([icon('play'), 'Start'], () => svcAct('start', [...marked]), 'sm'), btn([icon('stop'), 'Stop'], () => svcAct('stop', [...marked]), 'sm'),
-      btn([icon('restart'), 'Restart'], () => svcAct('restart', [...marked]), 'sm'), btn([icon('logs'), 'Logs'], () => go('logs', { svc: [...marked].join(',') }), 'sm'),
+    const items = svcOps([...marked], null, reload).filter(x => x && x !== '-' && ['s', 'x', 'r', 'l', 'd', 'b'].includes(x.key));
+    bulk.replaceChildren(h('b', {}, marked.size + ' marked'), h('span', { class: 'spacer' }), ...items.map(x => btn([x.icon && icon(x.icon), x.label.replace('…', '')], x.run, 'sm')),
       btn('Clear', () => { marked.clear(); tables.forEach(t => t.redraw()); drawBulk(); }, 'ghost sm'));
   }
   function draw() {
-    const shown = rows.filter(r => !stateF || stateClass(r.state) === stateF);
-    const count = c => rows.filter(r => stateClass(r.state) === c).length;
+    const shown = rows.filter(r => inState(r, stateF));
+    S.statusSection = Object.fromEntries(rows.map(r => [r.service, r.section]));
     summary.replaceChildren(...STATE_FILTERS.map(([v, l]) => h('button', { class: 'chip' + (stateF === v ? ' on' : ''), type: 'button', onclick: () => { stateF = v; history.replaceState(null, '', '#/services' + (v ? '?state=' + v : '')); draw(); } },
-      v && h('span', { class: 'dot', style: { background: { running: 'var(--green)', problem: 'var(--amber)', stopped: 'var(--dim)' }[v] } }), l, h('span', { class: 'n' }, v ? count(v) : rows.length))));
+      v && h('span', { class: 'dot', style: { background: { running: 'var(--green)', problem: 'var(--amber)', stopped: 'var(--dim)' }[v] } }), l, h('span', { class: 'n' }, v ? rows.filter(r => inState(r, v)).length : rows.length))));
     const groups = sections.map(s => ({ ...s, rows: shown.filter(r => (r.section || 'other') === s.name) })).filter(g => g.rows.length);
     const els = groups.map(g => {
       let t = tables.get(g.name);
       if (!t) {
-        t = dataTable({ columns, rowKey: r => r.service, selected: marked, onRow: r => { cursor = r.service; mark(); openService(r.service); }, rowClass: r => r.service === cursor ? 'cur' : '' });
+        t = dataTable({ columns, key: 'svc', rowKey: r => r.service, selected: marked, onRow: (r, e) => { cursor = r.service; mark(); if (e?.key === 'Enter' || e?.detail === 2) openService(r.service); },
+          menu: r => { cursor = r.service; mark(); return svcOps(marked.size && marked.has(r.service) ? [...marked] : [r.service], r, reload); }, rowClass: r => r.service === cursor ? 'cur' : '' });
+        t.el.addEventListener('dblclick', e => { const tr = e.target.closest('tbody tr'); const r = tr && t.visible[[...tr.parentNode.children].indexOf(tr)]; if (r && !e.target.closest('button,input')) openService(r.service); });
         tables.set(g.name, t);
       }
       t.update(g.rows);
-      if (filterText) t.filter(filterText);
-      const up = g.rows.filter(r => r.state === 'running').length, isClosed = closed.has(g.name) && !filterText;
+      t.filter(filterText);
+      const up = g.rows.filter(isUp).length, isClosed = closed.has(g.name) && !filterText;
       const names = g.rows.map(r => r.service);
       return h('section', { class: 'svc-group' + (isClosed ? ' closed' : ''), hidden: !!filterText && !t.visible.length },
         h('div', { class: 'svc-gh' },
@@ -64,10 +99,11 @@ function pageServices(ctx) {
           h('span', { class: 'spacer' }),
           h('span', { class: 'meter', title: `${up} of ${g.rows.length} running` }, h('i', { style: { width: 100 * up / g.rows.length + '%' } })),
           h('span', { class: 'muted small mono' }, `${up}/${g.rows.length}`),
-          h('div', { class: 'row hover-acts' }, ibtn('play', () => svcAct('start', names), 'Start the section', 'sm'), ibtn('stop', () => svcAct('stop', names), 'Stop the section', 'sm'), ibtn('logs', () => go('logs', { svc: names.join(',') }), 'The section\'s logs', 'sm'))),
+          h('div', { class: 'row hover-acts' }, ibtn('play', () => act('env.up', { targets: names }, 'start ' + g.name).then(reload), 'Start the section', 'sm'), ibtn('stop', () => act('env.down', { targets: names }, 'stop ' + g.name).then(reload), 'Stop the section', 'sm'), ibtn('logs', () => go('logs', { svc: names.join(',') }), 'The section\'s logs', 'sm'))),
         !isClosed && t.el);
     });
     body.replaceChildren(...els, ...(els.length ? [] : [emptyState(rows.length ? 'No service matches' : 'No services in this environment')]));
+    mark();
   }
   const mark = () => tables.forEach(t => t.el.querySelectorAll('tbody tr').forEach((tr, i) => tr.classList.toggle('cur', t.visible[i]?.service === cursor)));
   const load = poller(ctx, 3000, async () => {
@@ -75,67 +111,151 @@ function pageServices(ctx) {
     draw();
   });
   ctx.el.append(
-    pageHead('Services', `${S.info.project} on ${S.info.env}`,
-      searchBox('Filter services', v => { filterText = v; draw(); }),
+    pageHead('Services', `${S.info.project} on ${S.info.env} · right-click or . for a service's actions`,
+      searchBox('Filter services: ' + FILTER_HELP, v => { filterText = v; draw(); }),
       btn([icon('up'), 'Up'], () => act('env.up', { targets: filterText ? visible().map(r => r.service) : [] }, 'up').then(reload), 'primary', 'Deploy services and their dependencies'),
       btn([icon('down'), 'Down'], () => act('env.down', { targets: filterText ? visible().map(r => r.service) : [] }, 'down').then(reload), '', 'Stop services in reverse dependency order'),
       ibtn('refresh', reload, 'Refresh')),
     h('div', { class: 'toolbar' }, summary, h('span', { class: 'spacer' }), bulk), body);
   load();
-  ctx.menu([
-    { key: 's', label: 'Start', run: () => svcAct('start', targets()) }, { key: 'x', label: 'Stop', run: () => svcAct('stop', targets()) },
-    { key: 'r', label: 'Restart', run: () => svcAct('restart', targets()) }, { key: 'l', label: 'Logs', run: () => go('logs', { svc: targets().join(',') }) },
-    { key: 'u', label: 'Up everything', run: () => act('env.up', { targets: [] }, 'up').then(reload) }, { key: 'd', label: 'Down everything', run: () => act('env.down', { targets: [] }, 'down').then(reload) },
-  ]);
+  ctx.menu(() => targets().length ? ops().filter(Boolean) : [
+    { key: 'u', label: 'Up everything', run: () => act('env.up', { targets: [] }, 'up').then(reload) }, { key: 'D', label: 'Down everything', run: () => act('env.down', { targets: [] }, 'down').then(reload) }]);
   ctx.onKey(e => {
     const vis = visible(), i = vis.findIndex(r => r.service === cursor);
+    const moveTo = r => { cursor = r?.service ?? cursor; mark(); document.querySelector('.svc-groups tr.cur')?.scrollIntoView({ block: 'nearest' }); };
     switch (e.key) {
-      case 'ArrowDown': case 'j': cursor = vis[Math.min(vis.length - 1, i + 1)]?.service; mark(); return true;
-      case 'ArrowUp': case 'k': cursor = vis[Math.max(0, i - 1)]?.service; mark(); return true;
+      case 'ArrowDown': case 'j': moveTo(vis[Math.min(vis.length - 1, i + 1)]); return true;
+      case 'ArrowUp': case 'k': moveTo(vis[Math.max(0, i - 1)]); return true;
+      case 'Home': case 'g': moveTo(vis[0]); return true;
+      case 'End': case 'G': moveTo(vis.at(-1)); return true;
       case ' ': if (cursor) { marked.has(cursor) ? marked.delete(cursor) : marked.add(cursor); tables.forEach(t => t.redraw()); mark(); drawBulk(); } return true;
-      case 'Enter': if (cursor) openService(cursor); return true;
-      case 's': case 'x': case 'r': if (targets().length) svcAct({ s: 'start', x: 'stop', r: 'restart' }[e.key], targets()); return true;
-      case 'l': go('logs', { svc: targets().join(',') }); return true;
+      case 'Escape': if (marked.size) { marked.clear(); tables.forEach(t => t.redraw()); drawBulk(); return true; } return false;
     }
+    if (!targets().length) return false;
+    const hit = ops().find(x => x && x.key && (x.key === e.key || (x.key === 'enter' && e.key === 'Enter')));
+    if (hit && !hit.disabled) { hit.run(); return true; }
     return false;
   });
 }
 // brief is a spec struct's set fields as k: v, for a glance.
 const brief = o => o && Object.entries(o).filter(([, v]) => v != null && v !== '' && v !== false && !(Array.isArray(v) && !v.length)).map(([k, v]) => `${k.toLowerCase()}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
-function openService(name) {
+// openService is the TUI's service view: its pods, env vars, requests and limits, autoscaler and log.
+function openService(name, tab = 'pods') {
   const sp = specOf('service', name) || {};
   const ctrl = new AbortController();
-  const logs = h('div', { class: 'logs' });
+  let row = null;
   const status = h('div', {});
-  const replicas = h('input', { type: 'number', min: 0, value: 1, style: { width: '70px' } });
+  const pane = h('div', { class: 'svc-pane' });
   const ports = Object.entries(sp.Ports || {});
   const dd = (k, v) => v != null && v !== '' && (Array.isArray(v) ? v.length : true) ? [h('dt', {}, k), h('dd', {}, v)] : null;
-  const svcAct = a => act('runtime.' + a, { service: name }, a + ' ' + name).then(loadStatus);
+  const instCols = [
+    { key: 'id', label: 'Instance', cls: 'mono' }, { key: 'state', render: i => stateBadge(i.ready ? 'running' : i.state) }, { key: 'ready', render: i => i.ready ? '✓' : '✕' },
+    { key: 'restarts', num: true, render: i => i.restarts ? h('span', { class: 'amber' }, i.restarts) : '0' }, { key: 'started', label: 'Age', render: i => ago(i.started), sortBy: i => -toDate(i.started) },
+    { key: 'host', cls: 'muted' }, { key: 'ip', cls: 'mono muted' }, { key: 'cpu', num: true }, { key: 'memory', num: true }];
+  const instOps = i => [
+    { label: 'Its log', icon: 'logs', key: 'enter', run: () => { closeAll(); go('logs', { svc: name, i: i.id }); } },
+    { label: 'Shell', icon: 'term', key: 'e', run: () => openTerminal(i.id, 'shell in ' + name, { kind: 'service', service: name, instance: i.id }) },
+    { label: 'Copy the name', icon: 'copy', key: 'y', run: () => copy(i.id) }];
+  const inst = dataTable({ key: 'svc.inst', columns: instCols, empty: 'No instances: the service is not running', onRow: (i, e) => { if (e?.key === 'Enter' || e?.detail === 2) instOps(i)[0].run(); }, menu: i => instOps(i) });
+  const tabs = [['pods', 'Pods'], ['env', 'Env vars'], ['resources', 'Requests and limits'], ['autoscale', 'Autoscaler'], ['log', 'Log'], ['spec', 'Spec']];
+  const seg = h('div', { class: 'seg subtabs' });
+  const drawSeg = () => seg.replaceChildren(...tabs.map(([id, l]) => h('button', { class: id === tab ? 'on' : '', type: 'button', onclick: () => { tab = id; drawSeg(); drawPane(); } }, l)));
   async function loadStatus() {
     try {
-      const r = frameRows(await query('services.status', { services: [name] }))[0];
-      if (!r) return;
-      replicas.value = r.desired ?? 1;
-      status.replaceChildren(h('dl', { class: 'kv' }, dd('State', stateBadge(r.state)), dd('Ready', `${r.ready}/${r.desired}`), dd('Section', r.section), dd('Image', h('span', { class: 'mono' }, r.image)), dd('Message', r.message)));
-    } catch (e) { status.replaceChildren(h('div', { class: 'err' }, e.message)); }
+      row = frameRows(await query('services.status', { services: [name] }, ctrl.signal))[0];
+      if (!row) return;
+      status.replaceChildren(h('div', { class: 'row wrap svc-facts' }, stateBadge(row.state), h('span', {}, h('b', {}, `${row.ready ?? 0}/${row.desired ?? 0}`), ' ready'),
+        row.restarts ? h('span', { class: 'amber' }, row.restarts + ' restarts') : null, row.autoscale && h('span', { class: 'muted' }, `autoscale ${row.autoscale.min}-${row.autoscale.max}`),
+        h('span', { class: 'mono muted ellipsis', title: row.image }, row.image), row.message && h('span', { class: 'muted ellipsis' }, firstLine(row.message))));
+      inst.update(row.instances || []);
+    } catch (e) { if (e.name !== 'AbortError') status.replaceChildren(h('div', { class: 'err' }, e.message)); }
   }
-  drawer(name, sp.Help || sp.Description || 'service', [
-    h('div', { class: 'row wrap' },
-      btn([icon('play'), 'Start'], () => svcAct('start'), 'primary'), btn([icon('stop'), 'Stop'], () => svcAct('stop')),
-      btn([icon('restart'), 'Restart'], () => svcAct('restart')), h('span', { class: 'spacer' }),
-      h('span', { class: 'row' }, 'Replicas', replicas, btn('Scale', () => act('runtime.scale', { service: name, replicas: +replicas.value }, `scale ${name} to ${replicas.value}`).then(loadStatus), 'sm'))),
-    status,
-    h('dl', { class: 'kv' },
-      dd('Ports', ports.length ? h('span', { class: 'row wrap' }, ports.map(([k, p]) => h('a', { href: `http://localhost:${p}/`, target: '_blank', rel: 'noopener' }, `${k} ${p}`))) : null),
-      dd('Depends on', (sp.DependsOn || []).length ? h('span', { class: 'row wrap' }, sp.DependsOn.map(d => h('a', { href: '#', onclick: e => { e.preventDefault(); openService(d); } }, d))) : null),
-      dd('Health', brief(sp.Health)), dd('Build', brief(sp.Build))),
-    h('div', { class: 'row' }, h('b', {}, 'Live log'), h('span', { class: 'spacer' }), btn([icon('ext'), 'Open in Logs'], () => go('logs', { svc: name }), 'sm')),
-    logs,
-  ], () => ctrl.abort());
-  loadStatus();
-  const lv = logView(logs, { showService: false });
-  stream('services.logs', { services: [name], tail: 200 }, b => lv.push(frameRows(b.frame)), ctrl.signal)
-    .catch(e => { if (e.name !== 'AbortError') logs.append(h('div', { class: 'ln err' }, h('span', { class: 'msg' }, e.message))); });
+  let lv = null;
+  async function drawPane() {
+    if (tab !== 'log') { ctrl.logs?.abort(); lv = null; }
+    if (tab === 'pods') { pane.replaceChildren(h('div', { class: 'muted small' }, 'enter or dbl-click: the instance\'s log · right-click: shell and more'), inst.el); return; }
+    if (tab === 'spec') {
+      pane.replaceChildren(h('dl', { class: 'kv' },
+        dd('Ports', ports.length ? h('span', { class: 'row wrap' }, ports.map(([k, p]) => h('a', { href: `http://localhost:${p}/`, target: '_blank', rel: 'noopener' }, `${k} ${p}`))) : null),
+        dd('Depends on', (sp.DependsOn || []).length ? h('span', { class: 'row wrap' }, sp.DependsOn.map(d => h('a', { href: '#', onclick: e => { e.preventDefault(); openService(d); } }, d))) : null),
+        dd('Section', row?.section), dd('Health', brief(sp.Health)), dd('Build', brief(sp.Build))), jsonViewer(sp));
+      return;
+    }
+    if (tab === 'log') {
+      const box = h('div', { class: 'logs' });
+      pane.replaceChildren(h('div', { class: 'row' }, h('span', { class: 'spacer' }), btn([icon('ext'), 'Open in Logs'], () => { closeAll(); go('logs', { svc: name }); }, 'sm')), box);
+      lv = logView(box, { showService: false });
+      const c = ctrl.logs = new AbortController();
+      stream('services.logs', { services: [name], tail: 200 }, b => lv?.push(frameRows(b.frame)), c.signal)
+        .catch(e => { if (e.name !== 'AbortError') box.append(h('div', { class: 'ln err' }, h('span', { class: 'msg' }, e.message))); });
+      return;
+    }
+    pane.replaceChildren(loading());
+    try {
+      if (tab === 'env') pane.replaceChildren(await envEditor(name, ctrl.signal, loadStatus));
+      else if (tab === 'resources') pane.replaceChildren(await resourcesEditor(name, ctrl.signal));
+      else pane.replaceChildren(autoscaleEditor(name, row?.autoscale, loadStatus));
+    } catch (e) { if (e.name !== 'AbortError') pane.replaceChildren(errBox(e)); }
+  }
+  const timer = setInterval(() => !document.hidden && loadStatus(), 3000);
+  const d = drawer(name, sp.Help || sp.Description || 'service', [
+    h('div', { class: 'row wrap' }, svcOps([name], null, loadStatus).filter(x => x && x !== '-' && ['s', 'x', 'r', 'e', '+', '-'].includes(x.key))
+      .map(x => btn([x.icon && icon(x.icon), x.label], () => { const it = svcOps([name], row, loadStatus).find(y => y && y.key === x.key); it?.run(); }, x.key === 's' ? 'primary sm' : 'sm')),
+    h('span', { class: 'spacer' }), btn('More…', e => ctxMenu(e.currentTarget, svcOps([name], row, loadStatus).filter(x => x && x.key !== 'enter')), 'sm')),
+    status, seg, pane,
+  ], () => { clearInterval(timer); ctrl.abort(); ctrl.logs?.abort(); });
+  d.classList.add('wide');
+  d.addEventListener('keydown', e => {
+    if (e.target.closest('input,textarea,select')) return;
+    if (e.ctrlKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const i = tabs.findIndex(t => t[0] === tab); tab = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length][0]; drawSeg(); drawPane(); e.preventDefault(); return; }
+    if (tab === 'pods' && inst.keys(e)) { e.preventDefault(); e.stopPropagation(); }
+    else if (tab === 'log' && lv?.keys(e)) { e.preventDefault(); e.stopPropagation(); }
+  });
+  d.tabIndex = -1;
+  drawSeg();
+  loadStatus().then(drawPane);
+  setTimeout(() => d.focus(), 30);
+}
+async function envEditor(name, signal, after) {
+  const rows = frameRows(await query('services.env', { service: name }, signal));
+  const items = rows.map(r => ({ name: r.name, value: r.value, was: r.value, over: r.overridden }));
+  const tbody = h('tbody');
+  let filter = '';
+  const draw = () => tbody.replaceChildren(...items.filter(it => !it.gone && matchText(it.name + ' ' + it.value, filter)).map(it => h('tr', { class: it.value !== it.was ? 'changed' : '' },
+    h('td', {}, it.isNew ? h('input', { class: 'mono', value: it.name, placeholder: 'NAME', oninput: e => { it.name = e.target.value; } }) : h('span', { class: 'mono' }, it.name, it.over && h('span', { class: 'muted small' }, ' overridden'))),
+    h('td', { class: 'grow' }, h('input', { class: 'mono', value: it.value, style: { width: '100%' }, oninput: e => { it.value = e.target.value; e.target.closest('tr').classList.toggle('changed', it.value !== it.was); } })),
+    h('td', {}, ibtn('trash', () => { it.gone = true; draw(); }, 'Remove', 'sm')))));
+  draw();
+  const save = async () => {
+    const env = {};
+    for (const it of items) {
+      if (!it.name) continue;
+      if (it.gone) { if (!it.isNew) env[it.name] = ''; } else if (it.value !== it.was || it.isNew) env[it.name] = it.value;
+    }
+    if (!Object.keys(env).length) { toast('Nothing changed'); return; }
+    if (await act('runtime.set-env', { service: name, env }, 'env of ' + name)) { after?.(); }
+  };
+  return h('div', { class: 'col' },
+    h('div', { class: 'toolbar' }, searchBox('Filter variables', v => { filter = v; draw(); }), h('span', { class: 'muted small' }, rows.length + ' variables'), h('span', { class: 'spacer' }),
+      btn([icon('plus'), 'Add'], () => { items.unshift({ name: '', value: '', was: '', isNew: true }); draw(); tbody.querySelector('input')?.focus(); }, 'sm'), btn('Save and redeploy', save, 'primary sm')),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'env-t' }, h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Value'), h('th'))), tbody)));
+}
+async function resourcesEditor(name, signal) {
+  const rows = frameRows(await query('services.resources', { service: name }, signal));
+  if (!rows.length) return emptyState('No containers', 'This runtime does not report requests and limits');
+  const keys = [['cpu_request', 'CPU request', '100m'], ['cpu_limit', 'CPU limit', '500m'], ['mem_request', 'Memory request', '128Mi'], ['mem_limit', 'Memory limit', '512Mi']];
+  return h('div', { class: 'col' }, rows.map(r => {
+    const inputs = Object.fromEntries(keys.map(([k, , ph]) => [k, h('input', { class: 'mono', value: r[k] || '', placeholder: ph })]));
+    return h('div', { class: 'card card-b col' }, h('div', { class: 'row' }, h('b', {}, r.container), h('span', { class: 'spacer' }),
+      btn('Apply', () => act('runtime.set-resources', { service: name, container: r.container, ...Object.fromEntries(keys.map(([k]) => [k, inputs[k].value])) }, 'resources of ' + name), 'primary sm')),
+    h('div', { class: 'params' }, keys.map(([k, l]) => h('label', { class: 'field' }, l, inputs[k]))));
+  }), h('div', { class: 'muted small' }, 'Applying restarts the pods.'));
+}
+function autoscaleEditor(name, cur, after) {
+  const f = Object.fromEntries([['min', 1], ['max', 3], ['cpu', ''], ['memory', '']].map(([k, d]) => [k, h('input', { type: 'number', min: 0, value: cur?.[k] || d, placeholder: k === 'cpu' || k === 'memory' ? 'target % (optional)' : '' })]));
+  return h('div', { class: 'card card-b col' }, h('div', { class: 'muted' }, cur ? `The autoscaler keeps ${cur.min} to ${cur.max} replicas.` : 'No autoscaler yet: saving creates one on cpu or memory utilization.'),
+    h('div', { class: 'params' }, [['min', 'Min replicas'], ['max', 'Max replicas'], ['cpu', 'CPU target %'], ['memory', 'Memory target %']].map(([k, l]) => h('label', { class: 'field' }, l, f[k]))),
+    h('div', { class: 'row' }, h('span', { class: 'spacer' }), btn('Save', async () => { if (await act('runtime.autoscale', { service: name, ...Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value])) }, 'autoscale ' + name)) after?.(); }, 'primary sm')));
 }
 
 // ---------- shared pieces ----------
@@ -144,27 +264,40 @@ function sideList(items, cur, onPick, { label = x => x.name, sub = x => x.sub, k
   return h('div', { class: 'card list side-list' }, items.map(x => h('div', { class: 'item' + (x[key] === cur ? ' sel' : ''), onclick: () => onPick(x) },
     h('div', { class: 'n' }, label(x)), sub(x) && h('div', { class: 'd' }, sub(x)))));
 }
+// resultTable is a frame with its row count, filter, copy buttons, inspect (enter, dbl-click) and a row menu.
 function resultTable(f, opts = {}) {
-  const rows = frameRows(f), cols = (f?.fields || []).map(c => c.name), t = frameTable(f, opts);
-  return h('div', {}, h('div', { class: 'toolbar' }, h('b', {}, rows.length + ' rows'), f?.meta?.notice && h('span', { class: 'muted' }, f.meta.notice), h('span', { class: 'spacer' }),
-    searchBox('Filter rows', v => t.filter(v)), btn([icon('copy'), 'CSV'], () => copy(toCSV(rows, cols)), 'sm'), btn([icon('copy'), 'JSON'], () => copy(JSON.stringify(rows, null, 2)), 'sm')), t.el);
+  const rows = frameRows(f), cols = (f?.fields || []).map(c => c.name);
+  let t;
+  t = frameTable(f, { onRow: (r, e) => { if (e?.key === 'Enter') inspectRow(r); }, menu: (r, e) => rowMenu(r, cols, t, e), key: opts.key, ...opts });
+  t.el.addEventListener('dblclick', e => { const tr = e.target.closest('tbody tr'); if (tr) inspectRow(t.visible[[...tr.parentNode.children].indexOf(tr)]); });
+  const box = h('div', { class: 'result-box' }, h('div', { class: 'toolbar' }, h('b', {}, rows.length + ' rows'), f?.meta?.notice && h('span', { class: 'muted' }, f.meta.notice), h('span', { class: 'spacer' }),
+    searchBox('Filter rows: ' + FILTER_HELP, v => t.filter(v)), btn([icon('copy'), 'CSV'], () => copy(toCSV(t.visible, cols)), 'sm'), btn([icon('copy'), 'JSON'], () => copy(JSON.stringify(t.visible, null, 2)), 'sm')), t.el);
+  box.table = t;
+  return box;
 }
+const isJSON = v => { if (typeof v !== 'string' || !/^\s*[{[]/.test(v)) return false; try { JSON.parse(v); return true; } catch { return false; } };
 const has = (c, cap) => String(c?.caps || '').split(' ').includes(cap);
 
 // ---------- data: browse, query, queues ----------
 function pageData(ctx) {
   let comps = [], cur = ctx.rest[0], path = ctx.rest.slice(1), tab = store.get('data.tab', 'browse');
-  const left = h('div', {}, loading()), right = h('div', { class: 'grow' });
-  ctx.el.append(pageHead('Data', 'Databases, caches and brokers: browse, query, edit, peek'), h('div', { class: 'split' }, left, right));
+  const left = h('div', { class: 'side-col' }, loading()), right = h('div', { class: 'grow' });
+  let list = null;
+  ctx.el.append(pageHead('Data', 'Databases, caches and brokers: browse, query, edit, peek · ctrl+← → switches the tab'), splitPane(left, right, { key: 'data.side', size: 260 }));
   const place = () => history.replaceState(null, '', '#/data' + (cur ? '/' + [cur, ...path].map(encodeURIComponent).join('/') : ''));
   query('components').then(f => {
-    comps = frameRows(f).filter(c => /browse|query|queues/.test(c.caps || ''));
+    comps = frameRows(f).filter(c => /browse|query|queues|actions/.test(c.caps || ''));
     if (!comps.length) { left.replaceChildren(); right.replaceChildren(emptyState('No database, cache or broker', 'Components rig.yaml names show here')); return; }
     if (!comps.some(c => c.name === cur)) { cur = store.get('data.cur', comps[0].name); if (!comps.some(c => c.name === cur)) cur = comps[0].name; path = []; }
     drawLeft(); drawRight();
   }, e => left.replaceChildren(errBox(e)));
-  const drawLeft = () => left.replaceChildren(sideList(comps, cur, c => { cur = c.name; path = []; store.set('data.cur', cur); drawLeft(); drawRight(); },
-    { sub: c => [c.kind, c.type].filter(Boolean).join(' · ') }));
+  const drawLeft = () => {
+    list = groupedList({ groups: group(comps, c => c.kind || '', { title: k => k || 'other' }), key: 'data', cur, id: c => c.name, text: c => c.name + ' ' + c.type + ' ' + c.kind,
+      render: c => [h('div', { class: 'n' }, h('span', { class: 'ellipsis' }, c.name), c.type && h('span', { class: 'tag' }, c.type)), h('div', { class: 'd' }, (c.caps || '').split(' ').filter(x => x !== 'inspect').join(' · '))],
+      onPick: c => { cur = c.name; path = []; store.set('data.cur', cur); drawRight(); } });
+    left.replaceChildren(list.el);
+  };
+  ctx.subTab = d => { const b = [...right.querySelectorAll('.subtabs button')], i = b.findIndex(x => x.classList.contains('on')); b[(i + d + b.length) % b.length]?.click(); };
   function drawRight() {
     place();
     const c = comps.find(x => x.name === cur);
@@ -183,7 +316,8 @@ function pageData(ctx) {
     try { f = await query('data.browse', { component: c.name, path }); } catch (e) { box.replaceChildren(errBox(e)); return; }
     const leaf = f.name === 'leaf', rows = frameRows(f), first = f.fields?.[0]?.name;
     if (!leaf) {
-      const t = frameTable(f, { onRow: r => { path = [...path, String(r[first])]; drawRight(); }, empty: 'Empty' });
+      const t = frameTable(f, { key: 'data.nav', onRow: r => { path = [...path, String(r[first])]; drawRight(); }, empty: 'Empty' });
+      cursorTable = t;
       box.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, rows.length + ' items'), h('span', { class: 'spacer' }), searchBox('Filter', v => t.filter(v)),
         path.length > 0 && btn([icon('back'), 'Up'], () => { path = path.slice(0, -1); drawRight(); }, 'sm')), t.el);
       return;
@@ -197,7 +331,11 @@ function pageData(ctx) {
         if (v == null) return;
         if (await act('data.set', { component: c.name, path, row: idx.get(r), column: fl.name, value: v }, 'set ' + fl.name)) drawRight();
       } }, fmtCell(r[fl.name], fl)) : null }));
-    const t = dataTable({ columns: [editable && { check: true, onchange: () => del.hidden = !sel.size }, ...cols].filter(Boolean), rowKey: r => idx.get(r), selected: sel, empty: 'No rows' });
+    const t = dataTable({ key: 'data.' + c.name + '.' + path.join('.'), columns: [editable && { check: true, onchange: () => del.hidden = !sel.size }, ...cols].filter(Boolean), rowKey: r => idx.get(r), selected: sel, empty: 'No rows',
+      onRow: (r, e) => { if (e?.key === 'Enter') inspectRow(r, path.join('/')); }, menu: (r, e) => [...rowMenu(r, cols.map(x => x.key), t, e),
+        editable && '-', editable && { label: 'Delete the row', icon: 'trash', danger: true, run: async () => { if (await confirmBox('Delete a row', [c.name, ...path].join('/'), 'Delete', true) && await act('data.delete', { component: c.name, path, rows: [String(idx.get(r))] }, 'delete a row')) drawRight(); } }] });
+    cursorTable = t;
+    t.el.addEventListener('dblclick', e => { if (editable) return; const tr = e.target.closest('tbody tr'); if (tr) inspectRow(t.visible[[...tr.parentNode.children].indexOf(tr)], path.join('/')); });
     t.update(rows);
     const del = btn([icon('trash'), 'Delete marked'], async () => {
       if (!await confirmBox('Delete rows', `${sel.size} rows of ${[c.name, ...path].join('/')}`, 'Delete', true)) return;
@@ -210,15 +348,16 @@ function pageData(ctx) {
   }
   function queryPane(pane, c) {
     const key = 'data.q.' + c.name;
-    const ta = h('textarea', { rows: 5, class: 'mono', placeholder: (c.language || 'query') + (path.length ? ' at ' + path.join('/') : '') + ' · ctrl+enter runs', spellcheck: false }, store.get(key, ''));
+    const ta = h('textarea', { rows: 5, class: 'mono', placeholder: (c.language || 'query') + ' for ' + c.name + (path.length ? ' at ' + path.join('/') : '') + ' · ctrl+enter runs · tab takes the AI\'s completion · @? describe it', spellcheck: false }, store.get(key, ''));
+    const ghost = aiAssist(ta, () => `a ${c.language || 'query'} for ${c.name} (${c.type})` + (path.length ? ' on ' + path.join('/') : ''));
     const res = h('div', {});
     const run = async () => {
       store.set(key, ta.value);
       res.replaceChildren(loading());
-      try { res.replaceChildren(resultTable(await query('data.query', { component: c.name, query: ta.value, path }))); } catch (e) { res.replaceChildren(errBox(e)); }
+      try { res.replaceChildren(resultTable(await query('data.query', { component: c.name, query: ta.value, path }), { key: 'dq.' + c.name })); } catch (e) { res.replaceChildren(errBox(e)); }
     };
     ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); } });
-    pane.replaceChildren(h('div', { class: 'card card-b col' }, ta, h('div', { class: 'row' }, path.length > 0 && h('span', { class: 'muted' }, 'at ' + path.join('/')), h('span', { class: 'spacer' }),
+    pane.replaceChildren(h('div', { class: 'card card-b col' }, ta, ghost, h('div', { class: 'row' }, path.length > 0 && h('span', { class: 'muted' }, 'at ' + path.join('/')), h('span', { class: 'spacer' }),
       has(c, 'suggest') && path.length > 0 && btn('Suggest', async () => { try { ta.value = frameRows(await query('data.suggest', { component: c.name, path }))[0]?.query || ta.value; } catch (e) { toast(e.message, 'bad'); } }, 'sm'),
       btn([icon('play'), 'Run'], run, 'primary'))), res);
     ta.focus();
@@ -227,7 +366,8 @@ function pageData(ctx) {
     pane.replaceChildren(loading());
     let f;
     try { f = await query('data.queues', { component: c.name }); } catch (e) { pane.replaceChildren(errBox(e)); return; }
-    const t = frameTable(f, { onRow: r => peek(c, r.queue), empty: 'No queues' });
+    const t = frameTable(f, { key: 'data.queues', onRow: r => peek(c, r.queue), empty: 'No queues', menu: r => [{ label: 'Peek', key: 'enter', run: () => peek(c, r.queue) }, { label: 'Purge', icon: 'trash', danger: true, run: async () => { if (await act('data.purge', { component: c.name, queue: r.queue }, 'purge ' + r.queue)) drawRight(); } }] });
+    cursorTable = t;
     pane.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, frameRows(f).length + ' queues'), h('span', { class: 'muted' }, 'click a queue to peek'), h('span', { class: 'spacer' }), searchBox('Filter', v => t.filter(v)), ibtn('refresh', () => drawRight(), 'Refresh')), t.el);
   }
   function peek(c, q) {
@@ -236,26 +376,44 @@ function pageData(ctx) {
       h('span', { class: 'spacer' }), btn('Settings', async () => { try { box.replaceChildren(resultTable(await query('data.peek', { component: c.name, queue: q, detail: 'info' }))); } catch (e) { box.replaceChildren(errBox(e)); } }, 'sm')), box]).classList.add('wide');
     query('data.peek', { component: c.name, queue: q, n: 50 }).then(f => box.replaceChildren(resultTable(f)), e => box.replaceChildren(errBox(e)));
   }
-  ctx.onKey(e => { if (e.key === 'Backspace' && path.length && tab === 'browse') { path = path.slice(0, -1); drawRight(); return true; } return false; });
+  let cursorTable = null;
+  ctx.onKey(e => {
+    if ((e.key === 'Backspace' || e.key === 'Escape') && path.length && tab === 'browse') { path = path.slice(0, -1); drawRight(); return true; }
+    if (cursorTable?.el.isConnected && cursorTable.keys(e)) return true;
+    return list?.keys(e) || false;
+  });
 }
-// compActions lists what an adapter can do beyond the screens (rig do).
+// compActions lists what an adapter can do beyond the screens (rig do), each with its arguments and last result in place.
 async function compActions(pane, c) {
   pane.replaceChildren(loading());
   let rows;
   try { rows = frameRows(await query('component.actions', { component: c.name })); } catch (e) { pane.replaceChildren(errBox(e)); return; }
-  pane.replaceChildren(h('div', { class: 'card list' }, rows.map(r => h('div', { class: 'item row' }, h('div', { class: 'grow' }, h('div', { class: 'n mono' }, r.name, r.mutate && badge('changes', 'amber')), h('div', { class: 'd' }, r.help)),
-    btn([icon('play'), 'Run'], async () => {
-      const a = await ask(c.name + ' ' + r.name, { label: 'arguments, space separated (optional)' });
-      if (a == null) return;
-      act('component.do', { component: c.name, action: r.name, args: a.split(/\s+/).filter(Boolean) }, c.name + ' ' + r.name);
-    }, 'sm')))));
+  if (!rows.length) { pane.replaceChildren(emptyState('No actions', c.name + ' offers none')); return; }
+  let filter = '';
+  const list = h('div', { class: 'col acts' });
+  const draw = () => list.replaceChildren(...group(rows.filter(r => matchText(r.name + ' ' + (r.help || ''), filter)), r => r.mutate ? 'changes' : 'reads', { sort: false })
+    .sort((a, b) => a.id.localeCompare(b.id)).map(g => h('section', { class: 'card' }, h('div', { class: 'card-h' }, g.id === 'reads' ? 'Reads' : 'Changes', h('span', { class: 'muted small', style: { fontWeight: 400 } }, g.items.length)),
+      h('div', { class: 'act-list' }, g.items.map(r => {
+        const args = h('input', { class: 'mono', placeholder: 'arguments (optional)', onkeydown: e => { if (e.key === 'Enter') run(); } });
+        const out = h('div', {});
+        const run = async () => {
+          out.replaceChildren(loading());
+          const res = await act('component.do', { component: c.name, action: r.name, args: args.value.split(/\s+/).filter(Boolean) }, c.name + ' ' + r.name);
+          out.replaceChildren(res ? runResult(res) : '');
+        };
+        return h('div', { class: 'act-row' }, h('div', { class: 'row' }, h('div', { class: 'grow' }, h('div', { class: 'mono' }, h('b', {}, r.name), r.mutate && badge('changes', 'amber')), r.help && h('div', { class: 'muted small' }, r.help)),
+          args, btn([icon('play'), 'Run'], run, r.mutate ? 'sm' : 'primary sm')), out);
+      })))));
+  pane.replaceChildren(h('div', { class: 'toolbar' }, searchBox('Filter actions', v => { filter = v; draw(); }), h('span', { class: 'muted small' }, rows.length + ' actions')), list);
+  draw();
 }
 
 // ---------- kv ----------
 function pageKV(ctx) {
   let comps = [], cur = ctx.rest[0], prefix = ctx.q.get('prefix') || '';
-  const left = h('div', {}, loading()), right = h('div', { class: 'grow' });
-  ctx.el.append(pageHead('KV', 'Config stores: keys under a prefix'), h('div', { class: 'split' }, left, right));
+  const left = h('div', { class: 'side-col' }, loading()), right = h('div', { class: 'grow' });
+  let table = null;
+  ctx.el.append(pageHead('KV', 'Config stores: keys under a prefix · filter matches keys and values · enter edits'), splitPane(left, right, { key: 'kv.side', size: 220 }));
   query('components').then(f => {
     comps = frameRows(f).filter(c => c.kind === 'kv');
     if (!comps.length) { left.replaceChildren(); right.replaceChildren(emptyState('No config store', 'A kv component (consul, etcd) shows here')); return; }
@@ -263,6 +421,7 @@ function pageKV(ctx) {
     drawLeft(); draw();
   }, e => left.replaceChildren(errBox(e)));
   const drawLeft = () => left.replaceChildren(sideList(comps, cur, c => { cur = c.name; prefix = ''; drawLeft(); draw(); }, { sub: c => c.type }));
+  ctx.onKey(e => table?.el.isConnected ? table.keys(e) : false);
   const sel = new Set();
   async function draw() {
     history.replaceState(null, '', '#/kv/' + encodeURIComponent(cur) + (prefix ? '?prefix=' + encodeURIComponent(prefix) : ''));
@@ -275,10 +434,25 @@ function pageKV(ctx) {
     sel.clear();
     const del = btn([icon('trash'), 'Delete marked'], async () => { if (await act('kv.delete', { component: cur, keys: [...sel] }, 'delete ' + sel.size + ' keys')) draw(); }, 'danger sm');
     del.hidden = true;
-    const t = dataTable({ rowKey: r => r.key, selected: sel, onRow: r => put(r.key, r.value), empty: 'No keys',
-      columns: [{ check: true, onchange: () => del.hidden = !sel.size }, { key: 'key', cls: 'mono' }, { key: 'value', cls: 'mono muted', render: r => h('span', { class: 'ellipsis' }, firstLine(r.value)) }, { key: 'size', num: true }] });
+    const t = table = dataTable({ key: 'kv', rowKey: r => r.key, selected: sel, onRow: (r, e) => { if (e?.key === 'Enter' || e?.detail === 2) edit(r); }, empty: 'No keys',
+      menu: r => [{ label: 'Edit', icon: 'edit', key: 'enter', run: () => edit(r) }, { label: 'Copy the key', icon: 'copy', run: () => copy(r.key) }, { label: 'Copy the value', icon: 'copy', run: () => copy(r.value) },
+        String(r.key).endsWith('/') && { label: 'List under it', run: () => { prefix = r.key; draw(); } },
+        '-', { label: 'Delete', icon: 'trash', danger: true, run: async () => { if (await confirmBox('Delete ' + r.key, cur, 'Delete', true) && await act('kv.delete', { component: cur, keys: [r.key] }, 'delete ' + r.key)) draw(); } }],
+      columns: [{ check: true, onchange: () => del.hidden = !sel.size }, { key: 'key', cls: 'mono' }, { key: 'value', cls: 'mono muted', render: r => h('span', { class: 'ellipsis' }, isJSON(r.value) && h('span', { class: 'tag' }, 'json'), firstLine(r.value)) }, { key: 'size', num: true }] });
     t.update(frameRows(f));
     box.replaceChildren(h('div', { class: 'toolbar' }, h('b', {}, t.visible.length + ' keys'), h('span', { class: 'muted' }, 'click a key to edit'), h('span', { class: 'spacer' }), del, searchBox('Filter', v => t.filter(v))), t.el);
+  }
+  // edit opens a value: JSON as an editable tree beside its raw text, anything else as text.
+  function edit(r) {
+    let v = r.value;
+    const ta = h('textarea', { class: 'mono', rows: 16, spellcheck: false }, isJSON(v) ? JSON.stringify(JSON.parse(v), null, 2) : v);
+    const treeBox = h('div', {});
+    const drawTree = () => { if (!isJSON(ta.value)) { treeBox.replaceChildren(); return; } treeBox.replaceChildren(jsonViewer(JSON.parse(ta.value), { onEdit: val => { ta.value = JSON.stringify(val, null, 2); } })); };
+    ta.addEventListener('input', debounce(drawTree, 300));
+    drawTree();
+    const save = async () => { if (await act('kv.put', { component: cur, key: r.key, value: isJSON(ta.value) && isJSON(v) && !/\n/.test(v) ? JSON.stringify(JSON.parse(ta.value)) : ta.value }, 'put ' + r.key)) { d.close(); draw(); } };
+    const d = drawer(r.key, cur + ' · right-click a JSON field to edit, add or delete it', [h('div', { class: 'row' }, h('span', { class: 'spacer' }), btn([icon('copy'), 'Copy'], () => copy(ta.value), 'sm'), btn('Save', save, 'primary sm')), treeBox, h('label', { class: 'field' }, 'Value', ta)]);
+    d.classList.add('wide');
   }
   async function put(key, value) {
     const k = key && !key.endsWith('/') ? key : await ask('Put a key', { label: 'key', value: key });
@@ -336,40 +510,128 @@ async function openTrace(id, title) {
 }
 
 // ---------- load ----------
+// Each generator is polled on its own, so a slow one never holds the rest; history stays in the page for the charts.
 function pageLoad(ctx) {
-  const box = h('div', { class: 'grid cards' }, loading());
-  ctx.el.append(pageHead('Load', 'Load generators: rate, latency, errors', ibtn('refresh', () => load(), 'Refresh')), box);
-  const doAct = (a, args, label) => act(a, args, label).then(() => load());
-  const load = poller(ctx, 3000, async () => {
-    let rows;
-    try { rows = frameRows(await query('load.status')); } catch (e) { box.replaceChildren(errBox(e)); return; }
-    if (!rows.length) { box.replaceChildren(emptyState('No load generator', 'A load component (k6, vegeta) shows here')); return; }
-    box.replaceChildren(...rows.map(r => h('div', { class: 'card card-b col' },
-      h('div', { class: 'row' }, h('b', {}, r.name), r.running ? badge('running', 'green', true) : badge('idle', ''), h('span', { class: 'spacer' }),
-        r.running ? btn([icon('stop'), 'Stop'], () => doAct('load.stop', { component: r.name }, 'stop ' + r.name), 'sm') : btn([icon('play'), 'Start'], () => doAct('load.start', { component: r.name }, 'start ' + r.name), 'primary sm')),
-      r.error && h('div', { class: 'err small' }, r.error),
-      h('div', { class: 'stats-row' }, [['rate', fmtNum(r.rate) + '/s'], ['sent', fmtNum(r.sent)], ['failed', fmtNum(r.failed)], ['p50', fmtMs((r.p50 || 0) * 1000)], ['p95', fmtMs((r.p95 || 0) * 1000)], ['p99', fmtMs((r.p99 || 0) * 1000)]]
-        .map(([k, v]) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' + (k === 'failed' && r.failed ? ' red' : '') }, v)))),
-      h('div', { class: 'row' }, btn('Rate…', async () => { const v = await ask('Rate of ' + r.name, { label: 'requests per second', value: r.rate || '' }); if (v) doAct('load.rate', { component: r.name, rps: v }, 'rate ' + v); }, 'sm'),
-        r.replicas != null && btn(`Replicas ${r.replicas}…`, async () => { const v = await ask('Replicas of ' + r.name, { value: r.replicas }); if (v) doAct('load.replicas', { component: r.name, replicas: +v }, 'replicas ' + v); }, 'sm')))));
+  let names = (frameRowsCache.components || []).filter(c => c.kind === 'load').map(c => c.name);
+  const box = h('div', { class: 'load-grid' });
+  const cards = new Map(), hist = new Map();
+  let cur = store.get('load.cur', '');
+  ctx.el.append(pageHead('Load', 'Load generators: the rate they send, latency and failures · s/x start/stop, +/- rate, [ ] instances', ibtn('refresh', () => pollAll(), 'Refresh')), box);
+  const doAct = (a, args, label) => act(a, args, label).then(() => poll(args.component));
+  const ops = r => r && [
+    r.running ? { label: 'Stop', icon: 'stop', key: 'x', run: () => doAct('load.stop', { component: r.name }, 'stop ' + r.name) } : { label: 'Start', icon: 'play', key: 's', run: () => doAct('load.start', { component: r.name }, 'start ' + r.name) },
+    { label: 'Raise the rate', icon: 'plus', key: '+', run: () => doAct('load.rate', { component: r.name, rps: String(Math.round((r.rate || 0) * 1.25 + 1)) }, 'rate ' + r.name) },
+    { label: 'Lower the rate', key: '-', run: () => doAct('load.rate', { component: r.name, rps: String(Math.max(0, Math.round((r.rate || 0) * 0.8))) }, 'rate ' + r.name) },
+    { label: 'Set the rate…', key: 'r', run: async () => { const v = await ask('Rate of ' + r.name, { label: 'requests per second', value: r.rate || '' }); if (v) doAct('load.rate', { component: r.name, rps: v }, 'rate ' + v); } },
+    r.replicas != null && { label: 'More instances', key: ']', run: () => doAct('load.replicas', { component: r.name, replicas: r.replicas + 1 }, 'instances ' + r.name) },
+    r.replicas != null && { label: 'Fewer instances', key: '[', run: () => doAct('load.replicas', { component: r.name, replicas: Math.max(0, r.replicas - 1) }, 'instances ' + r.name) },
+    r.replicas != null && { label: 'Set instances…', key: 'R', run: async () => { const v = await ask('Instances of ' + r.name, { value: r.replicas }); if (v) doAct('load.replicas', { component: r.name, replicas: +v }, 'instances ' + v); } },
+    { label: 'Restart', icon: 'restart', key: 'b', run: async () => { await act('load.stop', { component: r.name }, 'stop ' + r.name); doAct('load.start', { component: r.name }, 'start ' + r.name); } },
+    { label: 'Chart full size', icon: 'ext', key: 'z', run: () => zoom(cards.get(r.name)?.el) },
+  ];
+  function card(name) {
+    let c = cards.get(name);
+    if (c) return c;
+    const el = h('div', { class: 'card load-card', tabindex: '0', onclick: () => select(name) });
+    c = { el, head: h('div', { class: 'row' }), stats: h('div', { class: 'stats-row' }, h('span', { class: 'spin' })), charts: h('div', { class: 'load-charts' }), row: null };
+    const rateBox = h('div', { class: 'chart-h' }), latBox = h('div', { class: 'chart-h' });
+    c.charts.append(h('div', {}, h('div', { class: 'muted small' }, 'requests/s'), rateBox), h('div', {}, h('div', { class: 'muted small' }, 'latency'), latBox));
+    c.rateBox = rateBox; c.latBox = latBox;
+    el.append(h('div', { class: 'card-b col' }, c.head, c.stats, c.charts));
+    onMenu(el, () => { select(name); return ops(c.row); });
+    cards.set(name, c);
+    return c;
+  }
+  const select = n => { cur = n; store.set('load.cur', n); cards.forEach((c, k) => c.el.classList.toggle('sel', k === n)); };
+  function drawCard(r) {
+    const c = card(r.name);
+    c.row = r;
+    const hs = hist.get(r.name) || []; hist.set(r.name, hs);
+    const now = Date.now(), prev = hs.at(-1);
+    const sent = prev && now > prev.t ? Math.max(0, (r.sent - prev.sent) / ((now - prev.t) / 1000)) : null;
+    const failed = prev && now > prev.t ? Math.max(0, (r.failed - prev.failed) / ((now - prev.t) / 1000)) : null;
+    hs.push({ t: now, sent: r.sent || 0, failed: r.failed || 0, rps: sent, fps: failed, p50: r.p50 || 0, p95: r.p95 || 0, p99: r.p99 || 0 });
+    if (hs.length > 600) hs.shift();
+    c.head.replaceChildren(h('b', {}, r.name), r.running ? badge('running', 'green pulse', true) : badge('idle', ''), r.replicas != null && h('span', { class: 'muted small' }, r.replicas + ' instances'), h('span', { class: 'spacer' }),
+      ...ops(r).filter(x => x && ['s', 'x', 'r'].includes(x.key)).map(x => btn([x.icon && icon(x.icon), x.label], e => { e.stopPropagation(); x.run(); }, x.key === 's' ? 'primary sm' : 'sm')),
+      ibtn('ext', e => { e.stopPropagation(); zoom(c.el, () => setTimeout(() => drawCharts(r.name), 30)); }, 'Full size (z)', 'sm'));
+    c.stats.replaceChildren(...[['target', fmtNum(r.rate) + '/s'], ['sent', sent == null ? fmtNum(r.sent) : fmtNum(sent) + '/s'], ['failed', fmtNum(r.failed)], ['p50', fmtMs((r.p50 || 0) * 1000)], ['p95', fmtMs((r.p95 || 0) * 1000)], ['p99', fmtMs((r.p99 || 0) * 1000)]]
+      .map(([k, v]) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' + (k === 'failed' && r.failed ? ' red' : '') }, v))), r.error ? h('div', { class: 'err small', style: { gridColumn: '1/-1' } }, r.error) : '');
+    drawCharts(r.name);
+  }
+  function drawCharts(name) {
+    const c = cards.get(name), hs = hist.get(name) || [];
+    if (!c || hs.length < 2) return;
+    const s = (n, f) => ({ name: n, pts: hs.filter(x => f(x) != null).map(x => [x.t, f(x)]) });
+    lineChart(c.rateBox, [s('sent', x => x.rps), s('failed', x => x.fps), s('target', () => c.row.rate || 0)], { unit: '/s', fit: true, legend: 'none' });
+    lineChart(c.latBox, [s('p50', x => x.p50), s('p95', x => x.p95), s('p99', x => x.p99)], { unit: 's', fit: true, legend: 'none' });
+  }
+  const busy = new Set();
+  async function poll(name) {
+    if (busy.has(name)) return;
+    busy.add(name);
+    try {
+      const rows = frameRows(await query('load.status', name ? { component: name } : {}));
+      if (!name) { names = rows.map(r => r.name); box.replaceChildren(...names.map(n => card(n).el)); }
+      rows.forEach(drawCard);
+    } catch (e) { const c = name && card(name); if (c) c.stats.replaceChildren(h('div', { class: 'err small' }, e.message)); else box.replaceChildren(errBox(e)); }
+    finally { busy.delete(name); }
+    if (!names.length) box.replaceChildren(emptyState('No load generator', 'A load component (k6, vegeta, ghz) shows here'));
+  }
+  const pollAll = () => names.length ? names.forEach(poll) : poll('');
+  box.replaceChildren(...names.map(n => card(n).el));
+  if (!names.length) box.append(loading());
+  pollAll();
+  ctx.every(3000, pollAll);
+  ctx.menu(() => ops(cards.get(cur)?.row) || []);
+  ctx.onKey(e => {
+    const i = names.indexOf(cur);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { select(names[Math.min(names.length - 1, i + 1)]); cards.get(cur)?.el.focus(); return true; }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'k') { select(names[Math.max(0, i - 1)]); cards.get(cur)?.el.focus(); return true; }
+    const hit = (ops(cards.get(cur)?.row) || []).find(x => x && x.key === e.key);
+    if (hit) { hit.run(); return true; }
+    return false;
   });
-  load();
+  if (cur) setTimeout(() => select(cur), 0);
 }
 
 // ---------- hosts ----------
+// Enter opens a shell on the host, as the TUI does; c runs one command there, p lists its pods.
 function pageHosts(ctx) {
   const box = h('div', {}, loading());
-  ctx.el.append(pageHead('Hosts', 'Machines and nodes the services run on', ibtn('refresh', () => load(), 'Refresh')), box);
+  const shell = r => openTerminal(r.host, 'shell on ' + r.host, { kind: 'host', host: r.host });
+  const runCmd = async r => { const c = await ask('Run on ' + r.host, { label: 'command', placeholder: 'df -h' }); if (c) openTerminal(r.host, c, { kind: 'host', host: r.host, command: c }); };
+  const pods = async r => {
+    const all = frameRows(await query('services.status'));
+    const list = all.flatMap(s => (s.instances || []).filter(i => i.host === r.host || i.host === r.addr).map(i => ({ service: s.service, ...i })));
+    const t = dataTable({ key: 'host.pods', empty: 'No pods of this project on ' + r.host, onRow: (i, e) => { if (e?.key === 'Enter' || e?.detail === 2) { closeAll(); go('logs', { svc: i.service, i: i.id }); } },
+      menu: i => [{ label: 'Its log', icon: 'logs', run: () => { closeAll(); go('logs', { svc: i.service, i: i.id }); } }, { label: 'Shell', icon: 'term', run: () => openTerminal(i.id, 'shell in ' + i.service, { kind: 'service', service: i.service, instance: i.id }) }],
+      columns: [{ key: 'service' }, { key: 'id', label: 'Instance', cls: 'mono' }, { key: 'state', render: i => stateBadge(i.ready ? 'running' : i.state) }, { key: 'restarts', num: true }, { key: 'started', label: 'Age', render: i => ago(i.started) }] });
+    t.update(list);
+    drawer(r.host, list.length + ' pods of ' + S.info.project, [t.el]).classList.add('wide');
+  };
+  const ops = r => [{ label: 'Shell', icon: 'term', key: 'enter', run: () => shell(r) }, { label: 'Run a command…', key: 'c', run: () => runCmd(r) }, { label: 'Pods on it', icon: 'services', key: 'p', run: () => pods(r) },
+    { label: 'Copy the name', icon: 'copy', key: 'y', run: () => copy(r.host) }];
   const bar = (v, label) => v == null ? '' : h('span', { class: 'row', title: label }, h('span', { class: 'meter' }, h('i', { style: { width: Math.min(100, v * 100) + '%', background: v > 0.9 ? 'var(--red)' : v > 0.7 ? 'var(--amber)' : '' } })), h('span', { class: 'mono small' }, Math.round(v * 100) + '%'));
-  const t = dataTable({ empty: 'No hosts', columns: [
+  const t = dataTable({ key: 'hosts', empty: 'No hosts', onRow: (r, e) => { if (e?.key === 'Enter' || e?.detail === 2 || e?.type === 'click') shell(r); }, menu: r => ops(r), columns: [
     { key: 'host', render: r => h('span', {}, h('b', {}, r.host), r.addr && h('span', { class: 'muted small' }, ' ' + r.addr)) },
     { key: 'ready', render: r => r.ready === false ? badge('not ready', 'red', true) : badge('ready', 'green', true) },
     { key: 'roles', cls: 'muted' }, { key: 'cpu', render: r => bar(r.cpu, 'cpu') }, { key: 'mem', render: r => bar(r.mem, 'memory') }, { key: 'disk', render: r => bar(r.disk, 'disk') },
-    { key: 'load1', num: true }, { key: 'pods', num: true }, { key: 'reason', cls: 'muted' }] });
+    { key: 'load1', num: true }, { key: 'pods', num: true }, { key: 'reason', cls: 'muted' },
+    { act: true, label: '', render: r => h('div', { class: 'row hover-acts' }, ibtn('term', () => shell(r), 'Shell (enter)', 'sm'), ibtn('play', () => runCmd(r), 'Run a command (c)', 'sm'), ibtn('services', () => pods(r), 'Pods (p)', 'sm')) }] });
+  ctx.el.append(pageHead('Hosts', 'Machines and nodes the services run on · click or enter: a shell there · right-click: more', searchBox('Filter hosts', v => t.filter(v)), ibtn('refresh', () => load(), 'Refresh')), box);
+  let first = true;
   const load = poller(ctx, 5000, async () => {
-    try { t.update(frameRows(await query('hosts.list'))); box.replaceChildren(t.el); } catch (e) { box.replaceChildren(errBox(e)); }
+    try { t.update(frameRows(await query('hosts.list'))); if (first) { box.replaceChildren(t.el); first = false; } } catch (e) { box.replaceChildren(errBox(e)); first = true; }
   });
   load();
+  ctx.menu(() => t.current() ? ops(t.current()) : []);
+  ctx.onKey(e => {
+    if (t.keys(e)) return true;
+    const r = t.current(), hit = r && ops(r).find(x => x.key === e.key);
+    if (hit) { hit.run(); return true; }
+    return false;
+  });
 }
 
 // ---------- tests ----------
@@ -423,25 +685,58 @@ function openManifest(r) {
 }
 
 // ---------- plugins ----------
+// Three shelves: what this project's rig.yaml uses, what is installed but idle here, and the registry's others.
 function pagePlugins(ctx) {
-  const box = h('div', {}, loading());
-  const verb = (v, n) => act('plugin.' + v, { names: [n] }, v + ' ' + n).then(load);
-  ctx.el.append(pageHead('Plugins', 'Installed plugins and what they add',
-    btn([icon('plus'), 'Add'], async () => { const n = await ask('Add a plugin', { label: 'name (from the registry) or a path' }); if (n) verb('add', n); }, 'primary')), box);
+  const box = h('div', { class: 'col plugins' }, loading());
+  let filter = '', rows = [], registry = null;
+  const verb = (v, names) => act('plugin.' + v, { names }, v + ' ' + names.join(', ')).then(load);
+  ctx.el.append(pageHead('Plugins', 'Components, importers and screens rig gets from plugins',
+    searchBox('Filter plugins', v => { filter = v; draw(); }),
+    btn([icon('plus'), 'Add'], async () => { const n = await ask('Add a plugin', { label: 'name (from the registry) or a path' }); if (n) verb('add', [n]); }, 'primary')), box);
+  const views = () => S.views.reduce((m, v) => (v.plugin && (m[v.plugin] = [...(m[v.plugin] || []), v.title]), m), {});
+  const ops = r => [
+    r.installed !== false && { label: r.state === 'off' ? 'Turn on' : 'Turn off for me', key: 'o', run: () => verb(r.state === 'off' ? 'on' : 'off', [r.name]) },
+    r.installed === false ? { label: 'Install', icon: 'plus', key: 'a', run: () => verb('add', [r.name]) } : { label: 'Upgrade', key: 'u', run: () => verb('up', [r.name]) },
+    r.installed !== false && { label: 'Logs', icon: 'logs', key: 'l', run: () => runCommand('plugin logs ' + r.name) },
+    r.installed !== false && r.kind && r.kind !== 'builtin' && { label: 'Remove', icon: 'trash', danger: true, run: () => verb('rm', [r.name]) }];
+  const row = r => {
+    const v = views()[r.name];
+    const el = h('div', { class: 'plug' + (r.state === 'off' ? ' dim' : '') },
+      icon('plugin'), h('div', { class: 'grow' }, h('div', { class: 'row' }, h('b', {}, r.name), r.version && h('span', { class: 'muted small mono' }, r.version), r.state === 'off' && badge('off'), r.kind && h('span', { class: 'tag' }, r.kind)),
+        r.description && h('div', { class: 'muted small ellipsis', title: r.description }, firstLine(r.description)),
+        v && h('div', { class: 'row wrap small' }, v.map(t => h('a', { href: '#/v-' + slug(t) }, t)))),
+      h('div', { class: 'row hover-acts' }, ...ops(r).filter(Boolean).slice(0, 2).map(x => btn(x.label, x.run, 'sm'))));
+    onMenu(el, () => ops(r));
+    return el;
+  };
+  function shelf(title, sub, list, extra) {
+    const shown = list.filter(r => matchText(r.name + ' ' + (r.description || '') + ' ' + (r.kind || ''), filter));
+    return h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('span', { class: 'grow' }, title, h('span', { class: 'muted small', style: { fontWeight: 400, marginLeft: '8px' } }, sub)), h('span', { class: 'n muted' }, shown.length), extra),
+      h('div', { class: 'plug-list' }, shown.length ? shown.map(row) : h('div', { class: 'empty small' }, list.length ? 'None match' : 'None')));
+  }
+  function draw() {
+    const used = new Set(S.info?.used || []);
+    const warns = rows.filter(r => r.state === 'warn');
+    const got = rows.filter(r => r.state !== 'warn');
+    const inUse = got.filter(r => used.has(r.name)), idle = got.filter(r => !used.has(r.name));
+    const idleOn = idle.filter(r => r.state !== 'off').map(r => r.name);
+    const names = new Set(got.map(r => r.name));
+    const avail = (registry || []).filter(r => !names.has(r.name));
+    box.replaceChildren(...warns.map(w => h('div', { class: 'banner amber' }, w.description)),
+      shelf('In use by this project', 'rig.yaml names them', inUse),
+      shelf('Installed, not used here', 'loaded but nothing in rig.yaml needs them', idle,
+        idleOn.length > 0 && btn('Turn off the ' + idleOn.length + ' unused', async () => { if (await confirmBox('Turn off unused plugins', idleOn.join(', ') + '\n\nOnly for you, in .rig/local.yaml; turn any back on here.', 'Turn off')) verb('off', idleOn); }, 'sm')),
+      registry == null ? h('section', { class: 'card card-b muted' }, h('span', { class: 'spin' }), ' Reading the registry…') : shelf('In the registry', 'not installed', avail));
+  }
   async function load() {
-    let rows;
-    try { rows = frameRows(await query('plugins')); } catch (e) { box.replaceChildren(errBox(e)); return; }
-    const views = S.views.reduce((m, v) => (v.plugin && (m[v.plugin] = [...(m[v.plugin] || []), v.title]), m), {});
-    box.replaceChildren(h('div', { class: 'grid cards' }, rows.map(r => r.state === 'warn'
-      ? h('div', { class: 'card card-b err' }, r.description)
-      : h('div', { class: 'card card-b col' + (r.state === 'off' ? ' dim' : '') },
-        h('div', { class: 'row' }, icon('plugin'), h('b', {}, r.name), h('span', { class: 'muted small' }, r.version), r.state === 'off' && badge('off'), h('span', { class: 'spacer' }), r.kind && badge(r.kind)),
-        r.description && h('div', { class: 'muted' }, r.description),
-        views[r.name] && h('div', { class: 'row wrap' }, views[r.name].map(t => h('a', { href: '#/v-' + slug(t) }, t))),
-        r.permissions && h('div', { class: 'small muted mono' }, r.permissions),
-        h('div', { class: 'row' }, h('span', { class: 'spacer' }),
-          btn(r.state === 'off' ? 'Turn on' : 'Turn off', () => verb(r.state === 'off' ? 'on' : 'off', r.name), 'sm'),
-          btn('Upgrade', () => verb('up', r.name), 'sm'), btn('Logs', () => runCommand('plugin logs ' + r.name), 'sm ghost'))))));
+    try { rows = frameRows(await query('plugins')); frameRowsCache.plugins = rows; } catch (e) { box.replaceChildren(errBox(e)); return; }
+    draw();
+    if (registry == null) {
+      api('run', { action: 'plugin.search', args: { text: '' } }).then(r => {
+        registry = String(r?.message || '').split('\n').map(l => /^(\S+) (\S+): (.*)$/.exec(l)).filter(Boolean).map(m => ({ name: m[1], version: m[2], description: m[3], installed: false }));
+        draw();
+      }, () => { registry = []; draw(); });
+    }
   }
   load();
 }

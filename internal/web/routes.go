@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,9 +32,53 @@ func (h *Handler) extra(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/ai", h.auth(h.withEngine(h.aiInfo)))
 	mux.HandleFunc("POST /v1/ai/config", h.auth(h.aiConfig))
 	mux.HandleFunc("GET /v1/ai/session", h.auth(h.withEngine(h.aiSession)))
+	mux.HandleFunc("POST /v1/ai/close", h.auth(h.withEngine(func(w http.ResponseWriter, r *http.Request, l *engine.Local) {
+		var in struct{ ID string }
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if err := ai.CloseSession(l.App.AIDir(), in.ID); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{})
+	})))
 	mux.HandleFunc("POST /v1/ai/chat", h.auth(h.withEngine(h.aiChat)))
 	mux.HandleFunc("GET /v1/ai/pending", h.auth(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, h.ai.list()) }))
 	mux.HandleFunc("POST /v1/ai/approve", h.auth(h.aiApprove))
+	mux.HandleFunc("POST /v1/ai/complete", h.auth(h.withEngine(h.aiComplete)))
+}
+
+// aiComplete finishes what a prompt holds, or writes it from a description after "@?" (as the TUI's prompts do).
+func (h *Handler) aiComplete(w http.ResponseWriter, r *http.Request, l *engine.Local) {
+	var in struct{ Hint, Text string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	run, err := l.App.AI(h.ai.socket())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if !run.Setup.Enabled() {
+		writeErr(w, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "AI is " + run.Setup.Describe() + ": set it up in Settings"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	var text string
+	if before, want, ok := strings.Cut(in.Text, "@?"); ok && strings.TrimSpace(want) != "" {
+		text, err = run.Describe(ctx, in.Hint, before, strings.TrimSpace(want), nil)
+	} else {
+		var rest string
+		rest, err = run.Complete(ctx, in.Hint, in.Text)
+		text = in.Text + rest
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"text": text})
 }
 
 func (h *Handler) withEngine(f func(http.ResponseWriter, *http.Request, *engine.Local)) http.HandlerFunc {
@@ -400,10 +446,13 @@ func (h *Handler) aiChat(w http.ResponseWriter, r *http.Request, l *engine.Local
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(v); err != nil {
+	body := http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(body).Decode(v); err != nil {
 		writeErr(w, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
 		return false
 	}
+	// net/http notices a page going away only once the body is read to its end: streams rely on that.
+	_, _ = io.Copy(io.Discard, body)
 	return true
 }
 

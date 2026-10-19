@@ -63,7 +63,7 @@ function envPicker() {
 function renderChrome() {
   const cur = parseRoute().id, curPage = pageOf(cur);
   const link = (p, n) => h('a', { href: '#/' + p.id, class: p.id === cur ? 'on' : '', 'data-page': p.id, title: p.title },
-    n != null && h('span', { class: 'tabnum' }, n), icon(p.icon), h('span', { class: 'ellipsis' }, p.title), h('span', { class: 'count', hidden: true }));
+    icon(p.icon), h('span', { class: 'ellipsis' }, p.title), h('span', { class: 'count', hidden: true }));
   const groups = GROUPS.map(g => ({ g, pages: PAGES.filter(p => p.group === g.id) })).filter(x => x.pages.length);
   const brand = () => h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'r'), h('div', { class: 'grow' }, S.info?.project || 'rig', h('small', {}, 'rig ' + (S.info?.version || ''))));
   const side = h('aside', { class: 'sidebar' }, brand(), h('div', { class: 'side-env' }, envPicker()),
@@ -78,17 +78,18 @@ function renderChrome() {
     })),
     h('div', { class: 'side-foot' }, h('button', { class: 'btn ghost side-ai', onclick: toggleAI, type: 'button' }, icon('ai'), 'Assistant', h('span', { class: 'kbd' }, '@'))));
   const curGroup = curPage?.group;
-  const top = h('header', { class: 'topbar' }, brand(),
-    h('nav', { class: 'topnav' }, groups.map(({ g, pages }, i) => h('a', { href: '#/' + (pages.find(p => p.id === store.get('last.' + g.id)) || pages[0]).id, class: g.id === curGroup ? 'on' : '', 'data-group': g.id },
-      h('span', { class: 'tabnum' }, i + 1), groupTitle(g), pages.length > 1 && h('span', { class: 'gn' }, pages.length)))),
+  const top = h('header', { class: 'topbar' }, ibtn('menu', () => document.body.classList.toggle('nav-open'), 'Screens', 'nav-btn'), brand(),
+    h('nav', { class: 'topnav' }, groups.map(({ g, pages }) => h('a', { href: '#/' + (pages.find(p => p.id === store.get('last.' + g.id)) || pages[0]).id, class: g.id === curGroup ? 'on' : '', 'data-group': g.id },
+      groupTitle(g), pages.length > 1 && h('span', { class: 'gn' }, pages.length)))),
     h('div', { class: 'crumb' }, curPage ? [groupTitle(GROUPS.find(g => g.id === curGroup) || {}), h('span', { class: 'sep' }, '/'), curPage.title] : ''),
     h('div', { class: 'spacer' }),
     h('button', { class: 'palette-btn', onclick: () => openPalette(), type: 'button', title: 'Search (ctrl+k) · : runs a command' }, icon('search'), h('span', { class: 'ellipsis' }, 'Search or :command'), h('span', { class: 'kbd' }, navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K')),
     h('span', { class: 'top-env' }, envPicker()),
-    ibtn('ai', toggleAI, 'Assistant (@)', 'ai-btn'),
+    ibtn('ai', toggleAI, 'Assistant (@)', 'ai-btn'), ibtn('ext', () => browserFull(), 'Full screen (F11)', 'full-btn'),
     ibtn(document.documentElement.dataset.scheme === 'light' ? 'moon' : 'sun', () => setPref('scheme', document.documentElement.dataset.scheme === 'light' ? 'dark' : 'light'), 'Light or dark'));
-  const sub = h('nav', { class: 'subnav' }, PAGES.filter(p => p.group === curGroup).map(p => link(p, PAGES.indexOf(p) < 9 ? PAGES.indexOf(p) + 1 : null)));
-  shell.replaceChildren(side, top, sub, h('main', { class: 'main', id: 'main' }), h('footer', { class: 'keys', id: 'keys' }));
+  const sub = h('nav', { class: 'subnav' }, PAGES.filter(p => p.group === curGroup).map(p => link(p)));
+  side.addEventListener('click', e => { if (e.target.closest('a')) document.body.classList.remove('nav-open'); });
+  shell.replaceChildren(h('div', { class: 'nav-scrim', onclick: () => document.body.classList.remove('nav-open') }), side, top, sub, h('main', { class: 'main', id: 'main' }), h('footer', { class: 'keys', id: 'keys' }));
   shell.classList.toggle('ai-open', aiOpen);
   if (aiOpen) shell.append(aiPanel());
   updateCounts();
@@ -125,6 +126,7 @@ function route() {
   S.keyHandler = null; S.menu = []; S.screen = '';
   const r = parseRoute(), page = pageOf(r.id);
   if (!page) return;
+  if (S.trail.at(-1) !== r.id) S.trail.push(r.id);
   store.set('last.' + page.group, page.id);
   if (!document.querySelector(`.subnav [data-page="${page.id}"]`) || !document.querySelector(`.topnav [data-group="${page.group}"].on`)) renderChrome();
   for (const a of document.querySelectorAll('[data-page]')) a.classList.toggle('on', a.dataset.page === r.id);
@@ -140,6 +142,7 @@ function route() {
     onKey(f) { S.keyHandler = f; },
     menu(items) { S.menu = items; },
   };
+  S.ctx = ctx;
   try { page.render(ctx); } catch (e) { el.append(h('div', { class: 'err' }, e.stack || e.message)); }
 }
 window.addEventListener('hashchange', () => { closeOverlay(); route(); });
@@ -183,8 +186,7 @@ function openPalette({ only, prompt, value = '' } = {}) {
       res.replaceChildren(h('div', { class: 'opt sel' }, icon('cmd'), h('span', { class: 'mono' }, input.value), h('span', { class: 'k' }, 'enter runs')));
       return;
     }
-    const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-    shown = items.filter(x => words.every(w => (x.k + ' ' + x.t + ' ' + (x.d || '')).toLowerCase().includes(w))).slice(0, 80);
+    shown = items.filter(x => matchText(x.k + ' ' + x.t + ' ' + (x.d || ''), input.value)).slice(0, 80);
     sel = Math.min(sel, Math.max(0, shown.length - 1));
     res.replaceChildren(...shown.map((x, i) => h('div', { class: 'opt' + (i === sel ? ' sel' : ''), onmousemove: () => { if (sel !== i) { sel = i; draw(); } }, onclick: () => pick(x) },
       h('span', {}, x.t), x.d && h('span', { class: 'd' }, x.d), h('span', { class: 'k' }, x.k))));
@@ -297,13 +299,11 @@ function openCommandView(v) {
   pageView(ctx, v, true);
 }
 // openMenu lists what the screen can do: the TUI's `.` menu.
-function openMenu() {
+function openMenu(at) {
   const page = pageOf(parseRoute().id);
-  const items = [...(typeof S.menu === 'function' ? S.menu() : S.menu).map(m => ({ k: m.key || '', t: m.label, run: m.run })),
-    { k: 'r', t: 'Refresh', run: () => route() }, { k: ':', t: 'Run a command', run: () => openCommandLine() }, { k: '@', t: 'Ask the assistant', run: toggleAI }];
-  const box = h('div', { class: 'menu-list' }, items.map(x => h('button', { class: 'menu-item', type: 'button', onclick: () => { closeOverlay(); x.run(); } }, h('kbd', {}, x.k || ' '), x.t)));
-  openOverlay([h('div', { class: 'palette' }, h('div', { class: 'modal-h' }, page?.title || 'Menu'), box)]);
-  box.querySelector('button')?.focus();
+  const own = (typeof S.menu === 'function' ? S.menu() : S.menu).filter(Boolean);
+  ctxMenu(at || { x: innerWidth / 2 - 140, y: 120 }, [...own, own.length && '-', { key: 'R', label: 'Reload the screen', icon: 'refresh', run: () => route() },
+    { key: ':', label: 'Run a command', run: () => openCommandLine() }, { key: '@', label: 'Ask the assistant', run: toggleAI }], page?.title || 'Menu');
 }
 function showHelp() {
   const page = pageOf(parseRoute().id);
@@ -319,9 +319,20 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); overlay ? closeOverlay() : openPalette(); return; }
   if (e.ctrlKey && k === 'e') { e.preventDefault(); closeOverlay(); openPalette({ only: 'environment', prompt: 'Switch environment' }); return; }
   if (e.ctrlKey && k === 'p') { e.preventDefault(); closeOverlay(); openPalette({ only: 'theme', prompt: 'Pick a theme' }); return; }
-  if (e.key === 'Escape') { if (overlay) { closeOverlay(); e.preventDefault(); } else if (typing) e.target.blur(); else if (aiOpen && !e.target.closest('.main')) toggleAI(); return; }
-  if (typing || overlay || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); stepPage(e.key === 'ArrowRight' ? 1 : -1); return; }
+  if (e.key === 'F1') { e.preventDefault(); showHelp(); return; }
+  if (e.key === 'Escape') {
+    if (overlay) { closeOverlay(); e.preventDefault(); } else if (typing) e.target.blur();
+    else if (document.querySelector('.zoomed')) return;
+    else if (aiOpen && !e.target.closest('.main')) toggleAI();
+    else if (!S.keyHandler?.(e)) back();
+    return;
+  }
+  if (typing || overlay || e.metaKey) return;
+  const arrow = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (arrow && e.ctrlKey) { e.preventDefault(); subTab(arrow); return; }
+  if (arrow && (e.shiftKey || e.altKey)) { e.preventDefault(); stepPage(arrow); return; }
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.target.closest?.('.drawer,.modal,.ai-panel')) { e.preventDefault(); stepPage(e.shiftKey ? -1 : 1); return; }
+  if (e.ctrlKey || e.altKey) return;
   if (S.keyHandler?.(e)) { e.preventDefault(); return; }
   const take = f => { e.preventDefault(); f(); };
   switch (e.key) {
@@ -329,11 +340,33 @@ document.addEventListener('keydown', e => {
     case '@': return take(toggleAI);
     case '!': return take(() => go('jobs'));
     case '?': return take(showHelp);
-    case '.': return take(openMenu);
+    case '.': case 'ContextMenu': return take(() => openMenu());
     case 'T': return take(() => openPalette({ only: 'task', prompt: 'Run a task' }));
+    case 'Backspace': return take(back);
     case '/': { const f = $('.page [data-filter]'); if (f) take(() => f.focus()); return; }
   }
-  if (/^[1-9]$/.test(e.key) && PAGES[+e.key - 1]) take(() => go(PAGES[+e.key - 1].id));
+});
+// back returns to the screen before this one, as esc and ⌫ do in the TUI.
+function back() {
+  if (S.trail.length < 2) return;
+  S.trail.pop();
+  const id = S.trail.pop();
+  go(id);
+}
+// subTab moves a screen's own tabs: the screen's handler, else its first row of sub-tabs.
+function subTab(d) {
+  if (S.ctx?.subTab) { S.ctx.subTab(d); return; }
+  const bar = $('.page .subtabs, .page .seg');
+  const bs = bar ? [...bar.querySelectorAll('button')] : [];
+  if (!bs.length) { stepPage(d); return; }
+  const i = bs.findIndex(b => b.classList.contains('on'));
+  bs[(i + d + bs.length) % bs.length].click();
+}
+// right-click on a screen's empty space opens its menu; rows and panels answer with their own
+document.addEventListener('contextmenu', e => {
+  if (e.defaultPrevented || e.shiftKey || !e.target.closest('.main') || e.target.closest('input,textarea,a,pre,.logs,.jtree') || String(getSelection())) return;
+  e.preventDefault();
+  openMenu({ x: e.clientX, y: e.clientY });
 });
 
 // ---------- boot ----------
@@ -354,6 +387,9 @@ async function boot(again) {
     const [cat, prov, views] = await Promise.all([api('catalog'), api('provides'), web('views').catch(() => [])]);
     S.info = info; S.catalog = cat || []; S.provides = prov || { sources: {}, actions: {} }; S.views = views || [];
     S.jobs = []; S.inbox = [];
+    const [comps, plugs] = await Promise.all([query('components').catch(() => null), query('plugins').catch(() => null)]);
+    frameRowsCache.components = comps ? frameRows(comps) : [];
+    frameRowsCache.plugins = plugs ? frameRows(plugs) : [];
   } catch (e) {
     if (S.env && !again) { S.env = ''; store.set('env', ''); return boot(true); }
     if (shell && again) { toast('Cannot open ' + S.env + ': ' + e.message, 'bad', 8000); S.env = S.info?.env || ''; store.set('env', S.env); route(); return; }

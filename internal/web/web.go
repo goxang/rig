@@ -8,7 +8,11 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -33,6 +37,7 @@ type Handler struct {
 	mu      sync.Mutex
 	engines map[string]*opening
 	ai      aiState
+	terms   terms
 }
 
 type opening struct {
@@ -94,6 +99,12 @@ func (h *Handler) Close() {
 	}
 	h.engines = nil
 	h.ai.close()
+	h.terms.mu.Lock()
+	ids := slices.Collect(maps.Keys(h.terms.m))
+	h.terms.mu.Unlock()
+	for _, id := range ids {
+		h.terms.drop(id)
+	}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -116,6 +127,7 @@ func (h *Handler) Routes() http.Handler {
 		server.Call(w, r, l, l.Session(r.Context()), nil)
 	}))
 	h.extra(mux)
+	h.termRoutes(mux)
 	return mux
 }
 
@@ -154,7 +166,9 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 		"runtime": l.App.Env.Runtime.Type}
 	if ui := l.App.Spec.UI; ui != nil {
 		out["tabs"] = ui.Tabs
+		out["logs"] = ui.Logs
 	}
+	out["used"] = used(l.App.Spec)
 	for k, v := range h.Info {
 		out[k] = v
 	}
@@ -177,4 +191,61 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": pe})
+}
+
+// used are the plugins and component types the project wires up: the API screen hides the rest.
+// used names the plugins rig.yaml needs in any environment: those it names, the importers, component
+// and runtime types, test runners, and the builders, debugger and IDE its services' builds imply.
+func used(p *spec.Project) []string {
+	set := map[string]bool{}
+	for n, pl := range p.Plugins {
+		if pl == nil || !pl.Off {
+			set[n] = true
+		}
+	}
+	for _, imp := range p.Imports {
+		for k := range imp {
+			set[k] = true
+		}
+	}
+	add := func(cs map[string]*spec.Component) {
+		for _, c := range cs {
+			if c != nil {
+				set[c.Type] = true
+			}
+		}
+	}
+	add(p.Components)
+	for _, env := range p.Environments {
+		if env == nil {
+			continue
+		}
+		add(env.Components)
+		if env.Runtime != nil {
+			set[env.Runtime.Type] = true
+		}
+	}
+	for _, t := range p.Tests {
+		if t != nil && t.Runner != "" {
+			set[t.Runner] = true
+		}
+	}
+	for _, s := range p.Services {
+		if s == nil || s.Build == nil {
+			continue
+		}
+		switch {
+		case s.Build.Go != "":
+			set["go"], set["delve"], set["goland"] = true, true, true
+		case s.Build.Dockerfile != "":
+			set["docker"] = true
+		case len(s.Build.Command) > 0:
+			set["command"] = true
+		}
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, ".git")); err == nil {
+		set["git"] = true
+	}
+	delete(set, "")
+	return slices.Sorted(maps.Keys(set))
 }
