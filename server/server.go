@@ -404,27 +404,32 @@ func (s *Server) engine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.subj = s.subject(c.user, mustUser(s.Store, c.user), c.token, l.App.Spec.Policy.Roles)
+	Call(w, r, l, c.subj, func() bool { return s.reauthedWithin(c.token) })
+}
+
+// Call answers the Engine call r names (POST .../{method}) on e for subj. reauthed settles a
+// policy reauth; nil asks it as a confirm, for a local client.
+func Call(w http.ResponseWriter, r *http.Request, e api.Engine, subj identity.Subject, reauthed func() bool) {
 	var in api.Request
 	if !readJSON(w, r, &in) {
 		return
 	}
-	ctx := identity.With(r.Context(), c.subj)
+	ctx := identity.With(r.Context(), subj)
 	confirmed := r.Header.Get("X-Rig-Confirm") == "1"
 	if confirmed {
 		ctx = core.WithConfirmed(ctx)
 	}
 	ctx = actions.WithAsk(ctx, func(_ context.Context, d policy.Decision, why string) error {
 		switch {
-		case d == policy.Confirm && confirmed:
+		case (d == policy.Confirm || reauthed == nil) && confirmed:
 			return nil
-		case d == policy.Confirm:
+		case d == policy.Confirm || reauthed == nil:
 			return &protocol.Error{Code: protocol.CodeNeedsInput, Message: "confirm: " + why, Data: &protocol.ErrorData{Hint: api.HintConfirm}}
-		case s.reauthedWithin(c.token):
+		case reauthed():
 			return nil
 		}
 		return &protocol.Error{Code: protocol.CodeNeedsInput, Message: "reauth: " + why, Data: &protocol.ErrorData{Hint: api.HintReauth}}
 	})
-	var e api.Engine = l
 	switch r.PathValue("method") {
 	case "catalog":
 		cat, err := e.Catalog(ctx)
@@ -456,10 +461,10 @@ func (s *Server) engine(w http.ResponseWriter, r *http.Request) {
 			// a client may only act as its own AI or agents, which carry its roles
 			switch in.As.Kind {
 			case identity.KindAI:
-				as := identity.AI(c.subj)
+				as := identity.AI(subj)
 				o.As = &as
 			case identity.KindAgent:
-				as := identity.Agent(in.As.Name, in.As.Approve, c.subj)
+				as := identity.Agent(in.As.Name, in.As.Approve, subj)
 				o.As = &as
 			default:
 				writeErr(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "cannot run as " + in.As.String()})

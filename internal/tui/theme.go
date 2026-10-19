@@ -286,3 +286,17 @@ func readable(fg string, ratio float64, bgs ...string) string {
 	}
 	return best
 }
+
+// Palettes are every theme resolved, light shades filled in, for the web UI.
+func Palettes() map[string]Theme {
+	out := map[string]Theme{}
+	for _, n := range ThemeNames() {
+		if t, err := loadTheme(n, 0); err == nil {
+			if t.Light == (themeShades{}) {
+				t.Light = themes["default"].Light
+			}
+			out[n] = t
+		}
+	}
+	return out
+}

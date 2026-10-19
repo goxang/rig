@@ -126,5 +126,6 @@ Every command; `rig <command> --help` has its flags. Generated from the code.
 | `vars [set K=V... \| unset K...]` | manifest variables ($MAIN_DB, ...): rig.yaml's, overridden per environment and kept in its state |
 | `version` | print the version |
 | `watch [service\|group...]` | rebuild and restart services as their sources change (every app service when none); ctrl+w in the UI |
+| `web` | open the control plane in your browser: services, logs, metrics, tasks, queries, jobs and the inbox |
 | `whoami` | who rig acts as, with which roles (on the server with -r) |
 | `why <service or symptom>` | incident mode: gather logs, traces, metrics, alerts and changes about a symptom, rank the likely causes, and have the AI find the root cause and propose a fix; answer "fix" to apply it |

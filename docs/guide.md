@@ -151,6 +151,15 @@ A Kubernetes environment can name its cluster by address as well: `runtime: { co
 https://rancher.example/k8s/clusters/local }` uses the context called `local` when the kubeconfig has
 one, else whichever context points at that server (Rancher names downloaded kubeconfigs per user).
 
+## Web UI
+
+`rig web` serves the control plane on `127.0.0.1:7979` and opens it in the browser: services (up, down,
+restart, scale, logs, ports), logs, dashboards, tasks, saved queries, activity, the inbox and an API
+explorer. The link carries a token kept in `<state dir>/web-token`, so a bookmark keeps working.
+Settings pick the theme (the UI's themes, light or dark), the density, the font and the layout:
+sidebar, top bar or terminal-like. `ctrl+k` runs anything, `1`-`9` switch pages, `/` filters, `?`
+lists the keys. Actions go through the same policy as the CLI and ask before dangerous ones.
+
 ## AI
 
 Set it up once, in three steps:

@@ -18,7 +18,7 @@ it all from one CLI and one terminal UI.
 ## How it is built
 
 ```
- clients   CLI · TUI · MCP server · AI · HTTP/WS server (rig serve)
+ clients   CLI · TUI · web UI (rig web) · MCP server · AI · HTTP/WS server (rig serve)
               │  all through one api.Engine: policy, jobs and audit apply to every caller
  kernel    catalog · sources (data frames) · actions (jobs) · views (widget trees) · events · policy
  engine    environments, dependency order, up/down, svc:// resolution, run state
@@ -74,6 +74,7 @@ rig init      # rig.yaml from what the project has: compose, manifests, sources
 rig doctor    # what is missing: tools, cluster or daemon, variables, ports, components
 rig up        # everything, in dependency order
 rig           # the terminal UI; ? lists the keys of every screen
+rig web       # the same control plane in the browser
 ```
 
 No `rig.yaml` yet? `rig up && rig` still work: rig infers the project in memory as `rig init` would,

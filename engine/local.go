@@ -42,6 +42,7 @@ type Local struct {
 	mu      sync.Mutex
 	sources map[string]sourceFunc
 	streams map[string]bool
+	live    map[string]streamFunc
 	about   map[string]protocol.SourceSpec
 }
 
@@ -52,7 +53,7 @@ func NewLocal(a *App, jm *jobs.Manager) *Local {
 	if jm == nil {
 		jm = &jobs.Manager{}
 	}
-	l := &Local{App: a, Bus: events.NewBus(), jobs: jm, me: identity.Local(), sources: map[string]sourceFunc{}, streams: map[string]bool{}, about: map[string]protocol.SourceSpec{}}
+	l := &Local{App: a, Bus: events.NewBus(), jobs: jm, me: identity.Local(), sources: map[string]sourceFunc{}, streams: map[string]bool{}, live: map[string]streamFunc{}, about: map[string]protocol.SourceSpec{}}
 	envs := map[string]policy.Env{}
 	for n, e := range a.Spec.Environments {
 		envs[n] = policy.Env{Protected: e.Protected, Readonly: e.ReadOnly}
@@ -68,6 +69,7 @@ func NewLocal(a *App, jm *jobs.Manager) *Local {
 		Inbox: inbox.Open(filepath.Join(a.StateDir(), "inbox")),
 	}
 	l.builtins()
+	l.observe()
 	l.leases()
 	l.pluginActions()
 	l.plugins()
@@ -293,6 +295,11 @@ func (l *Local) componentQuery(ctx context.Context, name string, args protocol.A
 		}
 		return tableFrame(t), nil
 	}
+	return metricsFrame(ctx, m, text, args)
+}
+
+// metricsFrame answers text as a range (range, step) or, with instant, one sample per series.
+func metricsFrame(ctx context.Context, m core.Metrics, text string, args protocol.Args) (*protocol.Frame, error) {
 	fields := []protocol.Field{{Name: "time", Type: protocol.TypeTime}, {Name: "series", Type: protocol.TypeString}, {Name: "value", Type: protocol.TypeNumber}}
 	var rows []map[string]any
 	if inst, _ := args["instant"].(bool); inst {
@@ -345,8 +352,11 @@ func seriesName(labels map[string]string) string {
 // Stream answers a source that only queries with one batch.
 func (l *Local) Stream(ctx context.Context, source string, args protocol.Args) (<-chan protocol.StreamBatch, error) {
 	l.mu.Lock()
-	live := l.streams[source]
+	live, own := l.streams[source], l.live[source]
 	l.mu.Unlock()
+	if own != nil {
+		return own(ctx, args)
+	}
 	if live {
 		return l.Host.Stream(ctx, source, args)
 	}
