@@ -16,6 +16,7 @@ import (
 	"github.com/goxang/rig/api"
 	"github.com/goxang/rig/core"
 	"github.com/goxang/rig/engine"
+	"github.com/goxang/rig/internal/sh"
 	"github.com/goxang/rig/protocol"
 	"github.com/goxang/rig/spec"
 )
@@ -136,7 +137,7 @@ func (t *servicesTab) hints() [][2]string {
 			{"dbl-click instance", "its log only"}, {"drag", "select log text: copied (past an edge scrolls)"}}
 	}
 	return [][2]string{{"enter", "open"}, {"space", "mark"}, {"d", "image"}, {"$", "env"}, {"F", "live manifests"}, {"b", "build/push/deploy"}, {"a", "mark section"}, {"ctrl+←→", "section"}, {"i", "infra"},
-		{"r", "restart"}, {"s/x", "start/stop"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+alt+←→↑↓", "sort"}}
+		{"r", "restart"}, {"s/x", "start/stop"}, {"K", "kill what holds its ports"}, {"+/-", "scale"}, {"h", "autoscaler"}, {"R", "requests/limits"}, {"D", "debug"}, {"m", "metrics"}, {"o", "open in GoLand (grouped, logs, stop, debug)"}, {"/", "filter"}, {"ctrl+alt+←→↑↓", "sort"}}
 }
 
 // targets are the marked services, else the selected (or open) one.
@@ -307,6 +308,8 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 		return t.scale(m, names, -1)
 	case "h":
 		return t.editAutoscale(m, names, nil)
+	case "K":
+		return killPorts(m, names)
 	case "F":
 		return serviceManifests(m, names[0])
 	case "R":
@@ -348,6 +351,41 @@ func (t *servicesTab) ops(m *model, key string, names []string) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// killPorts frees the host ports the services declare, for a local process left behind by a crashed run.
+func killPorts(m *model, names []string) tea.Cmd {
+	var ports []int
+	for _, n := range names {
+		if s := m.app.Spec.Services[n]; s != nil {
+			for _, p := range s.Ports {
+				if !slices.Contains(ports, p) {
+					ports = append(ports, p)
+				}
+			}
+		}
+	}
+	if len(ports) == 0 {
+		m.setStatus(label("kill", names)+": no ports declared", true)
+		return nil
+	}
+	slices.Sort(ports)
+	list := strings.Trim(fmt.Sprint(ports), "[]")
+	return m.actIf(true, "kill what listens on port "+list+" ("+strings.Join(names, ", ")+")", func(ctx context.Context) error {
+		var pids []int
+		for _, p := range ports {
+			found, err := sh.ListenerPIDs(ctx, p)
+			if err != nil {
+				return err
+			}
+			pids = append(pids, found...)
+		}
+		if len(pids) == 0 {
+			return fmt.Errorf("nothing listens on port %s", list)
+		}
+		sh.Kill(pids, 3*time.Second)
+		return nil
+	})
 }
 
 func tagNote(tag string) string {

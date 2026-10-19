@@ -15,6 +15,7 @@ var installs = map[string]string{
 	"git":            "install Git: https://git-scm.com/downloads",
 	"opencode":       "install opencode: `curl -fsSL https://opencode.ai/install | bash`, then `rig ai config`",
 	"ssh":            "install an OpenSSH client",
+	"lsof":           "install lsof",
 	"psql":           "install the PostgreSQL client (psql)",
 	"mysql":          "install the MySQL client",
 	"sqlcmd":         "install sqlcmd: https://learn.microsoft.com/sql/tools/sqlcmd/sqlcmd-utility",
