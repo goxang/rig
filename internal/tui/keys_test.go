@@ -73,7 +73,7 @@ func TestBuiltinViewsLoad(t *testing.T) {
 	if err := yaml.Unmarshal(contracts.Get("scm").View, &scm); err != nil || scm.Title != "Merge requests" {
 		t.Fatal(err)
 	}
-	served(&scm.Root, "gl")
+	engine.Served(&scm.Root, "gl")
 	var got []string
 	view.Walk(&scm.Root, func(n *protocol.Node) {
 		if n.Bind != nil {

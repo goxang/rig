@@ -16,6 +16,7 @@ import (
 	"github.com/goxang/rig/kernel/jobs"
 	"github.com/goxang/rig/protocol"
 	"github.com/goxang/rig/server"
+	"github.com/goxang/rig/spec"
 )
 
 //go:embed static
@@ -30,16 +31,44 @@ type Handler struct {
 	Info map[string]any
 
 	mu      sync.Mutex
-	engines map[string]*engine.Local
+	engines map[string]*opening
+	ai      aiState
 }
 
-// Engine is the engine for env, opened once.
+type opening struct {
+	done chan struct{}
+	l    *engine.Local
+	err  error
+}
+
+// Engine is the engine for env, opened once; opening one environment never waits on another.
 func (h *Handler) Engine(env string) (*engine.Local, error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if l, ok := h.engines[env]; ok {
-		return l, nil
+	o, ok := h.engines[env]
+	if !ok {
+		o = &opening{done: make(chan struct{})}
+		if h.engines == nil {
+			h.engines = map[string]*opening{}
+		}
+		h.engines[env] = o
+		go func() {
+			defer close(o.done)
+			o.l, o.err = h.open(env)
+		}()
 	}
+	h.mu.Unlock()
+	<-o.done
+	if o.err != nil {
+		h.mu.Lock()
+		if h.engines[env] == o {
+			delete(h.engines, env)
+		}
+		h.mu.Unlock()
+	}
+	return o.l, o.err
+}
+
+func (h *Handler) open(env string) (*engine.Local, error) {
 	a, err := h.Open(h.File, env)
 	if err != nil {
 		return nil, err
@@ -50,22 +79,21 @@ func (h *Handler) Engine(env string) (*engine.Local, error) {
 	}
 	// each request settles confirmation in the browser, so the app's own terminal prompt stands aside
 	a.Confirmed, a.Ask = true, nil
-	l := engine.NewLocal(a, &jobs.Manager{})
-	if h.engines == nil {
-		h.engines = map[string]*engine.Local{}
-	}
-	h.engines[env] = l
-	return l, nil
+	return engine.NewLocal(a, &jobs.Manager{}), nil
 }
 
 func (h *Handler) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, l := range h.engines {
-		l.Close()
-		l.App.Close()
+	for _, o := range h.engines {
+		<-o.done
+		if o.l != nil {
+			o.l.Close()
+			o.l.App.Close()
+		}
 	}
 	h.engines = nil
+	h.ai.close()
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -87,6 +115,7 @@ func (h *Handler) Routes() http.Handler {
 		}
 		server.Call(w, r, l, l.Session(r.Context()), nil)
 	}))
+	h.extra(mux)
 	return mux
 }
 
@@ -111,7 +140,21 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	out := map[string]any{"project": l.App.Spec.Name, "env": l.App.Env.Name, "default": l.App.Spec.Default}
+	var sections []map[string]string
+	for _, n := range l.App.Spec.SectionOrder {
+		sections = append(sections, map[string]string{"name": n, "help": l.App.Spec.Sections[n].Help})
+	}
+	var screens []string
+	for _, n := range spec.Screens {
+		if l.App.Configured(n) {
+			screens = append(screens, n)
+		}
+	}
+	out := map[string]any{"project": l.App.Spec.Name, "env": l.App.Env.Name, "default": l.App.Spec.Default, "sections": sections, "screens": screens,
+		"runtime": l.App.Env.Runtime.Type}
+	if ui := l.App.Spec.UI; ui != nil {
+		out["tabs"] = ui.Tabs
+	}
 	for k, v := range h.Info {
 		out[k] = v
 	}
@@ -125,6 +168,13 @@ func writeErr(w http.ResponseWriter, err error) {
 		pe = &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusInternalServerError)
+	status := http.StatusInternalServerError
+	switch pe.Code {
+	case protocol.CodeInvalidParams:
+		status = http.StatusBadRequest
+	case protocol.CodeNotFound:
+		status = http.StatusNotFound
+	}
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": pe})
 }

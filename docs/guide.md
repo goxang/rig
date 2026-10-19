@@ -153,12 +153,19 @@ one, else whichever context points at that server (Rancher names downloaded kube
 
 ## Web UI
 
-`rig web` serves the control plane on `127.0.0.1:7979` and opens it in the browser: services (up, down,
-restart, scale, logs, ports), logs, dashboards, tasks, saved queries, activity, the inbox and an API
-explorer. The link carries a token kept in `<state dir>/web-token`, so a bookmark keeps working.
-Settings pick the theme (the UI's themes, light or dark), the density, the font and the layout:
-sidebar, top bar or terminal-like. `ctrl+k` runs anything, `1`-`9` switch pages, `/` filters, `?`
-lists the keys. Actions go through the same policy as the CLI and ask before dangerous ones.
+`rig web` serves the control plane on `127.0.0.1:7979` and opens it in the browser, with the TUI's
+screens grouped: Operate (services by rig.yaml section, logs, metrics, traces, hosts, load), Data
+(browse, query and edit databases, caches, queues; KV; queries; manifests), Develop (tasks, tests and
+the dev-loop views: changes, merge requests, issues, docs), the project's and your own plugin views,
+and System (activity, inbox, plugins, the API by domain, settings). The link carries a token kept in
+`<state dir>/web-token`, so a bookmark keeps working.
+
+The TUI's keys work: `:` runs a command (`restart api`, `env staging`, `open Logs`, or any `rig`
+command, streamed), `@` opens the assistant beside any screen, `.` the screen's menu, `!` activity,
+`T` a task, `ctrl+e` the environment, `ctrl+p` the theme, `ctrl+k` search, `1`-`9` and `shift+←→`
+screens, `[ ]` sub-tabs, `?` the rest. Settings pick the theme, light or dark, density, font, the
+layout (sidebar, top bar or terminal-like) and the assistant (`rig ai config`). Actions go through the
+same policy as the CLI and ask before dangerous ones; the assistant's changes wait for your yes.
 
 ## AI
 

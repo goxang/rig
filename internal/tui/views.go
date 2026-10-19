@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,9 +20,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/goxang/rig/api"
-	"github.com/goxang/rig/contracts"
 	"github.com/goxang/rig/engine"
-	"github.com/goxang/rig/host"
 	"github.com/goxang/rig/kernel/frames"
 	"github.com/goxang/rig/kernel/view"
 	"github.com/goxang/rig/protocol"
@@ -1259,101 +1255,23 @@ func (t *viewTab) atRoot() bool { return true }
 // ones already there (and their state), and returns them in order.
 func addViews(a *engine.App, all map[string]tab) []tab {
 	var out []tab
-	var home []protocol.Node
-	servedBy := map[*viewTab]string{}
-	rank, ranks := 20, map[tab]int{}
-	var owner *host.Manifest
-	add := func(key, title string, v *view.View, dir, remote string) {
-		if v.Slot == "home" {
-			tile := v.Root
-			tile.Props = maps.Clone(tile.Props)
-			if tile.Props == nil {
-				tile.Props = protocol.Args{}
-			}
-			tile.Props["title"] = cmp.Or(view.Prop(tile, "title"), v.Title, title)
-			home = append(home, tile)
-			return
-		}
-		if v.Slot == "command" && v.Command != "" {
-			key = "cmd:" + v.Command
-		} else if v.Slot != "tab" {
-			return
+	for _, d := range engine.Views(a) {
+		key := d.Key
+		if d.View.Slot == "command" {
+			key = "cmd:" + d.View.Command
 		}
 		t, ok := all[key].(*viewTab)
 		if !ok {
-			t = newViewTab(cmp.Or(v.Title, title), v, dir)
-			t.remote = remote
+			t = newViewTab(d.Title, d.View, d.Dir)
+			t.remote = d.Remote
 			all[key] = t
 		}
-		if owner != nil {
-			t.plugin, t.secrets = owner.Name, owner.Permissions.Secrets
+		t.title = d.Title
+		if d.Plugin != "" {
+			t.plugin, t.secrets = d.Plugin, d.Secrets
 		}
-		if plugin, _, ok := strings.Cut(strings.TrimPrefix(key, "view:"), "/"); ok {
-			t.title = cmp.Or(v.Title, title)
-			servedBy[t] = plugin
-		}
-		if v.Slot == "command" {
-			return
-		}
-		ranks[t] = rank
-		out = append(out, t)
-	}
-	for _, n := range a.Spec.ViewOrder {
-		if v := a.Spec.Views[n]; v != nil {
-			add("view:"+n, n, v, a.Spec.Dir, "")
-		}
-	}
-	ms, _ := host.Discover(a.Spec.Dir, a.Spec.Plugins)
-	for _, m := range ms {
-		if !m.Relevant(a.Spec.Dir, a.Spec.Plugins) {
-			continue
-		}
-		showTabs := m.ShowsTab(a.Spec.Dir, a.Spec.Plugins)
-		owner = m
-		rank = viewRank(m, a.Spec.Dir)
-		names := make([]string, 0, len(m.Views))
-		for n := range m.Views {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			node := m.Views[n]
-			var v view.View
-			if err := a.Spec.Expanded(&node).Decode(&v); err != nil {
-				v = view.View{Slot: "tab", Root: protocol.Node{Widget: "text", Props: protocol.Args{"text": err.Error()}}}
-			}
-			remote := ""
-			if v.Root.Widget == "" && v.File == "" {
-				remote = m.Name + "." + n
-			}
-			if !showTabs && v.Slot == "tab" {
-				continue
-			}
-			add("view:"+m.Name+"."+n, n, &v, m.Dir, remote)
-		}
-		// a plugin with its own views has laid out what the contract views would show
-		for _, id := range m.Implements {
-			if len(names) > 0 || !showTabs {
-				break
-			}
-			if c := contracts.Get(id); c != nil && c.View != nil {
-				var v view.View
-				if err := yaml.Unmarshal(c.View, &v); err != nil {
-					panic(err)
-				}
-				served(&v.Root, m.Name)
-				add("view:"+m.Name+"/"+c.ID, v.Title, &v, m.Dir, "")
-			}
-		}
-	}
-	// two plugins serving one contract (docs from files and from Confluence) are named after the plugins
-	titles := map[string]int{}
-	for t := range servedBy {
-		titles[t.title]++
-	}
-	for t, plugin := range servedBy {
-		if titles[t.title] > 1 {
-			t.title = strings.ToUpper(plugin[:1]) + strings.ReplaceAll(plugin[1:], "-", " ")
+		if d.View.Slot != "command" {
+			out = append(out, t)
 		}
 	}
 	// Plugins is no tab: :plugins opens it for a while (pluginsScreen)
@@ -1364,48 +1282,7 @@ func addViews(a *engine.App, all map[string]tab) []tab {
 		}
 		all["view:Plugins"] = newViewTab("Plugins", &v, a.Spec.Dir)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return ranks[out[i]] < ranks[out[j]] })
-	if len(home) > 0 {
-		root := protocol.Node{Widget: "grid"}
-		for i := 0; i < len(home); i += 2 {
-			root.Children = append(root.Children, protocol.Node{Widget: "row", Children: home[i:min(i+2, len(home))]})
-		}
-		add("view:Home", "Home", &view.View{Title: "Home", Slot: "tab", Root: root}, a.Spec.Dir, "")
-		out = append([]tab{out[len(out)-1]}, out[:len(out)-1]...)
-	}
 	return out
-}
-
-// viewRank orders the views: the dev loop's contracts (changes, merge requests, issues, docs), then
-// the project's own, then what a user installed for themselves (games), git-ignored ones included.
-func viewRank(m *host.Manifest, dir string) int {
-	for i, c := range []string{"vcs", "scm", "tracker", "docs"} {
-		for _, id := range m.Implements {
-			if strings.HasPrefix(id, c+"/") {
-				return 10 + i
-			}
-		}
-	}
-	rel, err := filepath.Rel(dir, m.Dir)
-	if err != nil || strings.HasPrefix(rel, "..") || exec.Command("git", "-C", dir, "check-ignore", "-q", rel).Run() == nil {
-		return 30
-	}
-	return 20
-}
-
-// served points a contract's standard view at the plugin serving it: scm.mrs becomes <plugin>.scm.mrs.
-func served(root *protocol.Node, plugin string) {
-	view.Walk(root, func(n *protocol.Node) {
-		if n.Bind != nil && n.Bind.Source != "" {
-			n.Bind.Source = plugin + "." + n.Bind.Source
-		}
-		acts, _ := n.Props["actions"].([]any)
-		for _, a := range acts {
-			if am, ok := a.(map[string]any); ok && am["action"] != nil {
-				am["action"] = plugin + "." + fmt.Sprint(am["action"])
-			}
-		}
-	})
 }
 
 // pluginsView lists the plugins in use; its keys run `rig plugin ...`.

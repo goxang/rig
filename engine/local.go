@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/goxang/rig/kernel/policy"
 	"github.com/goxang/rig/kernel/refs"
 	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 type sourceFunc func(ctx context.Context, args protocol.Args) (*protocol.Frame, error)
@@ -70,6 +72,7 @@ func NewLocal(a *App, jm *jobs.Manager) *Local {
 	}
 	l.builtins()
 	l.observe()
+	l.components()
 	l.leases()
 	l.pluginActions()
 	l.plugins()
@@ -170,13 +173,22 @@ func (l *Local) builtins() {
 			names = SortedKeys(l.App.Spec.Services)
 		}
 		var rows []map[string]any
+		sections := l.App.Spec.SectionMap()
 		for _, st := range l.App.StatusAll(ctx, names) {
-			rows = append(rows, map[string]any{"service": st.Service, "state": string(st.State), "ready": st.Ready, "desired": st.Desired, "image": st.Image, "message": st.Message})
+			sec, role := cmp.Or(sections[st.Service], "other"), ""
+			if s := l.App.Spec.Services[st.Service]; s != nil {
+				if role = string(s.Role); s.Role == spec.RoleInfra {
+					sec = "infra"
+				}
+			}
+			rows = append(rows, map[string]any{"service": st.Service, "state": string(st.State), "ready": st.Ready, "desired": st.Desired, "image": st.Image, "message": st.Message,
+				"section": sec, "role": role})
 		}
 		return frames.FromRows([]protocol.Field{
 			{Name: "service", Type: protocol.TypeString, Ref: "svc://{service}"}, {Name: "state", Type: protocol.TypeString},
 			{Name: "ready", Type: protocol.TypeInt}, {Name: "desired", Type: protocol.TypeInt},
 			{Name: "image", Type: protocol.TypeString}, {Name: "message", Type: protocol.TypeString},
+			{Name: "section", Type: protocol.TypeString}, {Name: "role", Type: protocol.TypeString},
 		}, rows), nil
 	}
 	l.about["plugins"] = protocol.SourceSpec{Description: "installed plugins: version, state, what they implement"}

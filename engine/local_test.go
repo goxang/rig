@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -144,5 +145,20 @@ actions:
 	b, _ := os.ReadFile(filepath.Join(a.StateDir(), "audit.jsonl"))
 	if !strings.Contains(string(b), `"demo.poke"`) {
 		t.Errorf("plugin action not audited:\n%s", b)
+	}
+}
+
+func TestServicesStatusHasSections(t *testing.T) {
+	l := openLocal(t, "dev")
+	f, err := l.Query(context.Background(), "services.status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for i, s := range f.Columns[0] {
+		got[s.(string)] = f.Columns[slices.IndexFunc(f.Fields, func(x protocol.Field) bool { return x.Name == "section" })][i].(string)
+	}
+	if got["api"] != "other" || got["db"] != "infra" {
+		t.Fatalf("sections: %v", got)
 	}
 }

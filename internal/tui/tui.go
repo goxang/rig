@@ -311,7 +311,7 @@ func newTabs(a *engine.App, all map[string]tab, mode string) []tab {
 	}
 	var out []tab
 	for _, n := range spec.Screens {
-		if configured(a, n) && showScreen(mode, n) {
+		if a.Configured(n) && showScreen(mode, n) {
 			out = append(out, all[n])
 		}
 	}
@@ -399,47 +399,6 @@ func (m *model) setMode(mode string) tea.Cmd {
 }
 
 // configured says whether the project has anything for screen n to show.
-func configured(a *engine.App, n string) bool {
-	has := func(kinds ...core.Kind) bool {
-		for _, k := range kinds {
-			if len(a.Names(k)) > 0 {
-				return true
-			}
-		}
-		return false
-	}
-	rt := a.Env.Runtime.Type
-	switch n {
-	case "metrics":
-		if len(a.Spec.Dashboards) > 0 || has(core.KindMetrics) {
-			return true
-		}
-		for _, s := range a.Spec.Services {
-			if s.Metrics != nil {
-				return true
-			}
-		}
-		return false
-	case "traces":
-		return has(core.KindTracing)
-	case "queries":
-		return len(a.Queries()) > 0 || len(a.Queriers()) > 0
-	case "kv":
-		return has(core.KindKV)
-	case "data":
-		return has(core.KindDatabase, core.KindCache, core.KindMessaging)
-	case "load":
-		return has(core.KindLoad)
-	case "manifests":
-		return rt == "kubernetes" || rt == "kind" || len(a.Spec.Manifests) > 0
-	case "hosts":
-		_, ok := core.As[core.Hosts](a.Runtime())
-		return ok || has(core.KindHosts)
-	case "tests":
-		return len(a.SuiteNames()) > 0
-	}
-	return true
-}
 
 func Run(ctx context.Context, a *engine.App) error { return run(ctx, a, nil, nil) }
 
