@@ -81,8 +81,20 @@ function icon(name, cls = 'ico') {
   el.innerHTML = ICONS[name] || '';
   return el;
 }
-const btn = (label, onclick, cls = '', title) => h('button', { class: 'btn ' + cls, onclick, title, type: 'button' }, label);
-const ibtn = (name, onclick, title, cls = '') => h('button', { class: 'btn icon ghost ' + cls, onclick, title, 'aria-label': title, type: 'button' }, icon(name));
+// a click that starts async work shows a spinner on the button and ignores clicks until it settles
+const busyClick = onclick => !onclick ? onclick : function (e) {
+  const el = e?.currentTarget;
+  if (el?.classList?.contains('busy')) return;
+  const r = onclick.call(this, e);
+  if (r && typeof r.then === 'function' && el) {
+    el.classList.add('busy'); el.setAttribute('aria-busy', 'true');
+    const done = () => { el.classList.remove('busy'); el.removeAttribute('aria-busy'); };
+    r.then(done, done);
+  }
+  return r;
+};
+const btn = (label, onclick, cls = '', title) => h('button', { class: 'btn ' + cls, onclick: busyClick(onclick), title, type: 'button' }, label);
+const ibtn = (name, onclick, title, cls = '') => h('button', { class: 'btn icon ghost ' + cls, onclick: busyClick(onclick), title, 'aria-label': title, type: 'button' }, icon(name));
 const badge = (text, cls = '', dot = false) => h('span', { class: 'badge ' + cls }, dot && h('span', { class: 'dot' }), text);
 // Go writes nanoseconds, which Date does not parse
 const toDate = v => new Date(typeof v === 'string' ? v.replace(/(\.\d{3})\d+/, '$1') : v);
@@ -108,7 +120,21 @@ function colorOf(name) {
 
 // ---------- api ----------
 class ApiError extends Error {}
+let inflight = 0, barTimer;
+function progress(delta) {
+  inflight = Math.max(0, inflight + delta);
+  clearTimeout(barTimer);
+  const bar = document.getElementById('progress');
+  if (!bar) return;
+  if (inflight > 0) barTimer = setTimeout(() => { bar.hidden = false; }, 700);
+  else bar.hidden = true;
+}
 async function api(method, body = {}, confirm = false, signal) {
+  const slow = method === 'run';
+  if (slow) progress(1);
+  try { return await apiCall(method, body, confirm, signal); } finally { if (slow) progress(-1); }
+}
+async function apiCall(method, body = {}, confirm = false, signal) {
   const headers = authHeaders();
   if (confirm) headers['X-Rig-Confirm'] = '1';
   const r = await fetch('/v1/engine/' + method, { method: 'POST', headers, body: JSON.stringify(body), signal });
@@ -121,7 +147,11 @@ async function api(method, body = {}, confirm = false, signal) {
   }
   return j;
 }
-const query = (source, args = {}, signal) => api('query', { source, args }, false, signal);
+const query = (source, args = {}, signal) => {
+  const t = AbortSignal.timeout(source.startsWith('metrics.') ? 25000 : 90000);
+  return api('query', { source, args }, false, signal ? AbortSignal.any([signal, t]) : t)
+    .catch(e => { throw e.name === 'TimeoutError' ? new Error(source + ' timed out: the data source is slow or unreachable') : e; });
+};
 const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.token, 'X-Rig-Env': S.env });
 // web calls the page's own routes (views, the command line, the assistant) beside the Engine API.
 async function web(path, body) {
@@ -158,10 +188,15 @@ function frameRows(f) {
 }
 const stream = (source, args, onBatch, signal) => ndjson('engine/stream', { source, args }, onBatch, signal);
 // act runs an action through policy: a confirm comes back as a question, asked here.
+// pending maps a service to what is happening to it, so its row shows "restarting…" until the action returns.
+const pending = new Map();
+const PENDING_VERB = { 'env.up': 'starting…', 'env.down': 'stopping…', 'runtime.restart': 'restarting…' };
 async function act(action, args = {}, label = action) {
+  const names = PENDING_VERB[action] ? (args.targets || [args.service]).filter(Boolean) : [];
+  const mark = on => { names.forEach(n => on ? pending.set(n, PENDING_VERB[action]) : pending.delete(n)); if (names.length) document.dispatchEvent(new Event('rig:pending')); };
   const go = async confirm => {
-    S.running++; refreshJobs(); setTimeout(refreshJobs, 400);
-    try { return await api('run', { action, args }, confirm); } finally { S.running--; refreshJobs(); }
+    S.running++; refreshJobs(); setTimeout(refreshJobs, 400); mark(true);
+    try { return await api('run', { action, args }, confirm); } finally { mark(false); S.running--; refreshJobs(); }
   };
   try {
     let res;
@@ -170,7 +205,8 @@ async function act(action, args = {}, label = action) {
       if (!await confirmBox('Confirm ' + label, e.message.replace(/^(confirm|reauth): /, ''), 'Run', true)) return null;
       res = await go(true);
     }
-    toast((res.result?.message || label) + (res.result?.message ? '' : ' done'), 'ok');
+    const m = res.result?.message;
+    toast(m && !m.startsWith(action) ? m : label + ' done', 'ok');
     return res;
   } catch (e) {
     toast(label + ': ' + e.message, 'bad', 8000);
@@ -218,9 +254,13 @@ let overlay = null;
 const overlays = [];
 function closeOverlay() { overlays.at(-1)?.close(); }
 function closeAll() { while (overlays.length) overlays.at(-1).close(); }
-function openOverlay(nodes, onClose) {
-  const scrim = h('div', { class: 'scrim', onclick: () => o.close() });
+function openOverlay(nodes, onClose, { clear = false } = {}) {
+  const scrim = h('div', { class: 'scrim' + (clear ? ' clear' : ''), onclick: () => o.close() });
   scrim.style.zIndex = 40 + overlays.length * 2;
+  if (clear) scrim.oncontextmenu = e => {
+    e.preventDefault(); o.close();
+    document.elementFromPoint(e.clientX, e.clientY)?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, view: window }));
+  };
   nodes.forEach(n => { n.style.zIndex = 41 + overlays.length * 2; });
   document.body.append(scrim, ...nodes);
   const o = { closed: false, close() {
@@ -299,7 +339,7 @@ function dataTable({ columns, onRow, rowKey, selected, empty = 'Nothing here', r
     });
     const table = h('table', {}, h('thead', {}, head), h('tbody', {}, body));
     wrap.replaceChildren(table);
-    if (key) colResize(table, key);
+    colResize(table, key || 'auto.' + location.hash.replace(/[?].*/, '') + '.' + columns.map(c => c.key || c.label || '').join(','));
     if (!list.length) wrap.append(h('div', { class: 'empty' }, rows.length ? 'No rows match the filter' : empty));
     t.visible = list;
     cur = keep != null ? list.findIndex(r => ck(r) === keep) : -1;
@@ -342,8 +382,8 @@ function frameTable(frame, opts = {}) {
   return t;
 }
 const FILTER_HELP = 'words match fuzzy · *glob* · col=value · col!=value · col~text';
-function searchBox(placeholder, oninput, { value = '' } = {}) {
-  const input = h('input', { type: 'search', placeholder, value, title: FILTER_HELP, oninput: debounce(e => oninput(e.target.value), 80), 'data-filter': '1',
+function searchBox(placeholder, oninput, { value = '', title = FILTER_HELP } = {}) {
+  const input = h('input', { type: 'search', placeholder, value, title, oninput: debounce(e => oninput(e.target.value), 80), 'data-filter': '1',
     onkeydown: e => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; oninput(''); } else if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'ArrowDown') input.blur(); } });
   return h('div', { class: 'search' }, icon('search'), input);
 }
@@ -377,7 +417,7 @@ function parsed(r) {
   if (!level) { const m = LEVEL_RE.exec(msg); if (m) level = m[1].toLowerCase(); }
   level = level.replace(/[^a-z]/g, '');
   level = LEVELS[level] || level;
-  const keys = (f.fields.length ? f.fields : Object.keys(tree)).filter(k => k in tree && !used.has(k));
+  const keys = [...new Set([...f.fields, ...Object.keys(tree)])].filter(k => k in tree && !used.has(k));
   r._p = { tree, structured, time, level, msg, keys };
   return r._p;
 }
@@ -386,14 +426,16 @@ const compact = v => typeof v === 'object' && v ? JSON.stringify(v) : String(v);
 // shows each line structured (LEVEL message key=value, ui.logs' keys) or raw.
 function logView(el, { showService = true, max = 5000, filter = () => true } = {}) {
   let lines = [], wrap = S.info?.logs?.Wrap ?? true, raw = !!S.info?.logs?.Raw, cur = null;
-  const hidden = new Set(store.get('logs.hide.' + S.info?.project, S.info?.logs?.Hide || []));
+  const fmt = S.logFmt ||= logFormat();
+  const choice = store.get('logs.fields.' + S.info?.project, {});
+  const visible = k => k in choice ? choice[k] : fmt.fields.length ? fmt.fields.includes(k) : !fmt.hide.has(k);
   el.classList.add('logs');
   el.tabIndex = 0;
   el.classList.toggle('nowrap', !wrap);
   const lineEl = r => {
     const p = parsed(r);
     const t = r.time ? toDate(r.time) : null;
-    const kv = !raw && p.structured ? p.keys.filter(k => !hidden.has(k)).map(k => {
+    const kv = !raw && p.structured ? p.keys.filter(visible).map(k => {
       const v = compact(p.tree[k]);
       return [' ', h('span', { class: 'kv' + (/^err(or)?$/i.test(k) ? ' bad' : '') }, h('b', {}, k + '='), v.length > 400 ? v.slice(0, 400) + '…' : v)];
     }) : null;
@@ -452,7 +494,7 @@ function logView(el, { showService = true, max = 5000, filter = () => true } = {
     wrap(on) { wrap = on ?? !wrap; el.classList.toggle('nowrap', !wrap); return wrap; },
     raw(on) { raw = on ?? !raw; v.refilter(); return raw; },
     fields() { return [...new Set(lines.slice(-500).flatMap(r => parsed(r).keys))].sort(); },
-    hidden, setHidden(list) { hidden.clear(); list.forEach(k => hidden.add(k)); store.set('logs.hide.' + S.info?.project, [...hidden]); v.refilter(); },
+    known: () => choice, visible, setVisible(map) { Object.assign(choice, map); store.set('logs.fields.' + S.info?.project, choice); v.refilter(); },
     follow() { select(null); el.scrollTop = el.scrollHeight; },
     get lines() { return lines; }, get shown() { return lines.filter(filter); },
     keys(e) {
@@ -473,12 +515,12 @@ function logView(el, { showService = true, max = 5000, filter = () => true } = {
 }
 // pickFields asks which log fields show; the rest hide.
 async function pickFields(lv) {
-  const all = [...new Set([...lv.fields(), ...lv.hidden])].sort();
+  const all = [...new Set([...lv.fields(), ...Object.keys(lv.known())])].sort();
   if (!all.length) { toast('No fields in the lines so far'); return; }
-  const boxes = all.map(k => ({ k, el: h('input', { type: 'checkbox', checked: !lv.hidden.has(k) }) }));
+  const boxes = all.map(k => ({ k, el: h('input', { type: 'checkbox', checked: lv.visible(k) }) }));
   const ok = await modal('Fields shown', h('div', { class: 'col' }, h('div', { class: 'row' }, btn('All', () => boxes.forEach(b => { b.el.checked = true; }), 'sm ghost'), btn('None', () => boxes.forEach(b => { b.el.checked = false; }), 'sm ghost')),
     h('div', { class: 'field-picks' }, boxes.map(b => h('label', { class: 'row' }, b.el, h('span', { class: 'mono' }, b.k))))), [['Cancel', false, 'ghost'], ['Apply', true, 'primary']]);
-  if (ok) lv.setHidden(boxes.filter(b => !b.el.checked).map(b => b.k));
+  if (ok) lv.setVisible(Object.fromEntries(boxes.map(b => [b.k, b.el.checked])));
 }
 
 // ---------- metrics ----------

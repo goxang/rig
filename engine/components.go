@@ -384,6 +384,31 @@ func (l *Local) components() {
 			{Name: "load1", Type: protocol.TypeNumber}, {Name: "pods", Type: protocol.TypeInt}}, rows), nil
 	})
 
+	src("hosts.pods", "every pod running on one host: host, component", func(ctx context.Context, args protocol.Args) (*protocol.Frame, error) {
+		hs, ok := core.As[core.Hosts](a.Runtime())
+		if !ok || str(args["component"]) != "" {
+			var err error
+			if hs, _, err = Get[core.Hosts](a, core.KindHosts, str(args["component"])); err != nil {
+				return nil, err
+			}
+		}
+		list, err := hs.Hosts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var rows []map[string]any
+		for _, x := range list {
+			if x.Name != str(args["host"]) {
+				continue
+			}
+			for _, p := range x.Pods {
+				rows = append(rows, map[string]any{"pod": p.Name, "namespace": p.Namespace, "cpu": p.CPU, "mem": p.Mem, "started": p.Started})
+			}
+		}
+		return frames.FromRows([]protocol.Field{{Name: "pod", Type: protocol.TypeString}, {Name: "namespace", Type: protocol.TypeString}, {Name: "cpu", Type: protocol.TypeNumber},
+			{Name: "mem", Type: protocol.TypeBytes}, {Name: "started", Type: protocol.TypeTime}}, rows), nil
+	})
+
 	src("component.actions", "the adapter's own operations of a component (rig do): component", func(ctx context.Context, args protocol.Args) (*protocol.Frame, error) {
 		ac, err := as[core.Actioner](a, args)
 		if err != nil {

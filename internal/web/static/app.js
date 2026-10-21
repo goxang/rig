@@ -65,8 +65,10 @@ function renderChrome() {
   const link = (p, n) => h('a', { href: '#/' + p.id, class: p.id === cur ? 'on' : '', 'data-page': p.id, title: p.title },
     icon(p.icon), h('span', { class: 'ellipsis' }, p.title), h('span', { class: 'count', hidden: true }));
   const groups = GROUPS.map(g => ({ g, pages: PAGES.filter(p => p.group === g.id) })).filter(x => x.pages.length);
+  const rail = store.get('nav.rail', true);
+  const toggleRail = e => { const on = !store.get('nav.rail', true); store.set('nav.rail', on); $('.shell')?.classList.toggle('rail', on); e.currentTarget.title = on ? 'Expand the sidebar' : 'Collapse the sidebar'; window.dispatchEvent(new Event('resize')); };
   const brand = () => h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'r'), h('div', { class: 'grow' }, S.info?.project || 'rig', h('small', {}, 'rig ' + (S.info?.version || ''))));
-  const side = h('aside', { class: 'sidebar' }, brand(), h('div', { class: 'side-env' }, envPicker()),
+  const side = h('aside', { class: 'sidebar' }, h('div', { class: 'side-top' }, brand(), ibtn('menu', toggleRail, rail ? 'Expand the sidebar' : 'Collapse the sidebar', 'rail-btn')), h('div', { class: 'side-env' }, envPicker()),
     h('nav', { class: 'nav' }, groups.map(({ g, pages }) => {
       const closed = collapsed.has(g.id) && !pages.some(p => p.id === cur);
       return h('div', { class: 'nav-group' + (closed ? ' closed' : '') },
@@ -76,7 +78,7 @@ function renderChrome() {
         } }, icon('chev', 'chev'), groupTitle(g)),
         h('div', { class: 'nav-items' }, pages.map(p => link(p))));
     })),
-    h('div', { class: 'side-foot' }, h('button', { class: 'btn ghost side-ai', onclick: toggleAI, type: 'button' }, icon('ai'), 'Assistant', h('span', { class: 'kbd' }, '@'))));
+    h('div', { class: 'side-foot' }, h('button', { class: 'btn ghost side-ai', onclick: toggleAI, type: 'button', title: 'Assistant (@)' }, icon('ai'), h('span', { class: 'lbl' }, 'Assistant'), h('span', { class: 'kbd' }, '@'))));
   const curGroup = curPage?.group;
   const top = h('header', { class: 'topbar' }, ibtn('menu', () => document.body.classList.toggle('nav-open'), 'Screens', 'nav-btn'), brand(),
     h('nav', { class: 'topnav' }, groups.map(({ g, pages }) => h('a', { href: '#/' + (pages.find(p => p.id === store.get('last.' + g.id)) || pages[0]).id, class: g.id === curGroup ? 'on' : '', 'data-group': g.id },
@@ -85,12 +87,14 @@ function renderChrome() {
     h('div', { class: 'spacer' }),
     h('button', { class: 'palette-btn', onclick: () => openPalette(), type: 'button', title: 'Search (ctrl+k) · : runs a command' }, icon('search'), h('span', { class: 'ellipsis' }, 'Search or :command'), h('span', { class: 'kbd' }, navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K')),
     h('span', { class: 'top-env' }, envPicker()),
+    h('a', { class: 'btn icon ghost top-act', href: '#/jobs', 'data-page': 'jobs', title: 'Activity (!)', 'aria-label': 'Activity' }, icon('jobs'), h('span', { class: 'count', hidden: true })),
     ibtn('ai', toggleAI, 'Assistant (@)', 'ai-btn'), ibtn('ext', () => browserFull(), 'Full screen (F11)', 'full-btn'),
     ibtn(document.documentElement.dataset.scheme === 'light' ? 'moon' : 'sun', () => setPref('scheme', document.documentElement.dataset.scheme === 'light' ? 'dark' : 'light'), 'Light or dark'));
   const sub = h('nav', { class: 'subnav' }, PAGES.filter(p => p.group === curGroup).map(p => link(p)));
   side.addEventListener('click', e => { if (e.target.closest('a')) document.body.classList.remove('nav-open'); });
   shell.replaceChildren(h('div', { class: 'nav-scrim', onclick: () => document.body.classList.remove('nav-open') }), side, top, sub, h('main', { class: 'main', id: 'main' }), h('footer', { class: 'keys', id: 'keys' }));
   shell.classList.toggle('ai-open', aiOpen);
+  shell.classList.toggle('rail', rail);
   if (aiOpen) shell.append(aiPanel());
   updateCounts();
 }
@@ -186,7 +190,7 @@ function openPalette({ only, prompt, value = '' } = {}) {
       res.replaceChildren(h('div', { class: 'opt sel' }, icon('cmd'), h('span', { class: 'mono' }, input.value), h('span', { class: 'k' }, 'enter runs')));
       return;
     }
-    shown = items.filter(x => matchText(x.k + ' ' + x.t + ' ' + (x.d || ''), input.value)).slice(0, 80);
+    shown = rankBy(items, input.value, x => x.t, x => x.k + ' ' + (x.d || '')).slice(0, 80);
     sel = Math.min(sel, Math.max(0, shown.length - 1));
     res.replaceChildren(...shown.map((x, i) => h('div', { class: 'opt' + (i === sel ? ' sel' : ''), onmousemove: () => { if (sel !== i) { sel = i; draw(); } }, onclick: () => pick(x) },
       h('span', {}, x.t), x.d && h('span', { class: 'd' }, x.d), h('span', { class: 'k' }, x.k))));
@@ -417,3 +421,14 @@ async function boot(again) {
   boot();
   setInterval(() => { if (document.hidden || !S.info) return; refreshInbox(); if (S.running || S.jobs.some(isRunning)) refreshJobs(); }, 3000);
 })();
+
+// truncated text gets its full text as a tooltip the moment it is hovered
+document.addEventListener('mouseover', e => {
+  for (let el = e.target, n = 0; el && el !== document.body && n < 5; el = el.parentElement, n++) {
+    if (el.title || el.querySelector?.('[title]')) return;
+    const cs = getComputedStyle(el);
+    const clipped = (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1) || (cs.webkitLineClamp !== 'none' && el.scrollHeight > el.clientHeight + 1);
+    if (clipped) { el.title = el.textContent.trim().slice(0, 1000); return; }
+  }
+});
+

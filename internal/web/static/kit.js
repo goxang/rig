@@ -50,30 +50,48 @@ function rowMatcher(filter, cols) {
   return r => conds.every(c => c(r));
 }
 // matchText filters plain items (palette entries, list rows): typed text first, then fuzzy.
+// matchTier is the TUI's ranking: 0 name+desc hold q as typed, 1 only fuzzy on the name, -1 no match.
+const matchTier = (name, desc, q) => !q || `${name} ${desc || ''}`.toLowerCase().includes(q.toLowerCase()) ? 0 : fuzzy(name, q) ? 1 : -1;
+// rankBy keeps the items matchTier accepts, typed-text hits first.
+const rankBy = (items, q, name, desc) => q ? items.map(x => [x, matchTier(name(x), desc?.(x), q)]).filter(p => p[1] >= 0).sort((a, b) => a[1] - b[1]).map(p => p[0]) : items;
 const matchText = (text, q) => !q || String(text).toLowerCase().includes(q.toLowerCase()) || fuzzy(text, q);
 
 // ---------- resizing ----------
 // colResize lets a header's right edge drag its column wider; widths stay per table key.
 function colResize(table, key) {
-  const saved = store.get('cols.' + key, {});
+  const store_ = () => store.get('cols.' + key, {});
+  const saved = store_();
   const ths = [...table.querySelectorAll('thead th')];
   const set = (th, w) => { th.style.width = th.style.minWidth = th.style.maxWidth = w + 'px'; };
+  const total = () => ths.reduce((n, th) => n + (parseFloat(th.style.width) || th.getBoundingClientRect().width), 0);
+  const freeze = () => {
+    if (table.classList.contains('fixed')) return;
+    const w = ths.map(th => th.getBoundingClientRect().width);
+    ths.forEach((th, i) => set(th, Math.round(w[i])));
+    table.classList.add('fixed'); table.style.width = Math.round(total()) + 'px';
+  };
+  const thaw = () => { ths.forEach(th => { th.style.width = th.style.minWidth = th.style.maxWidth = ''; }); table.classList.remove('fixed'); table.style.width = ''; store.set('cols.' + key, {}); };
+  const ids = ths.map(th => th.dataset.col).filter(Boolean);
+  if (ids.length && ids.every(id => saved[id])) {
+    ths.forEach(th => set(th, saved[th.dataset.col] || (th.classList.contains('chk') ? 36 : 120)));
+    table.classList.add('fixed'); table.style.width = Math.round(total()) + 'px';
+  }
   ths.forEach(th => {
     const id = th.dataset.col;
     if (!id || th.classList.contains('chk')) return;
-    if (saved[id]) { set(th, saved[id]); table.classList.add('fixed'); }
     const grip = h('span', { class: 'col-grip', title: 'drag to resize · double-click resets' });
     grip.addEventListener('click', e => e.stopPropagation());
-    grip.addEventListener('dblclick', e => { e.stopPropagation(); delete saved[id]; store.set('cols.' + key, saved); th.style.width = th.style.minWidth = th.style.maxWidth = ''; });
+    grip.addEventListener('dblclick', e => { e.stopPropagation(); thaw(); });
     grip.addEventListener('pointerdown', e => {
       e.preventDefault(); e.stopPropagation();
+      freeze();
       const x0 = e.clientX, w0 = th.getBoundingClientRect().width;
       grip.setPointerCapture(e.pointerId);
       document.body.classList.add('resizing');
-      const move = ev => set(th, Math.max(40, w0 + ev.clientX - x0));
+      const move = ev => { set(th, Math.max(40, Math.round(w0 + ev.clientX - x0))); table.style.width = Math.round(total()) + 'px'; };
       const up = () => {
         grip.removeEventListener('pointermove', move); document.body.classList.remove('resizing');
-        saved[id] = Math.round(th.getBoundingClientRect().width); store.set('cols.' + key, saved);
+        store.set('cols.' + key, Object.fromEntries(ths.filter(t => t.dataset.col).map(t => [t.dataset.col, Math.round(t.getBoundingClientRect().width)])));
       };
       grip.addEventListener('pointermove', move);
       grip.addEventListener('pointerup', up, { once: true });
@@ -130,7 +148,7 @@ function ctxMenu(at, items, title) {
       it.icon ? icon(it.icon) : h('span', { class: 'ico' }), h('span', { class: 'grow ellipsis' }, it.label), it.key && h('kbd', {}, it.key));
     rows.push([b, it]); m.append(b);
   }
-  openOverlay([m]);
+  openOverlay([m], null, { clear: true });
   const r = m.getBoundingClientRect();
   let x = at.x ?? 0, y = at.y ?? 0;
   if (at instanceof Element) { const b = at.getBoundingClientRect(); x = b.left; y = b.bottom + 4; }

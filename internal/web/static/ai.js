@@ -167,32 +167,70 @@ async function aiCommand(line) {
   note('Unknown command ' + cmd + '.' + (near ? ' Did you mean ' + near[0] + '?' : '') + ' /help lists them.');
 }
 
-// aiSettings is Settings' Assistant section: rig ai config, in a form.
+// aiSettings is Settings' Assistant section: rig ai config, offering only what this machine has.
 function aiSettings() {
-  const box = h('div', {}, loading());
-  const HELP = {
-    backend: 'what runs the chat: opencode or claude (installed CLIs)', provider: 'whose API the key is for', model: 'the model, e.g. provider/model for opencode',
-    effort: 'how hard it thinks', fast_model: 'a small model for quick answers (autocomplete, titles)', fast_url: 'its OpenAI-compatible URL', fast_api_key: 'its key',
-    url: 'an OpenAI-compatible URL (ollama, a proxy)', api_key: 'the provider\'s API key', proxy: 'an HTTP proxy for its requests',
-    autocomplete: 'suggest the rest of a command while typing', disabled: 'turn the assistant off', redact: 'mask secrets before they leave this machine',
-  };
-  web('ai').then(info => {
-    const inputs = {};
-    const field = k => {
-      const v = info.config[k] || '', secret = /key/.test(k);
-      let input;
-      if (k === 'backend') input = h('select', {}, ['', 'opencode', 'claude'].map(x => h('option', { value: x, selected: x === v }, x || 'auto')));
-      else if (k === 'provider') input = h('select', {}, h('option', { value: '' }, 'none'), Object.keys(info.providers || {}).sort().map(x => h('option', { value: x, selected: x === v, title: info.providers[x] }, x)));
-      else if (['autocomplete', 'disabled', 'redact'].includes(k)) input = h('select', {}, [['', 'default'], ['true', 'on'], ['false', 'off']].map(([x, l]) => h('option', { value: x, selected: x === v }, l)));
-      else input = h('input', { type: secret ? 'password' : 'text', placeholder: secret && v ? v : '', value: secret ? '' : v, autocomplete: 'off' });
+  const box = h('div', { class: 'ai-set' }, loading());
+  Promise.all([web('ai'), web('ai/options')]).then(([info, opts]) => {
+    const cfg = info.config, inputs = {};
+    const backends = (opts.backends || []).map(b => ({ ...b, models: b.models || [] })), local = (opts.local || []).map(l => ({ ...l, models: l.models || [] }));
+    const dl = (id, items) => h('datalist', { id }, (items || []).map(m => h('option', { value: m })));
+    const inp = (k, o = {}) => {
+      const secret = /key/.test(k), v = cfg[k] || '';
+      const input = h('input', { type: secret ? 'password' : 'text', placeholder: secret && v ? v : (o.ph || ''), value: secret ? '' : v, autocomplete: 'off', list: o.list });
       inputs[k] = { input, was: secret ? '' : v, secret };
-      return h('label', { class: 'field' }, h('span', {}, h('span', { class: 'mono' }, k), h('span', { class: 'muted' }, ' — ' + (HELP[k] || ''))), input);
+      return input;
     };
+    const sel = (k, opts2) => {
+      const v = cfg[k] || '';
+      const input = h('select', {}, opts2.map(([x, l]) => h('option', { value: x, selected: x === v }, l)));
+      inputs[k] = { input, was: v };
+      return input;
+    };
+    const fld = (label, help, input) => h('label', { class: 'field' }, h('span', {}, label, help ? h('span', { class: 'muted' }, ' · ' + help) : null), input);
+    const curBackend = cfg.backend || backends[0]?.backend || '';
+    const modelsOf = b => (backends.find(x => x.backend === b)?.models) || [];
+    const bsel = sel('backend', [['', backends.length ? 'auto' : 'none installed'], ...backends.map(b => [b.backend, b.backend + (b.ready ? '' : ' (not logged in)')])]);
+    const mlist = h('datalist', { id: 'ai-models' });
+    const fill = () => mlist.replaceChildren(...modelsOf(bsel.value || curBackend).map(m => h('option', { value: m })));
+    bsel.onchange = fill; fill();
+    const model = inp('model', { list: 'ai-models', ph: 'default of the backend' });
+    const fastMode = h('select', {}, [['backend', 'A model of the backend'], ['custom', 'Custom endpoint (URL)']].map(([x, l]) => h('option', { value: x, selected: x === (cfg.fast_url ? 'custom' : 'backend') }, l)));
+    const flist = h('datalist', { id: 'ai-fast-models' });
+    const fastModel = inp('fast_model', { list: 'ai-models', ph: 'e.g. a flash/mini/haiku model' });
+    const fastUrl = inp('fast_url', { ph: 'https://host/v1' }), fastKey = inp('fast_api_key', { ph: 'API key' });
+    const probe = btn('List models', async () => {
+      try { const r = await web('ai/probe', { url: fastUrl.value, api_key: fastKey.value }); flist.replaceChildren(...r.models.map(m => h('option', { value: m }))); toast(r.models.length + ' models', 'ok'); } catch (e) { toast(e.message, 'bad', 6000); }
+    });
+    const fastCustom = h('div', { class: 'form-grid2' }, fld('URL', 'OpenAI-compatible', fastUrl), fld('API key', '', fastKey), fld('Model', '', h('div', { class: 'row' }, h('span', { class: 'grow' }, fastModel.cloneNode(false)), probe)));
+    const customModel = fastCustom.querySelector('input[list]');
+    customModel.setAttribute('list', 'ai-fast-models'); customModel.value = fastModel.value;
+    customModel.oninput = () => { fastModel.value = customModel.value; };
+    const fastBackend = h('div', { class: 'form-grid2' }, fld('Model', 'filter by typing', fastModel));
+    const applyMode = () => { const c = fastMode.value === 'custom'; fastCustom.hidden = !c; fastBackend.hidden = c; };
+    fastMode.onchange = applyMode; applyMode();
+    const adv = h('details', { class: 'ai-adv', open: !!(cfg.url || cfg.api_key || (cfg.provider && cfg.provider !== 'own')) },
+      h('summary', {}, 'Use an API endpoint instead (ollama, OpenAI-compatible, DeepSeek…)'),
+      h('div', { class: 'form-grid2' },
+        fld('Provider', '', sel('provider', [['', 'none'], ...Object.keys(info.providers || {}).sort().map(x => [x, x])])),
+        fld('URL', local.length ? 'found: ' + local.map(l => l.provider).join(', ') : '', inp('url', { ph: 'http://localhost:11434/v1' })),
+        fld('API key', '', inp('api_key')), fld('Proxy', '', inp('proxy', { ph: 'http://…' }))),
+      local.length ? h('div', { class: 'row' }, h('span', { class: 'muted small' }, 'on this machine:'), local.map(l => btn(l.provider + ' · ' + l.models.length + ' models', () => { inputs.provider.input.value = l.provider; inputs.url.input.value = l.url; mlist.replaceChildren(...l.models.map(m => h('option', { value: m }))); }, 'sm'))) : null);
     const state = h('div', { class: 'row' }, info.enabled ? badge('ready', 'green', true) : badge('not set up', 'amber', true), h('span', { class: 'muted' }, info.describe));
-    box.replaceChildren(state, h('div', { class: 'form-grid' }, (info.keys || []).map(field)),
-      h('div', { class: 'row' }, h('span', { class: 'muted small' }, info.file), h('span', { class: 'spacer' }), btn('Save', async () => {
+    const tri = k => sel(k, [['', 'default'], ['true', 'on'], ['false', 'off']]);
+    box.replaceChildren(state, mlist, flist,
+      h('div', { class: 'ai-sec' }, h('h4', {}, 'Chat'),
+        h('div', { class: 'form-grid2' }, fld('Backend', backends.length ? 'installed: ' + backends.map(b => b.backend).join(', ') : 'install opencode or claude', bsel),
+          fld('Model', 'filter by typing', model), fld('Effort', 'reasoning level', inp('effort', { ph: 'default' })))),
+      adv,
+      h('div', { class: 'ai-sec' }, h('h4', {}, 'Fast model'), h('p', { class: 'muted small' }, 'Small model for autocomplete and titles.'),
+        h('div', { class: 'form-grid2' }, fld('Source', '', fastMode)), fastBackend, fastCustom),
+      h('div', { class: 'ai-sec' }, h('h4', {}, 'Behavior'),
+        h('div', { class: 'form-grid2' }, fld('Autocomplete', 'suggest while typing', tri('autocomplete')), fld('Redact secrets', 'mask before sending', tri('redact')), fld('Disabled', 'turn the assistant off', tri('disabled')))),
+      h('div', { class: 'row' }, h('span', { class: 'muted small ellipsis' }, info.file), h('span', { class: 'spacer' }), btn('Save', async () => {
         const out = {};
+        if (fastMode.value === 'backend') { out.fast_url = ''; out.fast_api_key = ''; }
         for (const [k, x] of Object.entries(inputs)) { const v = x.input.value; if (x.secret ? v !== '' : v !== x.was) out[k] = v; }
+        if (fastMode.value === 'backend') { if (!cfg.fast_url) delete out.fast_url; if (!cfg.fast_api_key) delete out.fast_api_key; }
         if (!Object.keys(out).length) return toast('Nothing changed');
         try { const r = await web('ai/config', out); toast('Saved · ' + r.describe, 'ok'); aiState.info = null; if (aiOpen) aiLoadInfo(); box.replaceWith(aiSettings()); } catch (e) { toast(e.message, 'bad', 8000); }
       }, 'primary')));

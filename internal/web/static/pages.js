@@ -47,7 +47,7 @@ function pageLogs(ctx) {
   const groups = sectionGroups(all);
   const svcList = h('div', { class: 'svc-pick' });
   const drawPick = (f = '') => svcList.replaceChildren(
-    h('button', { class: 'pick-all' + (picked.size === 0 ? ' on' : ''), type: 'button', onclick: () => { picked.clear(); restart(); } }, 'All services'),
+    h('button', { class: 'pick-all' + (picked.size === all.length ? ' on' : ''), type: 'button', onclick: () => { picked.size === all.length ? picked.clear() : all.forEach(n => picked.add(n)); restart(); } }, picked.size === all.length ? 'Clear selection' : 'Select all'),
     ...groups.map(g => {
       const items = g.items.filter(x => matchText(x.name, f));
       if (!items.length) return null;
@@ -77,6 +77,7 @@ function pageLogs(ctx) {
     lv.clear(); held = [];
     const q = [...picked].join(',');
     history.replaceState(null, '', '#/logs' + (q ? '?svc=' + encodeURIComponent(q) + (instance ? '&i=' + encodeURIComponent(instance) : '') : ''));
+    if (!picked.size) { status.textContent = ''; box.append(h('div', { class: 'empty' }, 'Pick one or more services to read their logs')); return; }
     status.textContent = 'connecting…';
     const c = ctrl;
     stream('services.logs', { services: [...picked], tail: 300, instance: picked.size === 1 ? instance : '' }, b => {
@@ -100,7 +101,7 @@ function pageLogs(ctx) {
     [['', 'All levels'], ['debug', 'Debug+'], ['info', 'Info+'], ['warn', 'Warn+'], ['error', 'Errors']].map(([v, l]) => h('option', { value: v, selected: v === level }, l)));
   const refilter = debounce(() => lv.refilter(), 120);
   const logPane = h('div', { class: 'logs-main' },
-    h('div', { class: 'toolbar' }, searchBox('Filter: words, /regex/, a.b=value', v => { setText(v); refilter(); }), levelSel, status, h('span', { class: 'spacer' }),
+    h('div', { class: 'toolbar' }, searchBox('Filter lines…', v => { setText(v); refilter(); }, { title: 'words · /regex/ · a.b=value' }), levelSel, status, h('span', { class: 'spacer' }),
       rawBtn, btn('Fields', () => pickFields(lv), 'sm', 'h: fields shown'), wrapBtn, pauseBtn,
       ibtn('down', () => lv.follow(), 'Follow (G)', 'sm'), ibtn('trash', () => lv.clear(), 'Clear (c)', 'sm'),
       ibtn('copy', () => copy(lv.shown.map(r => `${r.time || ''} ${r.service} ${String(r.text).replace(ANSI_RE, '')}`).join('\n')), 'Copy shown (y)', 'sm'),
@@ -217,9 +218,8 @@ function pageMetrics(ctx) {
       { label: 'Open as ad-hoc query', icon: 'queries', key: 'e', run: () => { store.set('metrics.adhoc', targets[0]?.Query || ''); go('metrics/_query'); } },
     ]);
     el.addEventListener('dblclick', e => { if (e.target.closest('.ph')) view(); });
-    const my = gen;
     el._load = async () => {
-      if (my !== gen) return;
+      const my = gen;
       try {
         const args = t => ({ query: t.Query, source: p.Source || d?.Source || '', range, end: end || undefined, vars, instant: kind !== 'line' && kind !== 'stat' });
         const lists = await Promise.all(targets.map(async t => groupSeries(frameRows(await query('metrics.query', args(t), ctrl.signal)), t.Legend)));
@@ -287,7 +287,9 @@ function pageMetrics(ctx) {
       grid.append(el);
       panels.push(el);
     }
-    body.replaceChildren(d.Help ? h('p', { class: 'muted', style: { marginTop: 0 } }, d.Help) : '', grid);
+    const empty = Object.entries(d.Vars || {}).filter(([, v]) => !v.All && !v._values.length).map(([n]) => '$' + n);
+    body.replaceChildren(d.Help ? h('p', { class: 'muted', style: { marginTop: 0 } }, d.Help) : '',
+      empty.length ? h('div', { class: 'banner amber' }, `No values for ${empty.join(', ')} in ${S.info.env}: this dashboard has nothing to show here.`) : '', grid);
     if (!panels.length) body.replaceChildren(emptyState('This dashboard has no panels'));
     refresh();
   }
@@ -769,7 +771,7 @@ function pageSettings(ctx) {
     pane.replaceChildren(h('div', { class: 'settings-head' }, h('h2', {}, title), h('p', { class: 'muted' }, desc)),
       ...(tab === 'look' ? look() : tab === 'ai' ? [h('div', { class: 'card card-b' }, aiSettings())] : tab === 'keys' ? [shortcutsTable()] : about()));
   }
-  ctx.el.append(pageHead('Settings', 'Saved in this browser, except the assistant\'s, which rig ai config keeps'), h('div', { class: 'settings' }, nav, pane));
+  ctx.el.append(pageHead('Settings', 'Saved in this browser, except the assistant\'s, which rig ai config keeps'), splitPane(nav, pane, { key: 'settings.side', size: 240, min: 160 }));
   draw();
   ctx.onKey(e => {
     const i = tabs.findIndex(t => t[0] === tab);

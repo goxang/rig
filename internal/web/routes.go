@@ -31,6 +31,8 @@ func (h *Handler) extra(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/cli", h.auth(h.withEngine(h.cli)))
 	mux.HandleFunc("GET /v1/ai", h.auth(h.withEngine(h.aiInfo)))
 	mux.HandleFunc("POST /v1/ai/config", h.auth(h.aiConfig))
+	mux.HandleFunc("GET /v1/ai/options", h.auth(h.aiOptions))
+	mux.HandleFunc("POST /v1/ai/probe", h.auth(h.aiProbe))
 	mux.HandleFunc("GET /v1/ai/session", h.auth(h.withEngine(h.aiSession)))
 	mux.HandleFunc("POST /v1/ai/close", h.auth(h.withEngine(func(w http.ResponseWriter, r *http.Request, l *engine.Local) {
 		var in struct{ ID string }
@@ -376,6 +378,72 @@ func (h *Handler) aiInfo(w http.ResponseWriter, _ *http.Request, l *engine.Local
 	file, _ := ai.ConfigFile()
 	writeJSON(w, map[string]any{"config": conf, "keys": ai.Keys, "providers": ai.Providers, "describe": s.Describe(),
 		"enabled": s.Enabled(), "file": file, "sessions": sessions})
+}
+
+// aiOptions lists what this machine can run the assistant with: installed backends (with their
+// models) and local model servers.
+func (h *Handler) aiOptions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	type backend struct {
+		Backend string   `json:"backend"`
+		Model   string   `json:"model"`
+		Ready   bool     `json:"ready"`
+		Models  []string `json:"models"`
+	}
+	var backends []backend
+	for _, f := range ai.Detect() {
+		b := backend{Backend: f.Backend, Model: f.Model, Ready: f.Ready, Models: []string{}}
+		if f.Backend == ai.BackendClaude {
+			b.Models = []string{"opus", "sonnet", "haiku"}
+		} else if out, err := exec.CommandContext(ctx, f.Bin, "models").Output(); err == nil {
+			b.Models = strings.Fields(string(out))
+		}
+		backends = append(backends, b)
+	}
+	local := []map[string]any{}
+	for _, s := range ai.DetectLocal(ctx) {
+		local = append(local, map[string]any{"provider": s.Provider, "url": s.URL, "models": s.Models})
+	}
+	writeJSON(w, map[string]any{"backends": backends, "local": local})
+}
+
+// aiProbe lists the models of an OpenAI-compatible endpoint.
+func (h *Handler) aiProbe(w http.ResponseWriter, r *http.Request) {
+	var in struct{ URL, APIKey string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(in.URL, "/")+"/models", nil)
+	if err != nil {
+		writeErr(w, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
+		return
+	}
+	if in.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+in.APIKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeErr(w, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if resp.StatusCode/100 != 2 || json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&list) != nil {
+		writeErr(w, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "no model list at " + in.URL + " (" + resp.Status + ")"})
+		return
+	}
+	models := []string{}
+	for _, m := range list.Data {
+		models = append(models, m.ID)
+	}
+	writeJSON(w, map[string]any{"models": models})
 }
 
 func (h *Handler) aiConfig(w http.ResponseWriter, r *http.Request) {
