@@ -164,7 +164,9 @@ The TUI's keys work: `:` runs a command (`restart api`, `env staging`, `open Log
 command, streamed), `@` opens the assistant beside any screen, `.` or right-click the menu of what is
 under the cursor, `!` activity, `T` a task, `ctrl+e` the environment, `ctrl+p` the theme, `ctrl+k`
 search, `tab`/`shift+tab` or `shift+←→` screens, `ctrl+←→` or `[ ]` sub-tabs, `backspace` back, `esc`
-closes the top layer, `z` a panel full screen, `?` the rest. On Services the TUI's service keys
+closes the top layer, `z` a panel full screen, `S` saves the session (screen, filters, sorts, pane sizes, queries) and pins it: the page
+autosaves from then on and reopens on it in any browser (`:forget` drops it), `?` the rest. Dragging across a chart
+zooms to that range (double-click resets); `@?` in any filter has the assistant write it. On Services the TUI's service keys
 (`s x r l + - $ R h e d b m F K`) act on the cursor or the marked rows, and a row opens its pods, env,
 requests and limits, autoscaler, log and spec; `K` kills the local processes holding its ports.
 

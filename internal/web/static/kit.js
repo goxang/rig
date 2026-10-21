@@ -2,11 +2,26 @@
 
 // ---------- filter: the TUI's grammar ----------
 // Words match fuzzy (letters in order, gaps allowed), *glob* as a pattern, col=value, col!=value, col~text.
+const squash = x => String(x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// exact: every word is in s as typed, or as typed minus separators (hsmenabled finds HSM_ENABLED).
+function exact(s, q) {
+  s = String(s ?? '').toLowerCase();
+  let sq;
+  return String(q).toLowerCase().split(/\s+/).filter(Boolean).every(w => s.includes(w) || ((sq ??= squash(s)), squash(w) && sq.includes(squash(w))));
+}
+// fuzzy: exact words, else letters in order that stay close together (a loose scatter across a long text is no match).
 function fuzzy(s, q) {
   s = String(s ?? '').toLowerCase();
+  let sq;
   for (const w of String(q).toLowerCase().split(/\s+/).filter(Boolean)) {
-    let at = 0;
-    for (const c of w) { const i = s.indexOf(c, at); if (i < 0) return false; at = i + 1; }
+    if (s.includes(w) || ((sq ??= squash(s)), squash(w) && sq.includes(squash(w)))) continue;
+    let ok = false;
+    for (let st = s.indexOf(w[0]); st >= 0 && !ok; st = s.indexOf(w[0], st + 1)) {
+      let at = st + 1;
+      for (let k = 1; k < w.length && at > 0; k++) { const i = s.indexOf(w[k], at); at = i < 0 ? -1 : i + 1; }
+      ok = at > 0 && at - st <= w.length * 2;
+    }
+    if (!ok) return false;
   }
   return true;
 }
@@ -216,7 +231,10 @@ function jsonTree(value, { onEdit, open = 2, filter = '' } = {}) {
     } },
     onEdit && path.length && { label: 'Delete', icon: 'trash', key: 'd', danger: true, run: () => { setAt(path, null, true); commit(); } },
   ];
-  const hit = (k, v) => !filter || fuzzy(k + ' ' + (isObj(v) ? '' : String(v)), filter);
+  const text = (k, v) => k + ' ' + (isObj(v) ? '' : String(v));
+  const anyExact = (k, v) => exact(text(k, v), filter) || (isObj(v) && Object.entries(v).some(([kk, vv]) => anyExact(kk, vv)));
+  let strict = false;
+  const hit = (k, v) => !filter || (strict ? exact(text(k, v), filter) : fuzzy(text(k, v), filter));
   const keep = (k, v) => hit(k, v) || (isObj(v) && Object.entries(v).some(([kk, vv]) => keep(kk, vv)));
   const node = (k, v, path, depth) => {
     const key = k != null && h('span', { class: 'jk' }, typeof k === 'number' ? k : JSON.stringify(k).slice(1, -1), ': ');
@@ -243,7 +261,7 @@ function jsonTree(value, { onEdit, open = 2, filter = '' } = {}) {
     setOpen(opened);
     return el;
   };
-  const draw = () => box.replaceChildren(node(null, root, [], 0));
+  const draw = () => { strict = !!filter && anyExact('', root); box.replaceChildren(node(null, root, [], 0)); };
   draw();
   box.filter = f => { filter = f; draw(); };
   box.expandAll = () => { open = 99; draw(); };
@@ -355,7 +373,7 @@ async function aiReady() {
   if (aiEnabled == null) aiEnabled = web('ai').then(r => !!r.enabled).catch(() => false);
   return aiEnabled;
 }
-function aiAssist(input, hint) {
+function aiAssist(input, hint, { describeOnly = false } = {}) {
   const ghost = h('div', { class: 'ai-ghost', hidden: true });
   let seq = 0, asked = '';
   const hintOf = () => typeof hint === 'function' ? hint() : hint;
@@ -375,12 +393,12 @@ function aiAssist(input, hint) {
     } catch (e) { if (my === seq) { ghost.replaceChildren(h('span', { class: 'err' }, e.message)); } }
   };
   const later = debounce(() => ask(false), 900);
-  input.addEventListener('input', () => { seq++; ghost.hidden = true; ghost._rest = ''; if (!/@\?/.test(input.value)) later(); });
+  input.addEventListener('input', () => { seq++; ghost.hidden = true; ghost._rest = ''; if (!describeOnly && !/@\?/.test(input.value)) later(); });
   input.addEventListener('keydown', e => {
     if (e.key === 'Tab' && ghost._rest && !ghost.hidden) { e.preventDefault(); input.value += ghost._rest; ghost._rest = ''; ghost.hidden = true; input.dispatchEvent(new Event('input')); }
-    else if (e.key === 'Enter' && /@\?\s*\S/.test(input.value) && !e.ctrlKey) { e.preventDefault(); e.stopPropagation(); ask(true); }
+    else if (e.key === 'Enter' && /@\?\s*\S/.test(input.value) && !e.ctrlKey) { e.preventDefault(); e.stopImmediatePropagation(); ask(true); }
   }, true);
-  aiReady().then(on => { if (on && !input.placeholder.includes('@?')) input.placeholder = (input.placeholder ? input.placeholder + '  ·  ' : '') + '@? describe it, the AI writes it'; });
+  aiReady().then(on => { if (on && !describeOnly && !input.placeholder.includes('@?')) input.placeholder = (input.placeholder ? input.placeholder + '  ·  ' : '') + '@? describe it, the AI writes it'; });
   return ghost;
 }
 

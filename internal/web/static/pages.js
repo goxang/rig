@@ -232,10 +232,7 @@ function pageMetrics(ctx) {
           const v = last(list[0]);
           const spark = h('div', { class: 'spark' });
           bodyEl.replaceChildren(h('div', { class: 'bigv', style: { color: p.Warn != null || p.Crit != null ? colorFor(v) : 'var(--text)' } }, fmtNum(v, p.Unit)), spark);
-          const c = lineChart(spark, [list[0]], { unit: p.Unit, fit: true, legend: 'none' });
-          spark.querySelectorAll('.grid').forEach(g => g.remove());
-          spark._draw = () => { c.draw(); spark.querySelectorAll('.grid').forEach(g => g.remove()); };
-          charts.add(spark);
+          lineChart(spark, [list[0]], { unit: p.Unit, fit: true, legend: 'none' });
         } else if (kind === 'gauge') {
           const v = last(list[0]);
           const max = p.Max ?? (p.Unit === '%' ? 100 : Math.max(...list.map(last), 1));
@@ -423,8 +420,7 @@ function watchJob(action, since) {
     out.textContent = (j.output || []).join('\n') || (isRunning(j) ? 'running…' : '(no output)');
     if (j.error) out.append(h('div', { class: 'err' }, '\n' + j.error));
     if (stick) out.scrollTop = out.scrollHeight;
-    head.replaceChildren(isRunning(j) ? h('span', { class: 'row' }, h('span', { class: 'spin' }), 'running') : j.error ? badge('failed', 'red', true) : badge('done', 'green', true),
-      h('span', { class: 'muted' }, duration(j)));
+    head.replaceChildren(jobBadge(j), h('span', { class: 'muted' }, duration(j)), jobNote(j) && h('span', { class: 'muted small' }, jobNote(j)));
   };
   const poll = setInterval(refreshJobs, 800);
   document.addEventListener('rig:jobs', draw);
@@ -549,16 +545,16 @@ function pageJobs(ctx) {
     const jobs = [...S.jobs].reverse();
     if (!cur && jobs[0]) cur = jobs[0].id;
     list.replaceChildren(...jobs.map(j => h('div', { class: 'job' + (j.id === cur ? ' sel' : ''), onclick: () => { cur = j.id; draw(); } },
-      isRunning(j) ? h('span', { class: 'spin' }) : j.error ? h('span', { style: { color: 'var(--red)' } }, '✕') : h('span', { style: { color: 'var(--green)' } }, '✓'),
-      h('div', { class: 'grow' }, h('div', { class: 'l ellipsis' }, j.label), h('div', { class: 'muted', style: { fontSize: '12px' } }, toDate(j.start).toLocaleTimeString([], { hour12: false }) + ' · ' + duration(j))))));
+      jobIcon(j),
+      h('div', { class: 'grow' }, h('div', { class: 'l ellipsis' }, j.label), h('div', { class: 'muted', style: { fontSize: '12px' } }, toDate(j.start).toLocaleTimeString([], { hour12: false }) + ' · ' + duration(j) + (j.step ? ' · step ' + j.step : '') + (jobPhase(j) === 'pending' ? ' · pending' : ''))))));
     if (!jobs.length) list.replaceChildren(h('div', { class: 'empty' }, 'Nothing has run yet in this session'));
     const j = jobs.find(x => x.id === cur);
     if (!j) { right.replaceChildren(); return; }
     const pre = right.querySelector('pre');
     const stick = !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
     const out = h('pre', { class: 'out', style: { maxHeight: 'calc(100vh - 240px)' } }, (j.output || []).join('\n') || (isRunning(j) ? 'running…' : '(no output)'), j.error && h('div', { class: 'err' }, '\n' + j.error));
-    right.replaceChildren(h('div', { class: 'toolbar' }, h('b', { style: { fontSize: '15px' } }, j.label), isRunning(j) ? badge('running', 'accent pulse', true) : j.error ? badge('failed', 'red', true) : badge('done', 'green', true),
-      h('span', { class: 'muted' }, duration(j)), h('span', { class: 'spacer' }), btn([icon('copy'), 'Copy'], () => copy((j.output || []).join('\n')), 'sm')), out);
+    right.replaceChildren(h('div', { class: 'toolbar' }, h('b', { style: { fontSize: '15px' } }, j.label), jobBadge(j),
+      h('span', { class: 'muted' }, duration(j)), jobNote(j) && h('span', { class: 'muted small' }, jobNote(j)), h('span', { class: 'spacer' }), btn([icon('copy'), 'Copy'], () => copy((j.output || []).join('\n')), 'sm')), out);
     if (stick) out.scrollTop = out.scrollHeight; else out.scrollTop = pre.scrollTop;
   };
   ctx.el.append(pageHead('Activity', 'What ran from this page in this session: actions, tasks and their output'), splitPane(list, right, { key: 'jobs.side', size: 320 }));

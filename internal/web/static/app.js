@@ -106,7 +106,7 @@ function updateCounts() {
 function renderKeys(extra) {
   const el = $('#keys');
   if (!el) return;
-  const keys = [...(extra || []), [':', 'command'], ['ctrl+k', 'search'], ['ctrl+e', 'env'], ['@', 'AI'], ['.', 'menu'], ['?', 'help']];
+  const keys = [...(extra || []), [':', 'command'], ['S', 'save'], ['ctrl+k', 'search'], ['ctrl+e', 'env'], ['@', 'AI'], ['.', 'menu'], ['?', 'help']];
   el.replaceChildren(...keys.map(([k, d]) => h('span', {}, h('b', {}, k), d)), h('span', { class: 'spacer' }), h('span', {}, (S.info?.project || '') + ' · ' + (S.info?.env || '')));
 }
 async function switchEnv(env) {
@@ -175,6 +175,8 @@ function paletteItems() {
     ...Object.keys(S.info?.themes || {}).map(n => ({ k: 'theme', t: 'Theme: ' + n, run: () => setPref('theme', n) })),
     ...LAYOUTS.map(l => ({ k: 'layout', t: 'Layout: ' + l.t, run: () => setPref('layout', l.id) })),
     { k: 'mode', t: 'Toggle light / dark', run: () => setPref('scheme', document.documentElement.dataset.scheme === 'light' ? 'dark' : 'light') },
+    { k: 'session', t: 'Save the session (S)', d: 'filters, sorts, screen; reopens on it', run: () => saveSession() },
+    { k: 'session', t: 'Forget the saved session', run: forgetSession },
     { k: 'ai', t: 'Ask the assistant', run: () => { if (!aiOpen) toggleAI(); } },
     ...resources('environment').map(r => ({ k: 'environment', t: r.Name, d: r.Spec?.Description, run: () => switchEnv(r.Name) })),
   ];
@@ -212,7 +214,7 @@ function openPalette({ only, prompt, value = '' } = {}) {
   draw();
   input.focus();
 }
-const VERBS = ['open', 'service', 'start', 'stop', 'restart', 'deploy', 'build', 'logs', 'env', 'theme', 'task', 'plugins', 'search', 'menu', 'reload', 'ai', 'help',
+const VERBS = ['open', 'service', 'start', 'stop', 'restart', 'deploy', 'build', 'logs', 'env', 'theme', 'task', 'plugins', 'search', 'menu', 'reload', 'ai', 'help', 'save', 'forget',
   'up', 'down', 'status', 'ps', 'exec', 'query', 'kv', 'do', 'test', 'doctor', 'plugin', 'secret', 'trace', 'load', 'manifests', 'why', 'ship', 'diff', 'version'];
 function openCommandLine(value = '') {
   const hist = store.get('cmd.hist', []);
@@ -272,6 +274,8 @@ async function runCommand(line) {
     case 'search': return openPalette({ value: args.join(' ') });
     case 'menu': return openMenu();
     case 'reload': return boot(true);
+    case 'save': return saveSession();
+    case 'forget': return forgetSession();
     case 'help': return showHelp();
     case 'ai': if (!aiOpen) toggleAI(); if (args.length) aiSend(args.join(' ')); return;
     case 'q': case 'quit': return;
@@ -346,6 +350,7 @@ document.addEventListener('keydown', e => {
     case '?': return take(showHelp);
     case '.': case 'ContextMenu': return take(() => openMenu());
     case 'T': return take(() => openPalette({ only: 'task', prompt: 'Run a task' }));
+    case 'S': return take(() => saveSession());
     case 'Backspace': return take(back);
     case '/': { const f = $('.page [data-filter]'); if (f) take(() => f.focus()); return; }
   }
@@ -372,6 +377,49 @@ document.addEventListener('contextmenu', e => {
   e.preventDefault();
   openMenu({ x: e.clientX, y: e.clientY });
 });
+
+// ---------- saved session ----------
+// S saves what the page keeps (filters, sorts, pane sizes, queries, the screen) on the server and
+// pins it: from then on the page autosaves, and a page opened without a link to a screen reopens
+// on it, in any browser, as `rig resume` does for the TUI.
+const KEEP_OUT = new Set(['token']);
+function sessionState() {
+  const state = {};
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('rig.web.') && !KEEP_OUT.has(k.slice(8))) state[k.slice(8)] = localStorage.getItem(k);
+  } catch { /* storage blocked */ }
+  return state;
+}
+async function saveSession(quiet) {
+  store.set('session.pin', true);
+  try {
+    await web('web/session', { env: S.info?.env, hash: location.hash, state: sessionState() });
+    if (!quiet) toast('Session saved: this page opens on it from now on', 'ok', 2500);
+  } catch (e) { if (!quiet) toast('Cannot save the session: ' + e.message, 'bad', 6000); }
+}
+async function forgetSession() {
+  store.set('session.pin', false);
+  try { await fetch('/v1/web/session', { method: 'DELETE', headers: authHeaders() }); toast('Session forgotten', 'ok', 2000); } catch (e) { toast(e.message, 'bad'); }
+}
+// restoreSession reopens a saved session once per tab, only when the address names no screen.
+async function restoreSession() {
+  let done = false;
+  try { done = sessionStorage.getItem('rig.web.restored') === '1'; sessionStorage.setItem('rig.web.restored', '1'); } catch { /* private mode */ }
+  if (done || /^#\/[^?]/.test(location.hash)) return false;
+  try {
+    const r = await fetch('/v1/web/session', { headers: authHeaders() });
+    const s = r.ok ? await r.json() : null;
+    if (!s?.state) return false;
+    for (const [k, v] of Object.entries(s.state)) if (!KEEP_OUT.has(k)) localStorage.setItem('rig.web.' + k, v);
+    if (s.env) localStorage.setItem('rig.web.env', JSON.stringify(s.env));
+    localStorage.setItem('rig.web.session.pin', 'true');
+    history.replaceState(null, '', location.pathname + (s.hash || '#/'));
+    location.reload();
+    return true;
+  } catch { return false; }
+}
+setInterval(() => { if (store.get('session.pin', false) && S.info && !document.hidden) saveSession(true); }, 20000);
+document.addEventListener('visibilitychange', () => { if (document.hidden && store.get('session.pin', false) && S.info) saveSession(true); });
 
 // ---------- boot ----------
 function showLocked() {
@@ -418,7 +466,7 @@ async function boot(again) {
   }
   applyPrefs();
   if (!S.token) { showLocked(); return; }
-  boot();
+  restoreSession().then(reloading => { if (!reloading) boot(); });
   setInterval(() => { if (document.hidden || !S.info) return; refreshInbox(); if (S.running || S.jobs.some(isRunning)) refreshJobs(); }, 3000);
 })();
 

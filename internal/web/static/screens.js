@@ -575,8 +575,8 @@ function pageLoad(ctx) {
       .map(([k, v]) => h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' + (k === 'failed' && r.failed ? ' red' : '') }, v))), r.error ? h('div', { class: 'err small', style: { gridColumn: '1/-1' } }, r.error) : '');
     if (hs.length < 2) return;
     const s = (n, f) => ({ name: n, pts: hs.filter(x => f(x) != null).map(x => [x.t, f(x)]) });
-    lineChart(detail.rateBox, [s('sent', x => x.rps), s('failed', x => x.fps), s('target', () => r.rate || 0)], { unit: '/s', fit: true, legend: 'auto' });
-    lineChart(detail.latBox, [s('p50', x => x.p50), s('p95', x => x.p95), s('p99', x => x.p99)], { unit: 's', fit: true, legend: 'auto' });
+    lineChart(detail.rateBox, [s('sent', x => x.rps), s('failed', x => x.fps), s('target', () => r.rate || 0)], { unit: '/s', fit: true, legend: 'auto', memo: detail.rateBox });
+    lineChart(detail.latBox, [s('p50', x => x.p50), s('p95', x => x.p95), s('p99', x => x.p99)], { unit: 's', fit: true, legend: 'auto', memo: detail.latBox });
   }
   function record(r) {
     const hs = hist.get(r.name) || []; hist.set(r.name, hs);

@@ -383,9 +383,10 @@ function frameTable(frame, opts = {}) {
 }
 const FILTER_HELP = 'words match fuzzy · *glob* · col=value · col!=value · col~text';
 function searchBox(placeholder, oninput, { value = '', title = FILTER_HELP } = {}) {
-  const input = h('input', { type: 'search', placeholder, value, title, oninput: debounce(e => oninput(e.target.value), 80), 'data-filter': '1',
+  const input = h('input', { type: 'search', placeholder, value, title, oninput: debounce(e => { if (!/@\?/.test(e.target.value)) oninput(e.target.value); }, 80), 'data-filter': '1',
     onkeydown: e => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; oninput(''); } else if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'ArrowDown') input.blur(); } });
-  return h('div', { class: 'search' }, icon('search'), input);
+  const ghost = typeof aiAssist === 'function' ? aiAssist(input, () => 'a filter expression for a table or list on the screen ' + (pageOf(parseRoute().id)?.title || '') + ': ' + FILTER_HELP, { describeOnly: true }) : '';
+  return h('div', { class: 'search' }, icon('search'), input, ghost);
 }
 function toCSV(rows, cols) {
   const q = v => { const x = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
@@ -553,21 +554,30 @@ function groupSeries(rows, legend) {
 }
 const tipEl = () => document.querySelector('.tip') || document.body.appendChild(h('div', { class: 'tip', hidden: true }));
 // lineChart draws series in el: fit takes the height el has, the legend is a table sortable by
-// last/max/min/mean (click isolates a series, ctrl+click toggles one), and a drag zooms to a range.
-function lineChart(el, list, { unit = '', stack = false, height = 190, fit = false, onZoom, legend: legendKind = 'auto' } = {}) {
+// last/max/min/mean (click isolates a series, ctrl+click toggles one), and a drag zooms to a range:
+// through onZoom when the page owns the time window, else on the chart itself (double-click resets).
+function lineChart(el, list, { unit = '', stack = false, height = 190, fit = false, onZoom, legend: legendKind = 'auto', memo = el } = {}) {
   const hidden = new Set();
-  const stats = list.map(x => {
-    const v = x.pts.map(p => p[1]).filter(isFinite);
-    return { last: v.at(-1), max: v.length ? Math.max(...v) : NaN, min: v.length ? Math.min(...v) : NaN, mean: v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN };
-  });
+  let view = memo._view || null;
   const colorAt = x => series()[list.indexOf(x) % series().length];
   let sort = store.get('legend.sort', { key: '', dir: -1 });
-  const asTable = legendKind === 'table' || (legendKind === 'auto' && list.length > 1);
-  const legend = h('div', { class: asTable ? 'legend-t' : 'legend' });
+  const legend = h('div', {});
   const holder = h('div', { class: 'chart-h' });
-  el.replaceChildren(holder, legendKind !== 'none' && (list.length > 1 || legendKind === 'table') ? legend : '');
+  const reset = h('button', { class: 'zoom-reset', hidden: !view, onclick: () => setView(null) }, 'Reset zoom');
+  el.replaceChildren(holder, legend);
   el.classList.toggle('chart-fit', fit);
-  const drawLegend = () => {
+  if (!fit) holder.style.height = height + 'px';
+  const inView = x => view ? { ...x, pts: x.pts.filter(p => p[0] >= view[0] && p[0] <= view[1]) } : x;
+  const setView = v => { view = v; memo._view = v; reset.hidden = !v; draw(); };
+  const drawLegend = shown => {
+    const stats = list.map(x => {
+      const v = inView(x).pts.map(p => p[1]).filter(isFinite);
+      return { last: v.at(-1), max: v.length ? Math.max(...v) : NaN, min: v.length ? Math.min(...v) : NaN, mean: v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN };
+    });
+    const room = fit ? el.clientHeight : height + 120;
+    const asTable = legendKind === 'table' || (legendKind === 'auto' && list.length > 1 && room >= 320);
+    legend.hidden = legendKind === 'none' || (list.length <= 1 && legendKind !== 'table');
+    legend.className = asTable ? 'legend-t' : 'legend';
     const toggle = (x, e) => {
       if (e.ctrlKey || e.metaKey) hidden.has(x.key) ? hidden.delete(x.key) : hidden.add(x.key);
       else if (hidden.size === list.length - 1 && !hidden.has(x.key)) hidden.clear();
@@ -580,28 +590,29 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
     }
     const order = list.map((x, i) => ({ x, st: stats[i] }));
     if (sort.key) order.sort((a, b) => sort.key === 'name' ? a.x.name.localeCompare(b.x.name) * sort.dir : ((a.st[sort.key] ?? -Infinity) - (b.st[sort.key] ?? -Infinity)) * sort.dir);
-    const th = (k, l) => h('th', { class: 'sort' + (k !== 'name' ? ' num' : ''), onclick: () => { sort = { key: k, dir: sort.key === k ? -sort.dir : -1 }; store.set('legend.sort', sort); drawLegend(); } }, l, sort.key === k && h('span', { class: 'arrow' }, sort.dir > 0 ? '↑' : '↓'));
+    const th = (k, l) => h('th', { class: 'sort' + (k !== 'name' ? ' num' : ''), onclick: () => { sort = { key: k, dir: sort.key === k ? -sort.dir : -1 }; store.set('legend.sort', sort); drawLegend(shown); } }, l, sort.key === k && h('span', { class: 'arrow' }, sort.dir > 0 ? '↑' : '↓'));
     legend.replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, th('name', 'Series'), th('last', 'Last'), th('max', 'Max'), th('min', 'Min'), th('mean', 'Mean'))),
       h('tbody', {}, order.map(({ x, st }) => h('tr', { class: 'click' + (hidden.has(x.key) ? ' off' : ''), title: x.key, onclick: e => toggle(x, e) },
         h('td', { class: 'ellipsis' }, h('i', { class: 'sw', style: { background: colorAt(x) } }), x.name),
         ['last', 'max', 'min', 'mean'].map(k => h('td', { class: 'num mono' }, fmtNum(st[k], unit))))))));
   };
   const draw = () => {
-    const W = Math.max(holder.clientWidth || el.clientWidth || 400, 200);
-    const H = fit ? Math.max(80, holder.clientHeight || height) : height, padL = 56, padB = 20, padT = 6, padR = 10;
+    const box = holder.getBoundingClientRect();
+    const W = Math.max(Math.round(box.width) || el.clientWidth || 400, 120);
+    const H = Math.max(Math.round(box.height) || height, 60), bare = el.classList.contains('spark'), padL = bare ? 2 : W < 260 ? 44 : 56, padB = bare ? 2 : 20, padT = 6, padR = bare ? 2 : 10;
     const shown = list.filter(x => !hidden.has(x.key));
-    let data = shown.map(x => ({ ...x, v: x.pts.map(p => p[1]) }));
+    let data = shown.map(inView).map(x => ({ ...x, v: x.pts.map(p => p[1]) }));
     if (stack) { const acc = new Map(); data = data.map(x => ({ ...x, v: x.pts.map(([t, v]) => { const y = (acc.get(t) || 0) + (isNaN(v) ? 0 : v); acc.set(t, y); return y; }) })); }
-    const ts = list.flatMap(x => x.pts.map(p => p[0]));
+    const ts = view ? view : [Math.min(...list.flatMap(x => x.pts.map(p => p[0]))), Math.max(...list.flatMap(x => x.pts.map(p => p[0])))];
     const vs = data.flatMap(x => x.v).filter(v => isFinite(v));
-    const t0 = Math.min(...ts), t1 = Math.max(...ts);
-    let lo = Math.min(0, ...vs), hi = Math.max(...vs);
+    const t0 = ts[0], t1 = ts[1];
+    let lo = bare ? Math.min(...vs) : Math.min(0, ...vs), hi = Math.max(...vs);
     if (!vs.length) { lo = 0; hi = 1; }
     if (hi - lo < 1e-12) hi = lo + 1;
     hi += (hi - lo) * 0.08;
     const X = t => padL + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - padL - padR);
     const Y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
-    const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: W, height: H });
+    const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: W, height: H, preserveAspectRatio: 'none' });
     const g = s('g', { class: 'grid' });
     const rowsY = Math.max(2, Math.min(5, Math.floor(H / 45)));
     for (let i = 0; i <= rowsY; i++) {
@@ -615,7 +626,7 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
       g.append(s('text', { x: X(t), y: H - 4, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle' },
         (long ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' : '') + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: t1 - t0 < 600e3 ? '2-digit' : undefined, hour12: false })));
     }
-    svg.append(g);
+    if (!bare) svg.append(g);
     data.forEach((x, i) => {
       const c = colorAt(shown[i]);
       let d = '', pen = false;
@@ -633,21 +644,22 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
     const tip = tipEl();
     const tAt = e => { const rect = svg.getBoundingClientRect(), mx = (e.clientX - rect.left) * (W / rect.width); return { mx, t: t0 + (mx - padL) / (W - padL - padR) * (t1 - t0) }; };
     let drag = null;
-    svg.addEventListener('pointerdown', e => { if (!onZoom || e.button !== 0) return; const { mx, t } = tAt(e); if (mx < padL) return; drag = { mx, t }; svg.setPointerCapture(e.pointerId); });
+    svg.addEventListener('pointerdown', e => { if (e.button !== 0 || bare) return; const { mx, t } = tAt(e); if (mx < padL) return; drag = { mx, t }; svg.setPointerCapture(e.pointerId); });
     svg.addEventListener('pointerup', e => {
       if (!drag) return;
       const { mx, t } = tAt(e), d0 = drag; drag = null; band.setAttribute('visibility', 'hidden');
-      if (Math.abs(mx - d0.mx) > 6) onZoom(Math.min(t, d0.t), Math.max(t, d0.t));
+      if (Math.abs(mx - d0.mx) > 6) { const a = Math.min(t, d0.t), b = Math.max(t, d0.t); onZoom ? onZoom(a, b) : setView([a, b]); }
     });
     svg.addEventListener('pointermove', e => {
       const { mx, t } = tAt(e);
       if (drag) { band.setAttribute('x', Math.min(mx, drag.mx)); band.setAttribute('width', Math.abs(mx - drag.mx)); band.setAttribute('visibility', 'visible'); }
-      if (mx < padL || !ts.length) return;
+      if (mx < padL || !shown.length || !data.some(x => x.pts.length)) return;
       cross.setAttribute('x1', mx); cross.setAttribute('x2', mx); cross.setAttribute('visibility', 'visible');
-      const vals = shown.map(x => {
+      const vals = data.map((x, i) => {
+        if (!x.pts.length) return null;
         let best = 0; x.pts.forEach((p, j) => { if (Math.abs(p[0] - t) < Math.abs(x.pts[best][0] - t)) best = j; });
-        return { name: x.name, v: x.pts[best]?.[1], c: colorAt(x), t: x.pts[best]?.[0] };
-      }).sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)).slice(0, 14);
+        return { name: x.name, v: x.pts[best][1], c: colorAt(shown[i]), t: x.pts[best][0] };
+      }).filter(Boolean).sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)).slice(0, 14);
       tip.replaceChildren(h('div', { class: 'tt' }, new Date(vals[0]?.t || t).toLocaleString([], { hour12: false })),
         ...vals.map(x => h('div', { class: 'r' }, h('i', { style: { background: x.c } }), h('span', { class: 'ellipsis' }, x.name), h('span', { class: 'v' }, fmtNum(x.v, unit)))));
       tip.hidden = false;
@@ -656,10 +668,16 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
       tip.style.top = Math.min(e.clientY + 14, innerHeight - th - 8) + 'px';
     });
     svg.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
-    holder.replaceChildren(svg);
-    drawLegend();
+    svg.addEventListener('dblclick', () => view && setView(null));
+    holder.replaceChildren(svg, reset);
+    drawLegend(shown);
   };
   draw();
+  let seen = '';
+  new ResizeObserver(() => {
+    const r = holder.getBoundingClientRect(), k = Math.round(r.width) + 'x' + Math.round(r.height);
+    if (r.width && k !== seen) { seen = k; requestAnimationFrame(draw); }
+  }).observe(holder);
   return { draw };
 }
 function gauge(value, min, max, color, unit) {
@@ -683,6 +701,13 @@ function ask(title, { label = '', value = '', placeholder = '', secret = false, 
   return modal(title, body, [['Cancel', null, 'ghost'], ['OK', () => input.value, 'primary']]);
 }
 const isRunning = j => !j.end || j.end.startsWith('0001');
+// a run that waits for input, or stopped partway through its steps, is pending rather than ended
+const partialFail = j => { const m = /failed at step (\d+) of (\d+)/.exec(j.error || ''); return !!m && +m[2] > 1; };
+const jobPhase = j => isRunning(j) ? (j.waiting ? 'pending' : 'running') : j.error ? (partialFail(j) ? 'pending' : 'failed') : 'done';
+const jobNote = j => j.waiting ? 'waits for input: ' + j.waiting : partialFail(j) ? firstLine(j.error) : '';
+const jobIcon = j => ({ running: () => h('span', { class: 'spin' }), pending: () => h('span', { style: { color: 'var(--amber)' }, title: jobNote(j) }, '◔'),
+  failed: () => h('span', { style: { color: 'var(--red)' } }, '✕'), done: () => h('span', { style: { color: 'var(--green)' } }, '✓') })[jobPhase(j)]();
+const jobBadge = j => ({ running: () => badge('running', 'accent pulse', true), pending: () => badge('pending', 'amber', true), failed: () => badge('failed', 'red', true), done: () => badge('done', 'green', true) })[jobPhase(j)]();
 function duration(j) {
   const end = isRunning(j) ? Date.now() : toDate(j.end).getTime(), ms = end - toDate(j.start).getTime();
   return fmtMs(ms);

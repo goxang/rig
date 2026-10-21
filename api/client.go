@@ -37,6 +37,10 @@ type Job struct {
 	End    time.Time `json:"end,omitzero"`
 	Output []string  `json:"output,omitempty"`
 	Error  string    `json:"error,omitempty"`
+	// Waiting is the prompt of a running job that waits for its input.
+	Waiting string `json:"waiting,omitempty"`
+	// Step is the task step running ("3/7").
+	Step string `json:"step,omitempty"`
 }
 
 func WireJob(j *jobs.Job) *Job {
@@ -48,6 +52,10 @@ func WireJob(j *jobs.Job) *Job {
 	if err != nil {
 		out.Error = err.Error()
 	}
+	if p, ok := j.Waiting(); ok {
+		out.Waiting = p
+	}
+	out.Step, _ = j.StepTimer()
 	return out
 }
 

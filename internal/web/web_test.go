@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,5 +72,34 @@ services:
 	got := strings.Join(used(p), " ")
 	if got != "delve go goland jira local redis" {
 		t.Fatalf("used: %s", got)
+	}
+}
+
+func TestSessionRoundTrip(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	h := &Handler{File: filepath.Join(t.TempDir(), "rig.yaml"), Token: "t"}
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+	do := func(method, body string) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+"/v1/web/session", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer t")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	if _, b := do("GET", ""); strings.TrimSpace(b) != "{}" {
+		t.Fatalf("empty: %s", b)
+	}
+	do("POST", `{"hash":"#/logs","state":{"logs.level":"\"error\""}}`)
+	if _, b := do("GET", ""); !strings.Contains(b, `"#/logs"`) || !strings.Contains(b, "logs.level") {
+		t.Fatalf("saved: %s", b)
+	}
+	do("DELETE", "")
+	if _, b := do("GET", ""); strings.TrimSpace(b) != "{}" {
+		t.Fatalf("forgotten: %s", b)
 	}
 }

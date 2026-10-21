@@ -403,10 +403,11 @@ function simpleWidget(w, n, f) {
         : h('div', { class: 'bars' }, h('div', { class: 'b' }, h('span', {}, fmtNum(v, P(n, 'unit'))), h('div', { class: 'track' }, h('div', { class: 'fill', style: { width: Math.min(100, 100 * v / max) + '%', background: 'var(--accent)' } })), h('span')));
     }
     case 'chart': case 'sparkline': case 'heatmap': {
-      const el = h('div', {});
+      const fit = !!P(n, 'height');
+      const el = h('div', { style: fit ? { height: '100%' } : {} });
       const list = chartSeries(rows, fields, n);
       if (!list.length) return h('div', { class: 'empty' }, 'No data');
-      requestAnimationFrame(() => lineChart(el, list, { unit: P(n, 'unit'), height: w === 'sparkline' ? 60 : 180 }));
+      requestAnimationFrame(() => lineChart(el, list, { unit: P(n, 'unit'), height: w === 'sparkline' ? 60 : 240, fit, memo: n, legend: w === 'sparkline' ? 'none' : 'auto' }));
       return el;
     }
     case 'bar': {

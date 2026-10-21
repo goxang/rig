@@ -601,9 +601,16 @@ body.has-zoom { overflow: hidden; }
 .field-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; max-height: 50vh; overflow: auto; }
 
 /* ---------- charts ---------- */
-.chart-h { position: relative; min-height: 0; }
-.chart-fit { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.chart-fit > .chart-h { flex: 1 1 0; min-height: 60px; }
+.chart-h { position: relative; min-height: 0; min-width: 0; }
+.chart-h > .chart { position: absolute; inset: 0; width: 100%; height: 100%; }
+.chart-fit { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
+.chart-fit > .chart-h { flex: 1 1 0; min-height: 70px; }
+.zoom-reset { position: absolute; top: 4px; right: 6px; z-index: 2; font: 11px var(--sans, inherit); color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 8px; cursor: pointer; }
+.zoom-reset:hover { border-color: var(--accent); }
+.zoom-reset[hidden] { display: none; }
+.legend[hidden], .legend-t[hidden] { display: none; }
+.search > .ai-ghost { position: absolute; top: 100%; left: 0; z-index: 20; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; margin-top: 2px; white-space: nowrap; }
+.search > .ai-ghost[hidden] { display: none; }
 .chart-fit > .legend, .chart-fit > .legend-t { flex: 0 0 auto; }
 .legend-t { max-height: 34%; min-height: 0; overflow: auto; margin-top: 6px; font-size: 12px; }
 .panel.zoomed .legend-t { max-height: 40%; }
@@ -622,7 +629,8 @@ body.has-zoom { overflow: hidden; }
 .panel .ph .ph-btn { opacity: 0; transition: opacity .1s; }
 .panel:hover .ph .ph-btn, .panel:focus .ph .ph-btn, .panel.zoomed .ph .ph-btn { opacity: 1; }
 .panel .pmsg { margin: auto; color: var(--dim); font-size: 13px; text-align: center; }
-.panel .spark { flex: 1; min-height: 30px; }
+.panel .spark { flex: 0 0 42%; min-height: 36px; }
+.panel .spark > .chart-h { min-height: 0; }
 .panel.zoomed { padding: 16px; }
 .dash-bar { flex-wrap: wrap; }
 .dash-tabs .subtabs { flex-wrap: wrap; }
@@ -847,3 +855,8 @@ table.fixed td { max-width: none; }
 table.fixed th, table.fixed td { overflow: hidden; text-overflow: ellipsis; }
 .page > .splitpane > .settings-nav { align-self: flex-start; }
 .splitpane > .pane-b { padding-left: 14px; }
+
+/* one scroller per table panel: the list pane scrolls, the wrappers around it do not */
+.vpanel > .pbody:has(.psplit) { overflow: visible; max-height: none; }
+.pleft > .table-wrap, .pright > .table-wrap { overflow: visible; }
+.vrow .vpanel .pleft, .vrow .vpanel .pright { max-height: 340px; }
