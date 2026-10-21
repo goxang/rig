@@ -47,8 +47,13 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Saved = time.Now()
 		b, _ := json.Marshal(s)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-			err = os.WriteFile(path, b, 0o600)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if err := os.WriteFile(path, b, 0o600); err != nil {
+			writeErr(w, err)
+			return
 		}
 		writeJSON(w, map[string]any{"saved": s.Saved})
 	case http.MethodDelete:
