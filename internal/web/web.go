@@ -167,6 +167,10 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request) {
 	if ui := l.App.Spec.UI; ui != nil {
 		out["tabs"] = ui.Tabs
 		out["logs"] = ui.Logs
+		out["title"], out["lock"] = ui.Title, ui.Lock
+		if ui.System != nil {
+			out["system"] = ui.System
+		}
 	}
 	out["used"] = used(l.App.Spec)
 	for k, v := range h.Info {

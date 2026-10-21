@@ -103,3 +103,24 @@ func TestSessionRoundTrip(t *testing.T) {
 		t.Fatalf("forgotten: %s", b)
 	}
 }
+
+func TestInfoCarriesTheProfile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "rig.yaml")
+	os.WriteFile(file, []byte("project: p\nenvironments:\n  dev: { runtime: webtest }\nui: { title: Product office, tabs: [Roadmap], system: [inbox], lock: true }\n"), 0o644)
+	h := &Handler{File: file, Token: "t", Open: engine.Open}
+	defer h.Close()
+	srv := httptest.NewServer(h.Routes())
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/v1/web", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	for _, want := range []string{`"title":"Product office"`, `"tabs":["Roadmap"]`, `"system":["inbox"]`, `"lock":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("info lacks %s: %s", want, b)
+		}
+	}
+}

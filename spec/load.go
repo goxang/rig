@@ -285,13 +285,13 @@ func (p *Project) validate() error {
 		}
 	}
 	if p.UI != nil {
-		for _, t := range p.UI.Tabs {
-			if !slices.Contains(Screens, t) {
-				errs = append(errs, fmt.Sprintf("ui.tabs: unknown screen %q (screens: %s)", t, strings.Join(Screens, ", ")))
+		for _, t := range p.UI.System {
+			if !slices.Contains(SystemPages, t) {
+				errs = append(errs, fmt.Sprintf("ui.system: unknown page %q (pages: %s)", t, strings.Join(SystemPages, ", ")))
 			}
 		}
-		if m := p.UI.Mode; m != "" && m != "simple" && m != "detailed" {
-			errs = append(errs, fmt.Sprintf("ui.mode: %q is neither simple nor detailed", m))
+		if m := p.UI.Mode; m != "" && !slices.Contains([]string{"detailed", "simple", "software", "product"}, m) {
+			errs = append(errs, fmt.Sprintf("ui.mode: %q is not detailed, simple, software or product", m))
 		}
 	}
 	if p.AI != nil {

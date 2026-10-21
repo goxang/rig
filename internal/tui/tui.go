@@ -303,7 +303,13 @@ func newTabs(a *engine.App, all map[string]tab, mode string) []tab {
 	if ui := a.Spec.UI; ui != nil && len(ui.Tabs) > 0 {
 		var out []tab
 		for _, n := range ui.Tabs {
-			if t := cmp.Or(all[n], all["view:"+n]); t != nil {
+			t := cmp.Or(all[n], all["view:"+n])
+			for _, v := range views {
+				if vt, ok := v.(*viewTab); ok && t == nil && strings.EqualFold(vt.title, n) {
+					t = v
+				}
+			}
+			if t != nil {
 				out = append(out, t)
 			}
 		}
@@ -343,6 +349,9 @@ func showView(mode string, t *viewTab) bool {
 	}
 	return mode == "simple" || slices.Contains(t.v.Modes, mode)
 }
+
+// locked is ui.lock: people stay on the tabs it lists, with no mode switch or command line.
+func (m *model) locked() bool { return m.app.Spec.UI != nil && m.app.Spec.UI.Lock }
 
 func modeFile(a *engine.App) string { return filepath.Join(a.Spec.Dir, ".rig", "ui-mode") }
 
@@ -1698,7 +1707,9 @@ func (m *model) key(k tea.KeyPressMsg) tea.Cmd {
 			m.pickTheme()
 			return nil
 		case "V":
-			m.pickMode()
+			if !m.locked() {
+				m.pickMode()
+			}
 			return nil
 		case "M":
 			m.mouseOff = !m.mouseOff
@@ -2371,7 +2382,11 @@ func (m *model) overlay(box string, h int) string {
 
 func (m *model) header() string {
 	a := m.app
-	left := sAccent.Render(" ◆ rig ") + sTitle.Render(a.Spec.Name) + sDim.Render("  env ") + sTitle.Render(a.Env.Name) +
+	name := a.Spec.Name
+	if a.Spec.UI != nil && a.Spec.UI.Title != "" {
+		name = a.Spec.UI.Title
+	}
+	left := sAccent.Render(" ◆ rig ") + sTitle.Render(name) + sDim.Render("  env ") + sTitle.Render(a.Env.Name) +
 		sDim.Render(" ("+a.Env.Runtime.Type+")")
 	if ns := a.Namespace(); ns != "" {
 		left += sDim.Render("  ns ") + sTitle.Render(ns)

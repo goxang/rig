@@ -136,14 +136,24 @@ type OTel struct {
 var Screens = []string{"services", "logs", "metrics", "traces", "tests", "data", "kv", "queries", "load", "manifests", "hosts", "files"}
 
 type UI struct {
-	// Tabs are the screens shown, in order (number keys follow it); left out, every screen the
-	// project configures something for shows, in the order of Screens.
+	// Tabs are the screens and views shown, in order (number keys follow it); a name that is not a
+	// screen is a view's title. Left out, every screen the project configures something for shows,
+	// in the order of Screens.
 	Tabs []string `yaml:"tabs"`
 	// Mode is detailed (the default), simple (fewer columns, keys and screens), software (the dev
 	// screens and views for developers) or product (metrics and views for product); V picks it.
 	Mode string  `yaml:"mode"`
 	Logs *LogsUI `yaml:"logs"`
+	// Title names the UI (its brand and the group of its tabs); left out, the project's name.
+	Title string `yaml:"title"`
+	// System are the system pages kept next to the tabs (SystemPages); left out, all of them.
+	System []string `yaml:"system"`
+	// Lock keeps people on these pages: no environment picker, command line or mode switch.
+	Lock bool `yaml:"lock"`
 }
+
+// SystemPages are the pages ui.system picks from.
+var SystemPages = []string{"inbox", "activity", "plugins", "api", "settings"}
 
 // LogsUI says how the Logs screen reads structured (JSON) lines; every key has a default.
 type LogsUI struct {

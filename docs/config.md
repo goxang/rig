@@ -43,7 +43,7 @@ is out of date.
 | `reports` | metrics, traces and queries a run is measured by, with tests, load results, compares, templates and publishing: `rig report start` and `stop`, `rig report`, a suite's `report:`, the Load screen's `W` (see below) |
 | `load` | named load runs: a generator, a profile, a rate, a duration and assertions for `rig load run` (see below) |
 | `otel` | OpenTelemetry for every app and load service (see below) |
-| `ui` | `{tabs, mode, logs}`: the screens and their order (left out, every screen the project configures something for); `mode`: `detailed` (default), `simple` (fewer screens, columns and keys), `software` (dev screens and views for developers) or `product` (metrics and views tagged `modes: [product]`); `V` picks one; `logs` (see below) |
+| `ui` | `{tabs, mode, logs, title, system, lock}`: the screens and views and their order (a name that is not a screen is a view's title; left out, every screen the project configures something for); `title`, `system` and `lock` make a profile for one audience (see below); `mode`: `detailed` (default), `simple` (fewer screens, columns and keys), `software` (dev screens and views for developers) or `product` (metrics and views tagged `modes: [product]`); `V` picks one; `logs` (see below) |
 | `keys` | the key preset: `rig` (the default). A personal choice, so usually in `.rig/local.yaml` or `~/.config/rig/config.yaml` |
 | `agents` | `name: {on, instructions, tools, approve}`: assistants that run on an event or a schedule (see below) |
 | `policy` | `{roles, bind}`: who may run which actions where (see below) |
@@ -458,6 +458,20 @@ app and load service: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` (`service.
 `OTEL_PROPAGATORS=tracecontext,baggage`. A variable the service sets itself wins. `svc://` addresses are the
 service's name inside docker or Kubernetes and a forwarded port for local processes. Read the traces back with
 a `jaeger` or `tempo` component, the metrics with `prometheus`, the logs with `loki`.
+
+## a UI profile
+
+A unit whose people need a few pages, not the whole tool (a manager, HR, a portal), lists them:
+
+```yaml
+ui:
+  title: PEP · Product office   # the brand, and the group the tabs form
+  tabs: [Home, Roadmap, Intake, Releases]   # views by title, screens by name, in this order
+  system: [inbox]              # system pages kept: inbox, activity, plugins, api, settings (left out: all)
+  lock: true                   # no environment picker, command line or mode switch (V)
+```
+
+A plugin's manifest may carry the same `ui:` as a default; the project's own `ui:` wins.
 
 ## ui.logs
 

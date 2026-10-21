@@ -33,19 +33,31 @@ function viewIcon(v) {
   return /git(?!lab|hub)|change/.test(t) ? 'git' : /jira|issue|board/.test(t) ? 'board' : /confluence|doc|wiki/.test(t) ? 'doc'
     : /gitlab|github|merge|pull/.test(t) ? 'git' : /game|terminal|arcade/.test(t) ? 'terminal' : v.group === 'home' ? 'home' : 'view';
 }
+// A profile (ui.title with ui.tabs) makes the tabs one group in their own order; ui.system keeps
+// only the system pages it names.
 function buildPages() {
   const screens = new Set(S.info?.screens || []);
   const tabs = S.info?.tabs?.length ? S.info.tabs.map(t => t.toLowerCase()) : null;
-  const shown = p => (!p.screen || screens.has(p.screen)) && (!p.show || p.show()) && (!tabs || p.group === 'system' || p.id === 'tasks' || tabs.includes(p.id));
+  const system = S.info?.system ? S.info.system.map(n => n === 'activity' ? 'jobs' : n) : null;
+  const listed = p => tabs.includes(p.id) || tabs.includes(p.title.toLowerCase());
+  const shown = p => (!p.screen || screens.has(p.screen)) && (!p.show || p.show())
+    && (p.group === 'system' ? !system || system.includes(p.id) : !tabs || (p.id === 'tasks' && !S.info?.lock) || listed(p));
   const views = S.views.filter(v => !v.command).map(v => ({
     id: 'v-' + slug(v.title), title: v.title, icon: viewIcon(v), view: v, render: ctx => pageView(ctx, v),
     group: v.group === 'home' ? 'run' : v.group, home: v.group === 'home',
-  })).filter(p => !tabs || tabs.includes(p.title.toLowerCase()));
+  })).filter(p => !tabs || listed(p));
+  if (tabs && S.info?.title) {
+    const at = p => Math.max(tabs.indexOf(p.id), tabs.indexOf(p.title.toLowerCase()));
+    const main = [...views, ...BUILTIN.filter(p => p.group !== 'system' && shown(p))].map(p => ({ ...p, group: 'project' })).sort((a, b) => at(a) - at(b));
+    PAGES = [...main, ...BUILTIN.filter(p => p.group === 'system' && shown(p))];
+    return;
+  }
   const order = Object.fromEntries(GROUPS.map((g, i) => [g.id, i]));
   PAGES = [...views.filter(v => v.home), ...BUILTIN.filter(shown), ...views.filter(v => !v.home)]
     .map((p, i) => ({ ...p, i })).sort((a, b) => order[a.group] - order[b.group] || a.i - b.i);
 }
-const groupTitle = g => g.id === 'project' ? (S.info?.project ? S.info.project[0].toUpperCase() + S.info.project.slice(1) : 'Project') : g.title;
+const locked = () => !!S.info?.lock;
+const groupTitle = g => g.id === 'project' ? (S.info?.title || (S.info?.project ? S.info.project[0].toUpperCase() + S.info.project.slice(1) : 'Project')) : g.title;
 const pageOf = id => PAGES.find(p => p.id === id);
 
 // ---------- chrome ----------
@@ -67,8 +79,8 @@ function renderChrome() {
   const groups = GROUPS.map(g => ({ g, pages: PAGES.filter(p => p.group === g.id) })).filter(x => x.pages.length);
   const rail = store.get('nav.rail', true);
   const toggleRail = e => { const on = !store.get('nav.rail', true); store.set('nav.rail', on); $('.shell')?.classList.toggle('rail', on); e.currentTarget.title = on ? 'Expand the sidebar' : 'Collapse the sidebar'; window.dispatchEvent(new Event('resize')); };
-  const brand = () => h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'r'), h('div', { class: 'grow' }, S.info?.project || 'rig', h('small', {}, 'rig ' + (S.info?.version || ''))));
-  const side = h('aside', { class: 'sidebar' }, h('div', { class: 'side-top' }, brand(), ibtn('menu', toggleRail, rail ? 'Expand the sidebar' : 'Collapse the sidebar', 'rail-btn')), h('div', { class: 'side-env' }, envPicker()),
+  const brand = () => h('div', { class: 'brand' }, h('span', { class: 'logo' }, (S.info?.title || 'r')[0]), h('div', { class: 'grow' }, S.info?.title || S.info?.project || 'rig', h('small', {}, 'rig ' + (S.info?.version || ''))));
+  const side = h('aside', { class: 'sidebar' }, h('div', { class: 'side-top' }, brand(), ibtn('menu', toggleRail, rail ? 'Expand the sidebar' : 'Collapse the sidebar', 'rail-btn')), !locked() && h('div', { class: 'side-env' }, envPicker()),
     h('nav', { class: 'nav' }, groups.map(({ g, pages }) => {
       const closed = collapsed.has(g.id) && !pages.some(p => p.id === cur);
       return h('div', { class: 'nav-group' + (closed ? ' closed' : '') },
@@ -85,9 +97,9 @@ function renderChrome() {
       groupTitle(g)))),
     h('div', { class: 'crumb' }, curPage ? [groupTitle(GROUPS.find(g => g.id === curGroup) || {}), h('span', { class: 'sep' }, '/'), curPage.title] : ''),
     h('div', { class: 'spacer' }),
-    h('button', { class: 'palette-btn', onclick: () => openPalette(), type: 'button', title: 'Search (ctrl+k) · : runs a command' }, icon('search'), h('span', { class: 'ellipsis' }, 'Search or :command'), h('span', { class: 'kbd' }, navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K')),
-    h('span', { class: 'top-env' }, envPicker()),
-    h('a', { class: 'btn icon ghost top-act', href: '#/jobs', 'data-page': 'jobs', title: 'Activity (!)', 'aria-label': 'Activity' }, icon('jobs'), h('span', { class: 'count', hidden: true })),
+    h('button', { class: 'palette-btn', onclick: () => openPalette(), type: 'button', title: locked() ? 'Search (ctrl+k)' : 'Search (ctrl+k) · : runs a command' }, icon('search'), h('span', { class: 'ellipsis' }, locked() ? 'Search' : 'Search or :command'), h('span', { class: 'kbd' }, navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl K')),
+    !locked() && h('span', { class: 'top-env' }, envPicker()),
+    pageOf('jobs') && h('a', { class: 'btn icon ghost top-act', href: '#/jobs', 'data-page': 'jobs', title: 'Activity (!)', 'aria-label': 'Activity' }, icon('jobs'), h('span', { class: 'count', hidden: true })),
     ibtn('ai', toggleAI, 'Assistant (@)', 'ai-btn'), ibtn('ext', () => browserFull(), 'Full screen (F11)', 'full-btn'),
     ibtn(document.documentElement.dataset.scheme === 'light' ? 'moon' : 'sun', () => setPref('scheme', document.documentElement.dataset.scheme === 'light' ? 'dark' : 'light'), 'Light or dark'));
   const sub = h('nav', { class: 'subnav' }, PAGES.filter(p => p.group === curGroup).map(p => link(p)));
@@ -106,7 +118,8 @@ function updateCounts() {
 function renderKeys(extra) {
   const el = $('#keys');
   if (!el) return;
-  const keys = [...(extra || []), [':', 'command'], ['S', 'save'], ['ctrl+k', 'search'], ['ctrl+e', 'env'], ['@', 'AI'], ['.', 'menu'], ['?', 'help']];
+  const keys = locked() ? [...(extra || []), ['ctrl+k', 'search'], ['@', 'AI'], ['.', 'menu'], ['?', 'help']]
+    : [...(extra || []), [':', 'command'], ['S', 'save'], ['ctrl+k', 'search'], ['ctrl+e', 'env'], ['@', 'AI'], ['.', 'menu'], ['?', 'help']];
   el.replaceChildren(...keys.map(([k, d]) => h('span', {}, h('b', {}, k), d)), h('span', { class: 'spacer' }), h('span', {}, (S.info?.project || '') + ' · ' + (S.info?.env || '')));
 }
 async function switchEnv(env) {
@@ -135,7 +148,7 @@ function route() {
   if (!document.querySelector(`.subnav [data-page="${page.id}"]`) || !document.querySelector(`.topnav [data-group="${page.group}"].on`)) renderChrome();
   for (const a of document.querySelectorAll('[data-page]')) a.classList.toggle('on', a.dataset.page === r.id);
   $('.crumb')?.replaceChildren(groupTitle(GROUPS.find(g => g.id === page.group) || {}), h('span', { class: 'sep' }, '/'), page.title);
-  document.title = page.title + ' · ' + (S.info?.project || 'rig');
+  document.title = page.title + ' · ' + (S.info?.title || S.info?.project || 'rig');
   const main = $('#main'), el = h('div', { class: 'page' });
   main.replaceChildren(el); main.scrollTop = 0;
   renderKeys(page.keys);
@@ -162,6 +175,9 @@ const emptyState = (big, small, ...more) => h('div', { class: 'empty' }, h('div'
 
 // ---------- palette (ctrl+k) and the command line (:) ----------
 function paletteItems() {
+  if (locked()) return [...PAGES.map(p => ({ k: 'screen', t: p.title, d: groupTitle(GROUPS.find(g => g.id === p.group)), run: () => go(p.id) })),
+    { k: 'mode', t: 'Toggle light / dark', run: () => setPref('scheme', document.documentElement.dataset.scheme === 'light' ? 'dark' : 'light') },
+    { k: 'ai', t: 'Ask the assistant', run: () => { if (!aiOpen) toggleAI(); } }];
   return [
     ...PAGES.map(p => ({ k: 'screen', t: p.title, d: groupTitle(GROUPS.find(g => g.id === p.group)), run: () => go(p.id) })),
     ...serviceNames().flatMap(n => [
@@ -188,7 +204,7 @@ function openPalette({ only, prompt, value = '' } = {}) {
   const input = h('input', { placeholder: prompt || 'Search screens, services, tasks, dashboards, environments… or type : and a command', 'aria-label': 'search', value });
   const res = h('div', { class: 'res' });
   const draw = () => {
-    if (input.value.startsWith(':')) {
+    if (input.value.startsWith(':') && !locked()) {
       res.replaceChildren(h('div', { class: 'opt sel' }, icon('cmd'), h('span', { class: 'mono' }, input.value), h('span', { class: 'k' }, 'enter runs')));
       return;
     }
@@ -206,7 +222,7 @@ function openPalette({ only, prompt, value = '' } = {}) {
     else if (e.key === 'ArrowUp') { sel = Math.max(0, sel - 1); draw(); e.preventDefault(); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      if (input.value.startsWith(':')) { const line = input.value.slice(1); closeOverlay(); runCommand(line); }
+      if (input.value.startsWith(':') && !locked()) { const line = input.value.slice(1); closeOverlay(); runCommand(line); }
       else if (shown[sel]) pick(shown[sel]);
     }
   });
@@ -325,7 +341,7 @@ document.addEventListener('keydown', e => {
   const typing = e.target.closest?.('input,textarea,select,[contenteditable]');
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === 'k') { e.preventDefault(); overlay ? closeOverlay() : openPalette(); return; }
-  if (e.ctrlKey && k === 'e') { e.preventDefault(); closeOverlay(); openPalette({ only: 'environment', prompt: 'Switch environment' }); return; }
+  if (e.ctrlKey && k === 'e' && !locked()) { e.preventDefault(); closeOverlay(); openPalette({ only: 'environment', prompt: 'Switch environment' }); return; }
   if (e.ctrlKey && k === 'p') { e.preventDefault(); closeOverlay(); openPalette({ only: 'theme', prompt: 'Pick a theme' }); return; }
   if (e.key === 'F1') { e.preventDefault(); showHelp(); return; }
   if (e.key === 'Escape') {
@@ -343,6 +359,7 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.altKey) return;
   if (S.keyHandler?.(e)) { e.preventDefault(); return; }
   const take = f => { e.preventDefault(); f(); };
+  if (locked() && [':', '!', 'T', 'S'].includes(e.key)) return;
   switch (e.key) {
     case ':': return take(() => openCommandLine());
     case '@': return take(toggleAI);

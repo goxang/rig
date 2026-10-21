@@ -1715,6 +1715,13 @@
     "UI": {
       "additionalProperties": false,
       "properties": {
+        "lock": {
+          "description": "Keeps people on these pages: no environment picker, command line or mode switch.",
+          "type": [
+            "boolean",
+            "string"
+          ]
+        },
         "logs": {
           "$ref": "#/definitions/LogsUI"
         },
@@ -1726,8 +1733,8 @@
             "boolean"
           ]
         },
-        "tabs": {
-          "description": "The screens shown, in order (number keys follow it); left out, every screen the project configures something for shows, in the order of Screens.",
+        "system": {
+          "description": "The system pages kept next to the tabs (SystemPages); left out, all of them.",
           "items": {
             "type": [
               "string",
@@ -1736,6 +1743,25 @@
             ]
           },
           "type": "array"
+        },
+        "tabs": {
+          "description": "The screens and views shown, in order (number keys follow it); a name that is not a screen is a view's title. Left out, every screen the project configures something for shows, in the order of Screens.",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "title": {
+          "description": "Names the UI (its brand and the group of its tabs); left out, the project's name.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
         }
       },
       "type": "object"
@@ -1999,7 +2025,7 @@
           "$ref": "#/definitions/UI"
         }
       ],
-      "description": "{tabs, mode, logs}: the screens and their order (left out, every screen the project configures something for); mode: detailed (default), simple (fewer screens, columns and keys), software (dev screens and views for developers) or product (metrics and views tagged modes: [product]); V picks one; logs"
+      "description": "{tabs, mode, logs, title, system, lock}: the screens and views and their order (a name that is not a screen is a view's title; left out, every screen the project configures something for); title, system and lock make a profile for one audience; mode: detailed (default), simple (fewer screens, columns and keys), software (dev screens and views for developers) or product (metrics and views tagged modes: [product]); V picks one; logs"
     },
     "vars": {
       "additionalProperties": {

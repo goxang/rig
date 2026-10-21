@@ -895,3 +895,29 @@ table.fixed th, table.fixed td { overflow: hidden; text-overflow: ellipsis; }
 .modal:has(.help-grid) { width: min(1000px, 94vw); top: 8vh; }
 .help-grid { display: block; max-height: 64vh; overflow: auto; }
 .keys-t td:last-child { white-space: normal; text-overflow: clip; overflow: visible; }
+
+/* tiles, timeline, graph */
+.st-ok { --st: var(--green); } .st-warn { --st: var(--amber); } .st-err { --st: var(--red); } .st-none { --st: var(--dim); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.tile { background: color-mix(in srgb, var(--surface), var(--st) 8%); border: 1px solid color-mix(in srgb, var(--border), var(--st) 35%); border-left: 4px solid var(--st); border-radius: var(--radius); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .tl { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.tile .tv { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text); }
+.tile .tv small { font-size: 13px; color: var(--muted); font-weight: 500; }
+.tile .tm { font-size: 12px; color: var(--st); }
+.tline { display: flex; flex-direction: column; padding: 4px 4px 4px 10px; }
+.tl-m { font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 10px 0 4px -6px; }
+.tl-i { display: flex; gap: 12px; position: relative; padding: 6px 0 10px; border-left: 2px solid var(--border); padding-left: 14px; }
+.tl-dot { position: absolute; left: -7px; top: 10px; width: 12px; height: 12px; border-radius: 50%; background: var(--st); box-shadow: 0 0 0 3px var(--bg); }
+.tl-k { margin-left: 8px; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+.flow-wrap { overflow: auto; }
+.flow { width: 100%; min-width: 520px; height: auto; display: block; }
+.flow .fe { fill: none; stroke: var(--st); opacity: .85; }
+.flow .fe.st-none { stroke: var(--accent); }
+.flow .fe.live { stroke-dasharray: 7 7; animation: flowdash 1s linear infinite; }
+@keyframes flowdash { to { stroke-dashoffset: -14; } }
+@media (prefers-reduced-motion: reduce) { .flow .fe.live { animation: none; } }
+.flow .fl { fill: var(--muted); font: 11px var(--mono); }
+.flow .fn rect { fill: var(--surface); stroke: color-mix(in srgb, var(--border), var(--st) 60%); stroke-width: 1.5; }
+.flow .fn circle { fill: var(--st); }
+.flow .fnt { fill: var(--text); font: 600 13px var(--font); }
+.flow .fnv { fill: var(--muted); font: 11px var(--mono); }

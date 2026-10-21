@@ -60,6 +60,9 @@ func (m *model) command(line string) tea.Cmd {
 	verb, args := f[0], f[1:]
 	switch verb {
 	case "palette":
+		if m.locked() {
+			return nil
+		}
 		m.ask(":", "", func(line string) tea.Cmd {
 			if line = strings.TrimSpace(line); line != "" {
 				m.cmdHist = append(slices.DeleteFunc(m.cmdHist, func(h string) bool { return h == line }), line)

@@ -139,7 +139,7 @@ function pageView(ctx, v, inDrawer) {
   const scope = scopeOf(ctx);
   const st = { focus: null, tabs: [] };
   const body = h('div', { class: 'view' });
-  if (!inDrawer) ctx.el.append(pageHead(v.title, v.plugin ? 'from the ' + v.plugin + ' plugin' : null, ibtn('refresh', () => route(), 'Refresh (r)')));
+  if (!inDrawer) ctx.el.append(pageHead(v.title, v.plugin && !locked() ? 'from the ' + v.plugin + ' plugin' : null, ibtn('refresh', () => route(), 'Refresh (r)')));
   if (v.secret) {
     ctx.el.append(h('div', { class: 'banner amber' }, icon('kv'), h('span', { class: 'grow' }, h('b', {}, v.secret), ' is not set: this screen stays empty until it is.'),
       btn('Set ' + v.secret, async () => {
@@ -415,6 +415,9 @@ function simpleWidget(w, n, f) {
       const vals = rows.map(r => ({ name: r[nameK], v: +r[valK] })), max = Math.max(1e-9, ...vals.map(x => x.v));
       return h('div', { class: 'bars' }, vals.map((x, i) => h('div', { class: 'b' }, h('span', { class: 'ellipsis' }, x.name), h('div', { class: 'track' }, h('div', { class: 'fill', style: { width: 100 * x.v / max + '%', background: series()[i % series().length] } })), h('span', { class: 'mono' }, fmtNum(x.v, P(n, 'unit'))))));
     }
+    case 'tiles': return tilesWidget(n, rows);
+    case 'timeline': return timelineWidget(n, rows);
+    case 'graph': return graphWidget(rows);
     case 'form': return formWidget(n);
     default: {
       const t = dataTable({ columns: fields.map(fl => ({ key: fl.name, field: fl, num: ['int', 'number'].includes(fl.type) })), empty: 'No rows' });
@@ -435,6 +438,77 @@ function formWidget(n) {
   const form = schemaForm(P(n, 'schema') || spec?.args);
   return h('div', { class: 'vform' }, form.el, h('div', { class: 'row' }, h('span', { class: 'spacer' }), btn(P(n, 'submit') || 'Run', async () => {
     let args; try { args = form.value(); } catch (e) { return toast(e.message, 'bad'); }
-    await act(name, args, name);
+    await act(name, { ...(P(n, 'args') || {}), ...args }, name);
   }, 'primary')));
+}
+
+const STATUS = { ok: 'ok', good: 'ok', up: 'ok', done: 'ok', warn: 'warn', warning: 'warn', degraded: 'warn', err: 'err', error: 'err', bad: 'err', down: 'err', critical: 'err' };
+const stClass = v => 'st-' + (STATUS[String(v ?? '').toLowerCase()] || 'none');
+
+// tilesWidget is a scorecard: a tile per row (title or name, value, measure, target, note), coloured by status.
+function tilesWidget(n, rows) {
+  const label = P(n, 'label') || 'title', value = P(n, 'value') || 'value';
+  if (!rows.length) return h('div', { class: 'empty' }, 'Nothing to show');
+  return h('div', { class: 'tiles' }, rows.map(r => {
+    const v = r[value], num = typeof v === 'number' || (v !== '' && v != null && !isNaN(+v));
+    return h('div', { class: 'tile ' + stClass(r.status), title: [r.note, r.updated && 'updated ' + fmtCell(r.updated)].filter(Boolean).join(' · ') },
+      h('div', { class: 'tl ellipsis' }, r[label] || r.name || ''),
+      h('div', { class: 'tv' }, num ? fmtNum(+v) : String(v ?? '–'), r.measure && h('small', {}, ' ' + r.measure)),
+      h('div', { class: 'tm ellipsis' }, [r.unit, r.target && 'target ' + r.target, r.status].filter(Boolean).join(' · ')));
+  }));
+}
+
+// timelineWidget lists rows (time, title, kind, status, note) by month; order: desc puts the latest first.
+function timelineWidget(n, rows) {
+  const tk = P(n, 'time') || 'time', label = P(n, 'label') || 'title';
+  const at = v => typeof v === 'number' ? new Date(v * 1000) : toDate(v);
+  const items = rows.map(r => ({ r, t: at(r[tk]) })).filter(x => !isNaN(x.t)).sort((a, b) => P(n, 'order') === 'desc' ? b.t - a.t : a.t - b.t);
+  if (!items.length) return h('div', { class: 'empty' }, 'Nothing on the timeline');
+  let month = '';
+  return h('div', { class: 'tline' }, items.map(({ r, t }) => {
+    const m = t.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const head = m !== month && (month = m, h('div', { class: 'tl-m' }, m));
+    return [head, h('div', { class: 'tl-i ' + stClass(r.status) }, h('span', { class: 'tl-dot' }),
+      h('div', { class: 'tl-b' }, h('div', {}, h('b', {}, r[label] ?? ''), r.kind && h('span', { class: 'tl-k' }, r.kind)),
+        h('div', { class: 'muted small' }, [t.toLocaleDateString(), r.status, r.unit, r.note].filter(Boolean).join(' · '))))];
+  }));
+}
+
+// graphWidget draws a flow left to right: rows with from and to are edges (label, value, status), rows
+// with node describe a node (label, value, status). Width follows value; edges carrying traffic move.
+function graphWidget(rows) {
+  const edges = rows.filter(r => r.from != null && r.to != null && r.from !== '' && r.to !== '');
+  const info = Object.fromEntries(rows.filter(r => r.node != null && r.node !== '').map(r => [r.node, r]));
+  const ids = [...new Set([...Object.keys(info), ...edges.flatMap(e => [e.from, e.to])])];
+  if (!ids.length) return h('div', { class: 'empty' }, 'No flow');
+  const layer = {};
+  const visit = (id, d, path) => {
+    if (path.has(id) || (layer[id] ?? -1) >= d) return;
+    layer[id] = d; path.add(id);
+    edges.filter(e => e.from === id).forEach(e => visit(e.to, d + 1, path));
+    path.delete(id);
+  };
+  ids.filter(id => !edges.some(e => e.to === id)).forEach(id => visit(id, 0, new Set()));
+  ids.forEach(id => { if (layer[id] == null) visit(id, 0, new Set()); });
+  const cols = [];
+  ids.forEach(id => (cols[layer[id]] ||= []).push(id));
+  const W = 168, H = 58, gx = 96, gy = 22, tall = Math.max(...cols.map(c => c?.length || 0)) * (H + gy);
+  const pos = {};
+  cols.forEach((c, i) => (c || []).forEach((id, j) => { pos[id] = { x: 8 + i * (W + gx), y: (tall - c.length * (H + gy)) / 2 + j * (H + gy) + gy / 2 }; }));
+  const max = Math.max(1e-9, ...edges.map(e => +e.value || 0));
+  const svg = s('svg', { viewBox: `0 0 ${16 + cols.length * (W + gx) - gx} ${tall}`, class: 'flow', role: 'img' });
+  for (const e of edges) {
+    const a = pos[e.from], b = pos[e.to], x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2, mx = (x1 + x2) / 2;
+    const d = x2 > x1 ? `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1 + 60},${y1 - 70} ${x2 - 60},${y2 - 70} ${x2},${y2}`;
+    svg.append(s('path', { d, class: 'fe ' + stClass(e.status) + (+e.value > 0 ? ' live' : ''), 'stroke-width': (1.5 + 5 * Math.sqrt((+e.value || 0) / max)).toFixed(1) },
+      s('title', {}, `${e.from} → ${e.to}${e.label ? ': ' + e.label : ''}`)));
+    if (e.label) svg.append(s('text', { x: mx, y: (y1 + y2) / 2 - 7, class: 'fl', 'text-anchor': 'middle' }, e.label));
+  }
+  for (const id of ids) {
+    const p = pos[id], r = info[id] || {};
+    svg.append(s('g', { class: 'fn ' + stClass(r.status), transform: `translate(${p.x},${p.y})` },
+      s('rect', { width: W, height: H, rx: 10 }), s('circle', { cx: W - 14, cy: 14, r: 4 }),
+      s('text', { x: 12, y: 24, class: 'fnt' }, String(r.label || id).slice(0, 22)), s('text', { x: 12, y: 44, class: 'fnv' }, r.value ?? '')));
+  }
+  return h('div', { class: 'flow-wrap' }, svg);
 }
