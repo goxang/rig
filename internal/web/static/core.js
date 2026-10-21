@@ -290,6 +290,21 @@ function drawer(title, sub, body, onClose) {
     h('div', { class: 'drawer-b' }, body));
   const ov = openOverlay([d], onClose);
   d.close = () => ov.close();
+  const fit = w => Math.round(Math.max(320, Math.min(innerWidth - 40, w)));
+  const saved = store.get('drawer.w', 0);
+  if (saved) d.style.width = fit(saved) + 'px';
+  const grip = h('div', { class: 'edge-grip', title: 'drag to resize · double-click resets', ondblclick: () => { d.style.width = ''; store.set('drawer.w', 0); } });
+  grip.addEventListener('pointerdown', e => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); document.body.classList.add('resizing', 'cols');
+    const move = ev => { d.style.width = fit(innerWidth - ev.clientX) + 'px'; };
+    const up = () => {
+      grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up);
+      document.body.classList.remove('resizing', 'cols'); store.set('drawer.w', Math.round(d.offsetWidth));
+      window.dispatchEvent(new Event('resize'));
+    };
+    grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up);
+  });
+  d.prepend(grip);
   return d;
 }
 
@@ -382,9 +397,16 @@ function frameTable(frame, opts = {}) {
   return t;
 }
 const FILTER_HELP = 'words match fuzzy · *glob* · col=value · col!=value · col~text';
-function searchBox(placeholder, oninput, { value = '', title = FILTER_HELP } = {}) {
-  const input = h('input', { type: 'search', placeholder, value, title, oninput: debounce(e => { if (!/@\?/.test(e.target.value)) oninput(e.target.value); }, 80), 'data-filter': '1',
-    onkeydown: e => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; oninput(''); } else if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'ArrowDown') input.blur(); } });
+// A filter is remembered per screen and placeholder, so leaving a page and coming back (or reloading) keeps it.
+function searchBox(placeholder, oninput, { value, title = FILTER_HELP } = {}) {
+  const key = 'filter.' + parseRoute().id + '.' + placeholder;
+  const remember = v => store.set(key, v || '');
+  const saved = value === undefined ? store.get(key, '') : '';
+  const input = h('input', { type: 'search', placeholder, value: value ?? saved, title, 'data-filter': '1',
+    oninput: debounce(e => { remember(e.target.value); if (!/@\?/.test(e.target.value)) oninput(e.target.value); }, 80),
+    onkeydown: e => { if (e.key === 'Escape' && input.value) { e.stopPropagation(); input.value = ''; remember(''); oninput(''); } else if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'ArrowDown') input.blur(); } });
+  // The list behind a filter is often built after this call (or after its data arrives): apply again until it exists.
+  if (saved) [0, 300, 1200].forEach(ms => setTimeout(() => { try { oninput(saved); } catch { /* list not built yet */ } }, ms));
   const ghost = typeof aiAssist === 'function' ? aiAssist(input, () => 'a filter expression for a table or list on the screen ' + (pageOf(parseRoute().id)?.title || '') + ': ' + FILTER_HELP, { describeOnly: true }) : '';
   return h('div', { class: 'search' }, icon('search'), input, ghost);
 }

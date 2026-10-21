@@ -153,8 +153,15 @@ function pageMetrics(ctx) {
     winLabel.textContent = end ? `${new Date(to - ms(range)).toLocaleString([], { hour12: false })} → ${to.toLocaleString([], { hour12: false })}` : '';
     zoomOut.hidden = !zooms.length && !end;
   };
-  const setWin = (r, e, push = true) => { if (push) zooms.push([range, end]); range = r; end = e; if (!e) store.set('metrics.range', r); showWin(); refresh(); };
-  const onZoom = (t0, t1) => setWin(Math.max(10, Math.round((t1 - t0) / 1000)) + 's', new Date(t1).toISOString());
+  // a zoom also clips every chart to the range, for sources that answer with more than the window asked for
+  const setWin = (r, e, push = true, view = null) => {
+    if (push) zooms.push([range, end]);
+    range = r; end = e;
+    if (!e) store.set('metrics.range', r);
+    body.querySelectorAll('.panel .body').forEach(b => { b._view = view; });
+    showWin(); refresh();
+  };
+  const onZoom = (t0, t1) => setWin(Math.max(10, Math.round((t1 - t0) / 1000)) + 's', new Date(t1).toISOString(), true, [t0, t1]);
   const unzoom = () => { const z = zooms.pop(); if (z) setWin(z[0], z[1], false); else setWin(range, null, false); };
   const shift = d => { const len = ms(range), to = (end ? new Date(end).getTime() : Date.now()) + d * len / 2; setWin(range, to >= Date.now() ? null : new Date(to).toISOString()); };
   const drawTabs = () => tabs.replaceChildren(

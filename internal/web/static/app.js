@@ -316,7 +316,7 @@ function openMenu(at) {
 function showHelp() {
   const page = pageOf(parseRoute().id);
   modal('Keys', h('div', { class: 'help-grid' },
-    shortcutsTable(), page?.keys && h('div', {}, h('h4', {}, page.title), h('table', {}, h('tbody', {}, page.keys.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))))))),
+    shortcutsTable(), page?.keys && h('div', {}, h('h4', {}, page.title), h('table', { class: 'keys-t' }, h('tbody', {}, page.keys.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))))))),
   [['Close', true, 'primary']]);
 }
 

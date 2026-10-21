@@ -860,3 +860,24 @@ table.fixed th, table.fixed td { overflow: hidden; text-overflow: ellipsis; }
 .vpanel > .pbody:has(.psplit) { overflow: visible; max-height: none; }
 .pleft > .table-wrap, .pright > .table-wrap { overflow: visible; }
 .vrow .vpanel .pleft, .vrow .vpanel .pright { max-height: 340px; }
+
+/* plugin tiles: the footer wraps instead of stacking its buttons */
+.plug-foot { flex-wrap: wrap; }
+.plug-foot .btn, .plug-foot .ibtn { flex: none; white-space: nowrap; }
+.plug-top > :not(.grow) { flex: none; }
+
+/* key help: a long key combo wraps inside its column and never runs under the description */
+.keys-t, .help-grid table { width: 100%; table-layout: fixed; }
+.keys-t td:first-child, .help-grid table td:first-child { width: 38%; white-space: normal; overflow-wrap: anywhere; }
+.keys-t td, .help-grid table td { overflow-wrap: anywhere; }
+.keys-t kbd, .help-grid table kbd { white-space: normal; max-width: 100%; }
+
+/* popups resize: dialogs from their corner, drawers from their left edge */
+.modal { display: flex; flex-direction: column; resize: both; overflow: auto; min-width: 300px; max-width: 96vw; max-height: 88vh; }
+.modal-b { flex: 1; min-height: 0; overflow: auto; }
+.modal-h, .modal-f { flex: none; }
+.drawer { overflow: visible; }
+.drawer .edge-grip { left: -4px; }
+
+/* narrow screens have no sidebar column, rail or not */
+@media (max-width: 900px) { .shell.rail, .shell { grid-template-columns: 1fr; } }
