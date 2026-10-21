@@ -21,6 +21,7 @@ import (
 	"github.com/goxang/rig/kernel/jobs"
 	"github.com/goxang/rig/protocol"
 	"github.com/goxang/rig/protocol/rpc"
+	"github.com/goxang/rig/spec"
 )
 
 func TestMain(m *testing.M) {
@@ -413,5 +414,24 @@ func TestContextCarriesCaller(t *testing.T) {
 	ctx := identity.With(context.Background(), identity.Subject{Kind: identity.KindToken, Name: "product/l2", Roles: []string{"parent"}})
 	if c := h.context(ctx); c.User != "product/l2" || len(c.Roles) != 1 || c.Roles[0] != "parent" {
 		t.Errorf("remote call context = %+v", c)
+	}
+}
+
+func TestUIProfileOnlyForConfiguredPlugins(t *testing.T) {
+	root := filepath.Join(ConfigDir(), "plugins")
+	plugin(t, root, "name: layer-x\ndescription: x\nui: {title: Layer X, lock: true}\ntemplates: {t: {instructions: x}}\n")
+	t.Cleanup(func() { os.RemoveAll(filepath.Join(root, "layer-x")) })
+	has := func(cfg map[string]*spec.Plugin) (ui, templates bool) {
+		for _, d := range spec.PluginDefaults(t.TempDir(), cfg) {
+			ui = ui || d.Get("ui.title") != nil
+			templates = templates || d.Get("templates.t") != nil
+		}
+		return
+	}
+	if ui, tpl := has(nil); ui || !tpl {
+		t.Errorf("unconfigured: ui %v, templates %v", ui, tpl)
+	}
+	if ui, _ := has(map[string]*spec.Plugin{"layer-x": {}}); !ui {
+		t.Error("the configured plugin's ui profile is missing")
 	}
 }

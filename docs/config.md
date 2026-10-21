@@ -471,7 +471,7 @@ ui:
   lock: true                   # no environment picker, command line or mode switch (V)
 ```
 
-A plugin's manifest may carry the same `ui:` as a default; the project's own `ui:` wins.
+A plugin's manifest may carry the same `ui:` as a default for projects that configure it (`plugins.<name>`); the project's own `ui:` wins.
 
 ## ui.logs
 

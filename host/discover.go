@@ -18,6 +18,9 @@ func init() {
 		var out []*config.Doc
 		for _, m := range ms {
 			out = append(out, m.Fragment)
+			if m.UI != nil && cfg[m.Name] != nil {
+				out = append(out, m.UI)
+			}
 		}
 		return out
 	}

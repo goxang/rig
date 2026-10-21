@@ -138,6 +138,8 @@ type Manifest struct {
 	// Dir is where the manifest lives; Fragment the rig.yaml keys it contributes.
 	Dir      string      `yaml:"-"`
 	Fragment *config.Doc `yaml:"-"`
+	// UI is the manifest's ui profile, a default only for projects that configure the plugin.
+	UI       *config.Doc `yaml:"-"`
 	Warnings []string    `yaml:"-"`
 }
 
@@ -197,11 +199,13 @@ func ParseManifest(raw []byte, file string) (*Manifest, error) {
 		return nil, fmt.Errorf("%s: name %q: want lower-case letters, digits and dashes", file, m.Name)
 	}
 	known := knownKeys()
-	frag := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	frag, ui := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	top := root.Content[0]
 	for i := 0; i+1 < len(top.Content); i += 2 {
 		k := top.Content[i].Value
 		switch {
+		case k == "ui":
+			ui.Content = append(ui.Content, top.Content[i], top.Content[i+1])
 		case fragmentKeys[k]:
 			frag.Content = append(frag.Content, top.Content[i], top.Content[i+1])
 		case !known[k]:
@@ -209,6 +213,9 @@ func ParseManifest(raw []byte, file string) (*Manifest, error) {
 		}
 	}
 	m.Fragment = config.FromNode(frag, file, "plugin "+m.Name)
+	if len(ui.Content) > 0 {
+		m.UI = config.FromNode(ui, file, "plugin "+m.Name)
+	}
 	for n, a := range m.Actions {
 		switch a.Effect {
 		case "":
