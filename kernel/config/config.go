@@ -276,6 +276,9 @@ type Options struct {
 	Import func(kind, path string, project *yaml.Node) (*Doc, error)
 	// NoLocal skips .rig/local.yaml.
 	NoLocal bool
+	// NoTemplates leaves `defaults:` and `extends` to ApplyTemplates, for a first pass that only
+	// finds the plugins whose fragments may hold the templates.
+	NoTemplates bool
 }
 
 // Compose builds a project's configuration from rig.yaml (raw, at file) and every layer around it.
@@ -331,8 +334,10 @@ func Compose(raw []byte, file string, o Options) (*Doc, error) {
 			d.Over(l)
 		}
 	}
-	if err := d.applyTemplates(); err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
+	if !o.NoTemplates {
+		if err := d.ApplyTemplates(file); err != nil {
+			return nil, err
+		}
 	}
 	d.Finish()
 	return d, nil
@@ -368,6 +373,14 @@ func includes(root *yaml.Node, dir string) ([]string, error) {
 
 // templated are the sections whose entries take `defaults:` and `extends`.
 var templated = []string{"services", "components", "tasks", "queries", "environments", "agents", "views"}
+
+// ApplyTemplates is what Compose does last unless NoTemplates.
+func (d *Doc) ApplyTemplates(file string) error {
+	if err := d.applyTemplates(); err != nil {
+		return fmt.Errorf("%s: %w", file, err)
+	}
+	return nil
+}
 
 // applyTemplates fills every entry of a templated section: its section's defaults, then its templates
 // in order, then the entry itself. ${name} in a default or a template is the entry's name.

@@ -19,7 +19,8 @@ rig plugin logs gitlab -F           # its stderr; trace shows the JSON-RPC excha
 rig finds plugins in what `rig.lock` pins, then your own `~/.config/rig/rig.lock`, then `~/.config/rig/plugins`, then `.rig/plugins`, then
 `plugins.<name>.path`; a later one of the same name wins. `plugins.<name>:` in rig.yaml configures one
 against its `config:` schema. A plugin in `~/.config/rig/plugins` shows its views only in projects
-it applies to (see [views](views.md)). A pack is a plugin that is mostly `requires:`.
+it applies to (see [views](views.md)). A pack is a plugin that is mostly `requires:`; its
+`templates:` are there for `extends`, so a project picks the agents it wants (`po: {extends: product-owner}`).
 
 `rig plugin vendor` copies the locked plugins into `.rig/vendor` for offline installs. A mirror (`RIG_REGISTRY` or
 `registry:` in `~/.config/rig/config.yaml`) holds `index.json`, `<name>/<version>/<archive>` and the
@@ -29,7 +30,8 @@ shared files (one `rig-std` per platform) in `files/`.
 
 [goxang/rig-plugins](https://github.com/goxang/rig-plugins) holds them, grouped in packs: `pack/std`
 (runtimes, builders, git, imports), `pack/data`, `pack/observability`, `pack/qa`, `pack/gitlab`,
-`pack/github`, `pack/atlassian`, `pack/cloud-aws` and `pack/product`; plus `slack`, `mcp-bridge`,
+`pack/github`, `pack/atlassian`, `pack/cloud-aws`, `pack/product` and `pack/org` (organisational units, `unit/1`, with
+agents for the product roles); plus `slack`, `mcp-bridge`,
 `arcade`, `plugin-tree` (`:plugintree`: dependencies, how each talks to rig) and `rig-usage` (`:usage`: CPU and memory of rig and its plugins). Most are one Go binary, `rig-std`; `rig-std list` prints what each one serves.
 
 ## Writing one

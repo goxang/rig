@@ -76,19 +76,24 @@ func LoadData(raw []byte, file, env string, overrides map[string]string) (*Proje
 		}
 		return d, err
 	}}
+	opts.NoTemplates = PluginDefaults != nil
 	doc, err := config.Compose(raw, file, opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if PluginDefaults != nil {
+		opts.NoTemplates = false
 		var pl struct {
 			Plugins map[string]*Plugin `yaml:"plugins"`
 		}
 		_ = doc.Root.Decode(&pl)
 		if opts.Defaults = PluginDefaults(dir, pl.Plugins); len(opts.Defaults) > 0 {
-			if doc, err = config.Compose(raw, file, opts); err != nil {
-				return nil, nil, err
-			}
+			doc, err = config.Compose(raw, file, opts)
+		} else {
+			err = doc.ApplyTemplates(file)
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 	root := doc.Root
