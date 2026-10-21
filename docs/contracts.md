@@ -23,8 +23,16 @@ streams stream, effects match, optional capabilities are whole, and the sources 
 arguments answer frames with the contract's fields.
 
 The contracts are `runtime builder registry logs metrics traces profiles debugger database cache
-queue kv load query tests hosts vcs scm tracker docs iac notify secrets ai`, each at version 1. Their
+queue kv load query tests hosts vcs scm tracker docs iac notify secrets ai unit`, each at version 1. Their
 definitions are in `contracts/<name>/v1.yaml`; a new version lives next to the old one.
+
+`unit/1` is a project as an organisational unit: a team, the management above some teams, a
+division. It answers `unit.info`, `unit.kpis`, `unit.people`, `unit.items` (risks, blockers,
+decisions), `unit.requests` and `unit.children`, and takes `unit.request`, `unit.answer` and
+`unit.item`. A unit reads the units below it over their `rig serve`, one level down, with a token
+whose role allows only `<plugin>.unit.*`; a request sent down lands in the child's own state and
+raises `unit.request` there, which an agent can act on. `unit.people` is separate so a role can
+see delivery figures without people figures, or the reverse.
 
 Optional capabilities are what a built-in screen offers beyond the kind's basics: `browse`, `edit`
 and `snapshot` on data, `forward`, `env` and `resources` on a runtime, and so on. A screen shows

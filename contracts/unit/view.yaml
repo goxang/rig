@@ -1,0 +1,4 @@
+title: Unit
+widget: table
+source: unit.kpis
+refresh: 60s

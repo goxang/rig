@@ -10,7 +10,7 @@ import (
 )
 
 func TestContractsLoadAndCheck(t *testing.T) {
-	if len(IDs()) != 24 || Get("metrics").Kind != "metrics" || ForKind("messaging").ID != "queue/1" {
+	if len(IDs()) != 25 || Get("metrics").Kind != "metrics" || ForKind("messaging").ID != "queue/1" {
 		t.Fatalf("contracts: %v", IDs())
 	}
 	for _, id := range IDs() {

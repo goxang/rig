@@ -1,0 +1,22 @@
+contract: unit/1
+description: "an organisational unit (a team, a division, a company): what it reports to the unit above and the requests it takes from it"
+sources:
+  unit.info:
+    fields: {name: string, title: string, layer: int, parent: string, owner: string, description: string}
+  unit.kpis:
+    args: {child: string}
+    fields: {unit: string, name: string, title: string, value: number, measure: string, target: string, status: string, updated: time, note: string}
+  unit.people:
+    args: {child: string}
+    fields: {unit: string, name: string, title: string, value: number, measure: string, target: string, status: string, updated: time, note: string}
+  unit.items:
+    args: {child: string}
+    fields: {unit: string, id: string, kind: string, title: string, severity: string, status: string, owner: string, updated: time, ref: string}
+  unit.requests:
+    fields: {id: string, from: string, to: string, by: string, title: string, body: string, status: string, answer: string, due: string, created: time, updated: time}
+  unit.children:
+    fields: {name: string, title: string, layer: int, reachable: bool, ok: int, warn: int, err: int, high: int, open_requests: int, updated: time, error: string}
+actions:
+  unit.request: {effect: write, args: {to: string, title: string!, body: string, due: string, from: string, by: string}}
+  unit.answer: {effect: write, args: {id: string!, status: string!, answer: string}}
+  unit.item: {effect: write, args: {kind: string!, title: string!, severity: string, status: string, owner: string, ref: string, id: string}}
