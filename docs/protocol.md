@@ -69,7 +69,9 @@ Field types: `string`, `number`, `int`, `bool`, `time` (Unix seconds), `duration
 ## Context
 
 Every call can carry `context: {project, env, user, roles, scope: {service, selection, range}, trace_id,
-deadline, dry_run}`, so a plugin reacts to what was picked elsewhere.
+deadline, dry_run}`, so a plugin reacts to what was picked elsewhere. `user` and `roles` are the
+caller: the `rig serve` account (`user/token` for an API token) and its roles for a remote call,
+the person who asked for an approved inbox item, else the local user with no roles.
 
 ## Errors
 

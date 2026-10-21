@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/goxang/rig/api"
+	"github.com/goxang/rig/kernel/identity"
 	"github.com/goxang/rig/kernel/jobs"
 	"github.com/goxang/rig/protocol"
 	"github.com/goxang/rig/spec"
@@ -105,8 +106,13 @@ func (h *Host) owner(name string) (*Plugin, string, error) {
 	return p, rest, nil
 }
 
-func (h *Host) context() *protocol.Context {
-	return &protocol.Context{Project: h.Dir, Env: h.Env, User: os.Getenv("USER")}
+// context tells the plugin who is calling: the server's account for a remote call, else this machine's user.
+func (h *Host) context(ctx context.Context) *protocol.Context {
+	c := &protocol.Context{Project: h.Dir, Env: h.Env, User: os.Getenv("USER")}
+	if s, ok := identity.From(ctx); ok {
+		c.User, c.Roles = s.Name, s.Roles
+	}
+	return c
 }
 
 func withDeadline(ctx context.Context, c *protocol.Context) *protocol.Context {
@@ -122,7 +128,7 @@ func (h *Host) Query(ctx context.Context, name string, args protocol.Args) (*pro
 		return nil, err
 	}
 	var f protocol.Frame
-	if err := p.call(ctx, protocol.MethodQuery, protocol.QueryParams{Source: local, Args: args, Context: withDeadline(ctx, h.context())}, &f); err != nil {
+	if err := p.call(ctx, protocol.MethodQuery, protocol.QueryParams{Source: local, Args: args, Context: withDeadline(ctx, h.context(ctx))}, &f); err != nil {
 		return nil, err
 	}
 	return &f, nil
@@ -149,7 +155,7 @@ func (h *Host) View(ctx context.Context, name string, args protocol.Args) (*prot
 		return nil, err
 	}
 	var n protocol.Node
-	if err := p.call(ctx, protocol.MethodRender, protocol.RenderParams{View: local, Args: args, Context: h.context()}, &n); err != nil {
+	if err := p.call(ctx, protocol.MethodRender, protocol.RenderParams{View: local, Args: args, Context: h.context(ctx)}, &n); err != nil {
 		return nil, err
 	}
 	return &n, nil
@@ -165,7 +171,7 @@ func (h *Host) Run(ctx context.Context, name string, args protocol.Args, dryRun 
 	if dryRun {
 		method = protocol.MethodPlan
 	}
-	params := protocol.RunParams{Action: local, Args: args, Context: withDeadline(ctx, h.context())}
+	params := protocol.RunParams{Action: local, Args: args, Context: withDeadline(ctx, h.context(ctx))}
 	params.Context.DryRun = dryRun
 	if j := jobs.From(ctx); j != nil {
 		params.Job = j.ID
@@ -198,7 +204,7 @@ func (h *Host) Stream(ctx context.Context, name string, args protocol.Args) (<-c
 	p.streams.Store(id, in)
 	p.enter()
 	end := func() { p.streams.Delete(id); p.leave() }
-	if err := c.Call(ctx, protocol.MethodStream, protocol.StreamParams{ID: id, Source: local, Args: args, Context: h.context()}, nil); err != nil {
+	if err := c.Call(ctx, protocol.MethodStream, protocol.StreamParams{ID: id, Source: local, Args: args, Context: h.context(ctx)}, nil); err != nil {
 		end()
 		return nil, err
 	}

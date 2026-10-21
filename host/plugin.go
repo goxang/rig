@@ -153,7 +153,7 @@ func (p *Plugin) handshake(ctx context.Context, c *rpc.Conn) error {
 	if ir.Protocol != protocol.Version {
 		return fmt.Errorf("speaks %q, want %s", ir.Protocol, protocol.Version)
 	}
-	err = c.Call(ctx, protocol.MethodConfigure, protocol.ConfigureParams{Config: p.Config, Components: p.h.components(p.Name), Context: p.h.context()}, nil)
+	err = c.Call(ctx, protocol.MethodConfigure, protocol.ConfigureParams{Config: p.Config, Components: p.h.components(p.Name), Context: p.h.context(ctx)}, nil)
 	if pe := (*protocol.Error)(nil); errors.As(err, &pe) && pe.Code == protocol.CodeMethodNotFound {
 		err = nil
 	}

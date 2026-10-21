@@ -17,6 +17,7 @@ import (
 	llsys "github.com/landlock-lsm/go-landlock/landlock/syscall"
 
 	"github.com/goxang/rig/kernel/frames"
+	"github.com/goxang/rig/kernel/identity"
 	"github.com/goxang/rig/kernel/jobs"
 	"github.com/goxang/rig/protocol"
 	"github.com/goxang/rig/protocol/rpc"
@@ -401,5 +402,16 @@ func TestBudgetRoundTrip(t *testing.T) {
 		if kb > 15<<10 {
 			t.Errorf("plugin RSS %d kB, budget 15 MB", kb)
 		}
+	}
+}
+
+func TestContextCarriesCaller(t *testing.T) {
+	h := &Host{Options: Options{Dir: t.TempDir()}}
+	if c := h.context(context.Background()); c.User != os.Getenv("USER") || c.Roles != nil {
+		t.Errorf("local call context = %+v", c)
+	}
+	ctx := identity.With(context.Background(), identity.Subject{Kind: identity.KindToken, Name: "product/l2", Roles: []string{"parent"}})
+	if c := h.context(ctx); c.User != "product/l2" || len(c.Roles) != 1 || c.Roles[0] != "parent" {
+		t.Errorf("remote call context = %+v", c)
 	}
 }

@@ -139,7 +139,7 @@ func (r *Runner) Run(ctx context.Context, c Call) (_ *jobs.Job, _ *protocol.RunR
 		ctx, j = r.Jobs.Start(ctx, c.Action)
 		defer func() { j.Finish(err) }()
 	}
-	res, err := a.Run(ctx, c.Args)
+	res, err := a.Run(identity.With(ctx, c.Subject), c.Args)
 	if err != nil {
 		entry.Error = err.Error()
 	} else if res != nil {
@@ -199,7 +199,7 @@ func (r *Runner) Decide(ctx context.Context, id string, approve bool, by identit
 		ctx, j = r.Jobs.Start(ctx, it.Action)
 		defer func() { j.Finish(err) }()
 	}
-	res, err := a.Run(ctx, it.Args)
+	res, err := a.Run(identity.With(ctx, it.Subject), it.Args)
 	it.Status = inbox.Approved
 	if err != nil {
 		it.Status, it.Result, entry.Error = inbox.Failed, err.Error(), err.Error()
