@@ -101,8 +101,7 @@ func (h *Handler) termCmd(l *engine.Local, in termReq) (*exec.Cmd, error) {
 		}
 		var command []string
 		if c, _ := in.Command.(string); c != "" {
-			// Hosts join argv with spaces and hand it to a shell, so the line goes in as one word.
-			command = []string{c + "; echo; printf 'press enter '; read _"}
+			command = []string{"sh", "-c", c + "; echo; printf 'press enter '; read _"}
 		}
 		// The session outlives this request: the PTY's own close ends it.
 		return hs.Shell(context.Background(), in.Host, command)

@@ -719,12 +719,14 @@ function pagePlugins(ctx) {
   let tab = store.get('plug.tab', 'use');
   const row = r => {
     const v = views()[r.name], acts = ops(r).filter(Boolean);
-    const el = h('div', { class: 'plug-tile' + (r.state === 'off' ? ' dim' : '') },
-      h('div', { class: 'plug-top' }, icon('plugin'), h('b', { class: 'ellipsis grow' }, r.name), r.version && h('span', { class: 'muted small mono' }, r.version), r.state === 'off' && badge('off')),
-      h('div', { class: 'muted small clamp3', title: r.description }, r.description || 'No description'),
-      v && h('div', { class: 'row wrap small' }, v.map(t => h('a', { href: '#/v-' + slug(t) }, t))),
-      h('div', { class: 'plug-foot' }, r.kind && h('span', { class: 'tag' }, r.kind), h('span', { class: 'spacer' }),
-        ...acts.slice(0, 2).map(x => btn(x.label, x.run, 'sm' + (x.label === 'Install' ? ' primary' : ''))), acts.length > 2 && ibtn('more', e => ctxMenu(e.currentTarget, acts), 'More', 'sm')));
+    const first = acts[0];
+    const el = h('div', { class: 'plug-tile' + (r.state === 'off' ? ' dim' : ''), title: r.description || r.name },
+      h('div', { class: 'plug-top' }, h('span', { class: 'plug-ico' }, icon('plugin')),
+        h('div', { class: 'plug-name' }, h('b', { class: 'ellipsis' }, r.name), h('span', { class: 'muted small' }, [r.kind, r.version].filter(Boolean).join(' · '))),
+        r.state === 'off' && badge('off'), acts.length > 0 && ibtn('more', e => ctxMenu(e.currentTarget, acts), 'Actions', 'sm')),
+      h('div', { class: 'plug-desc clamp3' }, r.description || 'No description'),
+      h('div', { class: 'plug-foot' }, v && v.map(t => h('a', { class: 'plug-view', href: '#/v-' + slug(t) }, t)), h('span', { class: 'spacer' }),
+        first && btn(first.label, first.run, 'sm' + (first.label === 'Install' ? ' primary' : ''))));
     onMenu(el, () => ops(r));
     return el;
   };

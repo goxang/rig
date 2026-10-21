@@ -74,7 +74,7 @@ func darwinStats(ctx context.Context, h *core.Host) {
 
 func (Host) Shell(ctx context.Context, _ string, command []string) (*exec.Cmd, error) {
 	if len(command) > 0 {
-		return exec.CommandContext(ctx, "sh", "-c", strings.Join(command, " ")), nil
+		return exec.CommandContext(ctx, command[0], command[1:]...), nil
 	}
 	login := os.Getenv("SHELL")
 	switch {

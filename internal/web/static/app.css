@@ -881,3 +881,17 @@ table.fixed th, table.fixed td { overflow: hidden; text-overflow: ellipsis; }
 
 /* narrow screens have no sidebar column, rail or not */
 @media (max-width: 900px) { .shell.rail, .shell { grid-template-columns: 1fr; } }
+
+/* plugin card: identity on top, the description in full on hover, views and the main action below */
+.plug-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.plug-tile { gap: 10px; padding: 14px 16px; min-height: 0; }
+.plug-top { gap: 10px; }
+.plug-ico { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: var(--surface-2); color: var(--accent); }
+.plug-name { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.plug-name b { font-size: 14px; }
+.plug-desc { font-size: 13px; line-height: 1.45; color: var(--muted); min-height: calc(1.45em * 2); }
+.plug-foot { margin-top: auto; gap: 8px; }
+.plug-view { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--accent); text-decoration: none; }
+.modal:has(.help-grid) { width: min(1000px, 94vw); top: 8vh; }
+.help-grid { display: block; max-height: 64vh; overflow: auto; }
+.keys-t td:last-child { white-space: normal; text-overflow: clip; overflow: visible; }

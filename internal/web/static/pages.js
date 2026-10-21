@@ -158,7 +158,7 @@ function pageMetrics(ctx) {
     if (push) zooms.push([range, end]);
     range = r; end = e;
     if (!e) store.set('metrics.range', r);
-    body.querySelectorAll('.panel .body').forEach(b => { b._view = view; });
+    body.querySelectorAll('.panel .body').forEach(b => { b._zoom = view; });
     showWin(); refresh();
   };
   const onZoom = (t0, t1) => setWin(Math.max(10, Math.round((t1 - t0) / 1000)) + 's', new Date(t1).toISOString(), true, [t0, t1]);
@@ -302,7 +302,7 @@ function pageMetrics(ctx) {
     ctrl.abort(); ctrl = new AbortController(); queue.length = 0;
     const my = gen;
     for (const p of panels) {
-      const load = p._load;
+      const load = p._raw ||= p._load;
       p._load = () => my === gen ? load() : Promise.resolve();
       p._due = true;
       io.unobserve(p); io.observe(p);
@@ -799,6 +799,6 @@ function shortcutsTable(filter = '') {
   return h('div', { class: 'keys-grid' }, groups.map(([title, rows]) => {
     const shown = rows.filter(([k, d]) => matchText(k + ' ' + d + ' ' + title, filter));
     return shown.length > 0 && h('div', { class: 'card' }, h('div', { class: 'card-h' }, title),
-      h('table', { class: 'plain keys-t' }, h('tbody', {}, shown.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))))));
+      h('table', { class: 'plain keys-t' }, h('tbody', {}, shown.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', { title: d }, d))))));
   }));
 }

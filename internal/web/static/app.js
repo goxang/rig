@@ -314,10 +314,10 @@ function openMenu(at) {
     { key: ':', label: 'Run a command', run: () => openCommandLine() }, { key: '@', label: 'Ask the assistant', run: toggleAI }], page?.title || 'Menu');
 }
 function showHelp() {
-  const page = pageOf(parseRoute().id);
-  modal('Keys', h('div', { class: 'help-grid' },
-    shortcutsTable(), page?.keys && h('div', {}, h('h4', {}, page.title), h('table', { class: 'keys-t' }, h('tbody', {}, page.keys.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))))))),
-  [['Close', true, 'primary']]);
+  const grid = h('div', { class: 'help-grid' });
+  const draw = f => grid.replaceChildren(shortcutsTable(f));
+  draw('');
+  modal('Keys', h('div', { class: 'col' }, searchBox('Search keys and descriptions', draw, { value: '' }), grid), [['Close', true, 'primary']]);
 }
 
 // ---------- keys: the TUI's rig preset ----------

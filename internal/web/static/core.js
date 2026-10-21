@@ -580,7 +580,7 @@ const tipEl = () => document.querySelector('.tip') || document.body.appendChild(
 // through onZoom when the page owns the time window, else on the chart itself (double-click resets).
 function lineChart(el, list, { unit = '', stack = false, height = 190, fit = false, onZoom, legend: legendKind = 'auto', memo = el } = {}) {
   const hidden = new Set();
-  let view = memo._view || null;
+  let view = memo._zoom || null;
   const colorAt = x => series()[list.indexOf(x) % series().length];
   let sort = store.get('legend.sort', { key: '', dir: -1 });
   const legend = h('div', {});
@@ -590,7 +590,7 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
   el.classList.toggle('chart-fit', fit);
   if (!fit) holder.style.height = height + 'px';
   const inView = x => view ? { ...x, pts: x.pts.filter(p => p[0] >= view[0] && p[0] <= view[1]) } : x;
-  const setView = v => { view = v; memo._view = v; reset.hidden = !v; draw(); };
+  const setView = v => { view = v; memo._zoom = v; reset.hidden = !v; draw(); };
   const drawLegend = shown => {
     const stats = list.map(x => {
       const v = inView(x).pts.map(p => p[1]).filter(isFinite);
@@ -621,7 +621,7 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
   const draw = () => {
     const box = holder.getBoundingClientRect();
     const W = Math.max(Math.round(box.width) || el.clientWidth || 400, 120);
-    const H = Math.max(Math.round(box.height) || height, 60), bare = el.classList.contains('spark'), padL = bare ? 2 : W < 260 ? 44 : 56, padB = bare ? 2 : 20, padT = 6, padR = bare ? 2 : 10;
+    const H = Math.max(Math.round(box.height) || height, 60), bare = el.classList.contains('spark'), padB = bare ? 2 : 20, padT = 6, padR = bare ? 2 : 10;
     const shown = list.filter(x => !hidden.has(x.key));
     let data = shown.map(inView).map(x => ({ ...x, v: x.pts.map(p => p[1]) }));
     if (stack) { const acc = new Map(); data = data.map(x => ({ ...x, v: x.pts.map(([t, v]) => { const y = (acc.get(t) || 0) + (isNaN(v) ? 0 : v); acc.set(t, y); return y; }) })); }
@@ -632,14 +632,16 @@ function lineChart(el, list, { unit = '', stack = false, height = 190, fit = fal
     if (!vs.length) { lo = 0; hi = 1; }
     if (hi - lo < 1e-12) hi = lo + 1;
     hi += (hi - lo) * 0.08;
+    const rowsY = Math.max(2, Math.min(5, Math.floor(H / 45)));
+    const yLabels = Array.from({ length: rowsY + 1 }, (_, i) => fmtNum(lo + (hi - lo) * i / rowsY, unit));
+    const padL = bare ? 2 : Math.max(W < 260 ? 44 : 56, Math.ceil(Math.max(...yLabels.map(l => l.length)) * 6.6) + 12);
     const X = t => padL + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - padL - padR);
     const Y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
     const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, width: W, height: H, preserveAspectRatio: 'none' });
     const g = s('g', { class: 'grid' });
-    const rowsY = Math.max(2, Math.min(5, Math.floor(H / 45)));
     for (let i = 0; i <= rowsY; i++) {
       const v = lo + (hi - lo) * i / rowsY, y = Y(v);
-      g.append(s('line', { x1: padL, x2: W - padR, y1: y, y2: y }), s('text', { x: padL - 6, y: y + 3.5, 'text-anchor': 'end' }, fmtNum(v, unit)));
+      g.append(s('line', { x1: padL, x2: W - padR, y1: y, y2: y }), s('text', { x: padL - 6, y: y + 3.5, 'text-anchor': 'end' }, yLabels[i]));
     }
     const ticks = t1 > t0 ? Math.max(2, Math.min(8, Math.floor(W / 110))) : 0;
     const long = t1 - t0 > 86400e3;
