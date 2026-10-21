@@ -46,6 +46,7 @@ policy:
   roles:
     tester: { extends: viewer, allow: ["task.hello:write", "env.lock:write"], approve: ["task.wipe:*"] }
     boss:   { extends: viewer, allow: ["task.*:write"], reauth: ["task.wipe:*"] }
+    scout:  { allow: ["audit:read"] }
 `
 
 func newServer(t *testing.T) (*Server, *httptest.Server, string) {
@@ -184,6 +185,19 @@ func TestServer(t *testing.T) {
 	}
 	if err := ci.Do(ctx, "/v1/engine/session", nil, map[string]string{}, nil); code(err) != protocol.CodeDenied {
 		t.Fatalf("revoked token still works: %v", err)
+	}
+
+	// reads go through policy too: a role may see one source and nothing else
+	must(t, s.Store.PutUser("carol", User{Roles: []string{"scout"}}, "pw-carol"))
+	carol := login(t, ts, fp, "carol", "pw-carol", "")
+	if _, err := carol.Query(ctx, "audit", nil); err != nil {
+		t.Fatalf("carol reads audit: %v", err)
+	}
+	if _, err := carol.Query(ctx, "services", nil); code(err) != protocol.CodeDenied {
+		t.Fatalf("carol reads another source: %v", err)
+	}
+	if _, err := carol.Catalog(ctx); code(err) != protocol.CodeDenied {
+		t.Fatalf("carol reads the catalog: %v", err)
 	}
 
 	// audit: the server's log names who did what, and who approved

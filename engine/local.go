@@ -131,6 +131,12 @@ func (l *Local) envName() string {
 	return l.App.Env.Name
 }
 
+// MayRead says whether subj may read name: a source, or engine.<method> for the API's other reads.
+func (l *Local) MayRead(subj identity.Subject, name string) (bool, string) {
+	d, why := l.runner.Policy.Decide(policy.Request{Subject: subj, Action: name, Effect: protocol.EffectRead, Env: l.envName()}, l.runner.Envs)
+	return d == policy.Allow, why
+}
+
 func (l *Local) builtins() {
 	reg := l.runner.Actions
 	svc := func(name, help string, f func(ctx context.Context, n string) error) {

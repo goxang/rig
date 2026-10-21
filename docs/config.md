@@ -435,6 +435,8 @@ assistant. Without `policy:` the local default applies: reads run, a `readonly` 
 writes, the assistant's writes wait in `rig inbox`, danger and protected environments ask first. With
 roles, an allowed write to a protected environment still asks to confirm. `rig serve` adds the roles
 `viewer`, `dev`, `operator`, `admin` and `ai` where the project does not define them (`rig admin roles`).
+Over `rig serve` reads are checked too: a query or stream by its source name (`jira.tracker.issues:read`),
+the other reads as `engine.<method>` (`engine.catalog:read`), so a role can see some sources and nothing else.
 
 ## otel
 

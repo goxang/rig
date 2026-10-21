@@ -38,7 +38,8 @@ Every Engine call, from any client, goes through `policy:` (see [config](config.
 `action[:effect][@env/<name>]`; the most restrictive match wins: deny, approve (another person, via
 `rig inbox`), reauth (password or TOTP again), confirm, then allow. Without `policy:`, reads run, a
 `readonly` environment refuses writes, a `protected` one and danger actions ask first, and the
-assistant's writes wait in the inbox. Exit code 4 means protected or denied.
+assistant's writes wait in the inbox. `rig serve` checks reads as well, by source name, so a token
+can be limited to the sources it needs. Exit code 4 means protected or denied.
 
 ## Server
 

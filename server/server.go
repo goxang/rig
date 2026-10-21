@@ -407,6 +407,11 @@ func (s *Server) engine(w http.ResponseWriter, r *http.Request) {
 	Call(w, r, l, c.subj, func() bool { return s.reauthedWithin(c.token) })
 }
 
+// reader is an Engine that applies policy to reads: sources by name, the rest as engine.<method>.
+type reader interface {
+	MayRead(subj identity.Subject, name string) (bool, string)
+}
+
 // Call answers the Engine call r names (POST .../{method}) on e for subj. reauthed settles a
 // policy reauth; nil asks it as a confirm, for a local client.
 func Call(w http.ResponseWriter, r *http.Request, e api.Engine, subj identity.Subject, reauthed func() bool) {
@@ -430,7 +435,18 @@ func Call(w http.ResponseWriter, r *http.Request, e api.Engine, subj identity.Su
 		}
 		return &protocol.Error{Code: protocol.CodeNeedsInput, Message: "reauth: " + why, Data: &protocol.ErrorData{Hint: api.HintReauth}}
 	})
-	switch r.PathValue("method") {
+	method := r.PathValue("method")
+	if rd, ok := e.(reader); ok && method != "session" && method != "run" && method != "decide" {
+		name := "engine." + method
+		if method == "query" || method == "stream" {
+			name = in.Source
+		}
+		if ok, why := rd.MayRead(subj, name); !ok {
+			writeErr(w, http.StatusForbidden, &protocol.Error{Code: protocol.CodeDenied, Message: "denied: " + why})
+			return
+		}
+	}
+	switch method {
 	case "catalog":
 		cat, err := e.Catalog(ctx)
 		if err != nil {
