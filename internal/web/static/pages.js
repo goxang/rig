@@ -607,14 +607,34 @@ function pageInbox(ctx) {
 }
 
 // ---------- api explorer ----------
+const FORMATS = { password: 'password', date: 'date', 'date-time': 'datetime-local', datetime: 'datetime-local', time: 'time', email: 'email', uri: 'url' };
+// checks is a checkbox group standing in for a multiple select: same selectedOptions and value API.
+function checks(opts) {
+  const el = h('div', { class: 'checks' });
+  el.multiple = true;
+  el.set = list => el.replaceChildren(...list.map(([v, l]) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: v }), ' ', l)));
+  Object.defineProperty(el, 'selectedOptions', { get: () => [...el.querySelectorAll('input:checked')] });
+  el.set(opts);
+  return el;
+}
 function schemaForm(schema) {
   const props = schema?.properties || {}, req = new Set(schema?.required || []);
   const comps = (frameRowsCache.components || []).map(c => c.name);
   const fields = Object.entries(props).map(([k, p]) => {
-    const t = p.type || 'string';
+    const t = p.type || 'string', fmt = p.format, choices = p.enum || p.items?.enum, dyn = p['x-options'];
+    const many = t === 'array';
+    const pick = list => many ? checks(list) : h('select', {}, h('option', { value: '' }, ''), list.map(([v, l]) => h('option', { value: v }, l)));
     let input;
-    if (p.enum) input = h('select', {}, h('option', { value: '' }, ''), p.enum.map(v => h('option', { value: v }, v)));
-    else if (t === 'boolean') input = h('input', { type: 'checkbox' });
+    if (choices) input = pick(choices.map(v => [v, v]));
+    else if (dyn?.source) {
+      input = pick([]);
+      // options come from a source: {source, args, value, label}; the select fills when it answers
+      query(dyn.source, dyn.args || {}).then(f => {
+        const opts = (f?.rows || frameRows(f)).map(r => [String(r[dyn.value || 'id'] ?? ''), String(r[dyn.label || dyn.value || 'name'] ?? r[dyn.value || 'id'] ?? '')]);
+        if (many) input.set(opts); else input.append(...opts.map(([v, l]) => h('option', { value: v }, l)));
+        if (p.default != null) input.value = p.default;
+      }).catch(() => {});
+    } else if (t === 'boolean') input = h('input', { type: 'checkbox' });
     else if (t === 'integer' || t === 'number') input = h('input', { type: 'number', step: t === 'integer' ? 1 : 'any', placeholder: p.description || k });
     else if (t === 'object') input = h('textarea', { rows: 3, placeholder: '{ "key": "value" }', class: 'mono' });
     else if (k === 'service' || (t === 'array' && k === 'services') || (t === 'array' && k === 'targets')) {
@@ -622,7 +642,15 @@ function schemaForm(schema) {
         : h('select', {}, h('option', { value: '' }, ''), serviceNames().map(n => h('option', { value: n }, n)));
     } else if (k === 'component' && comps.length) {
       input = h('select', {}, h('option', { value: '' }, ''), comps.map(n => h('option', { value: n }, n)));
-    } else input = h('input', { placeholder: t === 'array' ? 'comma separated' : p.description || k });
+    } else if (fmt === 'textarea' || fmt === 'markdown') input = h('textarea', { rows: fmt === 'markdown' ? 8 : 4, placeholder: p.description || k });
+    else input = h('input', { type: FORMATS[fmt] || 'text', autocomplete: fmt === 'password' ? 'new-password' : null, placeholder: t === 'array' ? 'comma separated' : p.description || k });
+    const set = v => {
+      if (v == null) v = '';
+      if (t === 'boolean') input.checked = !!v;
+      else if (input.classList?.contains('checks')) input.querySelectorAll('input').forEach(c => { c.checked = [].concat(v).includes(c.value); });
+      else if (!input.multiple) input.value = Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v;
+    };
+    if (p.default != null) set(p.default);
     const get = () => {
       if (t === 'boolean') return input.checked || undefined;
       if (input.multiple) { const v = [...input.selectedOptions].map(o => o.value); return v.length ? v : undefined; }
@@ -631,9 +659,10 @@ function schemaForm(schema) {
       if (t === 'integer' || t === 'number') return +v;
       if (t === 'array') return v.split(',').map(x => x.trim()).filter(Boolean);
       if (t === 'object') return JSON.parse(v);
+      if (FORMATS[fmt] === 'datetime-local') return new Date(v).toISOString();
       return v;
     };
-    return { k, get, el: h('label', { class: 'field' }, h('span', {}, h('span', { class: 'mono' }, k), req.has(k) && h('span', { style: { color: 'var(--red)' } }, ' *'), h('span', { class: 'muted' }, ' ' + t), p.description && h('span', { class: 'muted' }, ' — ' + p.description)), input) };
+    return { k, get, reset: () => set(p.default), el: h('label', { class: 'field' }, h('span', {}, h('span', { class: p.title ? '' : 'mono' }, p.title || k), req.has(k) && h('span', { style: { color: 'var(--red)' } }, ' *'), !p.title && h('span', { class: 'muted' }, ' ' + t), p.description && h('span', { class: 'muted' }, ' — ' + p.description)), input) };
   });
   const raw = h('textarea', { rows: 4, class: 'mono', placeholder: 'extra arguments as JSON, merged over the fields' });
   return {
@@ -642,8 +671,11 @@ function schemaForm(schema) {
       const out = {};
       for (const f of fields) { const v = f.get(); if (v !== undefined) out[f.k] = v; }
       if (raw.value.trim()) Object.assign(out, JSON.parse(raw.value));
+      const miss = [...req].filter(k => props[k] && out[k] === undefined);
+      if (miss.length) throw new Error('required: ' + miss.join(', '));
       return out;
     },
+    reset() { fields.forEach(f => f.reset()); raw.value = ''; },
   };
 }
 // CORE_DOMAINS are the engine's own; any other first part names a plugin, shown only when the project uses it.

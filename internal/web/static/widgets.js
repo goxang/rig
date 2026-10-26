@@ -214,9 +214,9 @@ function renderWidget(n, scope, st) {
   const tools = h('div', { class: 'row ptools' });
   const content = h('div', { class: 'pbody' });
   const panel = h('div', { class: 'panel vpanel' + (P(n, 'border') === false ? ' bare' : ''), style: sizeStyle(n) },
-    (title || w === 'table' || w === 'board' || w === 'terminal') && h('div', { class: 'ph' }, h('span', { class: 'ellipsis' }, title || ''), status, h('span', { class: 'spacer' }), tools), content);
+    (title || w === 'table' || w === 'board' || w === 'calendar' || w === 'terminal') && h('div', { class: 'ph' }, h('span', { class: 'ellipsis' }, title || ''), status, h('span', { class: 'spacer' }), tools), content);
   const ctl = { actions: (P(n, 'actions') || []).filter(usable), rows: () => [], row: () => null, marked: () => [], refresh: () => load() };
-  if (!st.focus && (w === 'table' || w === 'board')) st.focus = ctl;
+  if (!st.focus && (w === 'table' || w === 'board' || w === 'calendar')) st.focus = ctl;
   panel.addEventListener('mousedown', () => { st.focus = ctl; });
   let frame = null, draw = null, ctrl;
   const bind = n.bind;
@@ -235,6 +235,7 @@ function renderWidget(n, scope, st) {
   const mk = {
     table: () => tableWidget(n, content, tools, ctl, () => load()),
     board: () => boardWidget(n, content, tools, ctl, () => load()),
+    calendar: () => calendarWidget(n, content, tools, ctl, () => load()),
   }[w];
   if (mk) draw = mk();
   else draw = f => content.replaceChildren(simpleWidget(w, n, f));
@@ -353,18 +354,31 @@ function boardWidget(n, content, tools, ctl, refresh) {
     const items = ctl.actions.map(a => h('button', { class: 'menu-item', type: 'button', onclick: () => { closeOverlay(); runAction(a, r, rows, [], refresh); } }, h('kbd', {}, a.key || ' '), a.name || a.action || a.command));
     openOverlay([h('div', { class: 'popmenu', style: { left: '50%', top: '30%' } }, items)]);
   };
+  // drop: an action whose args may name ${row.x} and ${lane}; dragging a card to a lane runs it
+  const drop = P(n, 'drop'), fixed = [].concat(P(n, 'lanes') || []).map(String);
+  let dragged = null;
+  const moveTo = async (r, lane) => {
+    if (!drop || !r || String(r[by] ?? '') === lane) return;
+    await runAction({ ...drop, args: JSON.parse(JSON.stringify(drop.args || {}).replaceAll('${lane}', lane.replace(/["\\]/g, '\\$&'))) }, r, rows, [], refresh);
+  };
   const draw = () => {
     const shown = rows.filter(r => !filterText || JSON.stringify(r).toLowerCase().includes(filterText));
-    const groups = [...new Set(rows.map(r => r[by] ?? ''))];
+    const groups = [...new Set([...fixed, ...rows.map(r => String(r[by] ?? ''))])];
     lanes.replaceChildren(...groups.map(g => {
-      const list = shown.filter(r => (r[by] ?? '') === g);
-      return h('div', { class: 'lane' }, h('div', { class: 'lane-h' }, h('span', { class: 'ellipsis' }, g || '—'), h('span', { class: 'n' }, list.length)),
+      const list = shown.filter(r => String(r[by] ?? '') === g);
+      const lane = h('div', { class: 'lane' }, h('div', { class: 'lane-h' }, h('span', { class: 'ellipsis' }, g || '—'), h('span', { class: 'n' }, list.length)),
         h('div', { class: 'lane-b' }, list.map(r => {
-          const c = h('div', { class: 'bcard' + (r === cur ? ' cur' : ''), onclick: () => select(r), oncontextmenu: e => { e.preventDefault(); select(r); menu(r); } },
+          const c = h('div', { class: 'bcard' + (r === cur ? ' cur' : ''), draggable: drop ? 'true' : null, ondragstart: () => { dragged = r; }, onclick: () => select(r), oncontextmenu: e => { e.preventDefault(); select(r); menu(r); } },
             h('div', { class: 'bt' }, r[keyF] && h('span', { class: 'bk' }, r[keyF]), r[cardF]), meta.length > 0 && h('div', { class: 'bm' }, meta.map(m => r[m] && h('span', {}, r[m]))));
           c._r = r;
           return c;
         })));
+      if (drop) {
+        lane.addEventListener('dragover', e => { e.preventDefault(); lane.classList.add('over'); });
+        lane.addEventListener('dragleave', () => lane.classList.remove('over'));
+        lane.addEventListener('drop', e => { e.preventDefault(); lane.classList.remove('over'); const r = dragged; dragged = null; moveTo(r, g); });
+      }
+      return lane;
     }));
   };
   ctl.key = e => {
@@ -373,6 +387,57 @@ function boardWidget(n, content, tools, ctl, refresh) {
   };
   content.replaceChildren(h('div', { class: 'psplit' }, h('div', { class: 'pleft' }, lanes), preview && right));
   return f => { rows = rowsOf(f, n); if (cur) cur = rows.find(r => r[keyF] === cur[keyF]) || null; draw(); };
+}
+
+const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+// calendarWidget is a month grid, Monday first; a day lists its rows, a row opens the actions menu.
+function calendarWidget(n, content, tools, ctl, refresh) {
+  const tf = P(n, 'time') || 'time', ef = P(n, 'end'), lf = P(n, 'label') || 'title', sf = P(n, 'status');
+  let rows = [], cur = null, month = new Date(), day = new Date();
+  month.setDate(1);
+  const grid = h('div', { class: 'cal' }), list = h('div', { class: 'cal-day' }), head = h('b', {});
+  ctl.rows = () => rows; ctl.row = () => cur; ctl.marked = () => [];
+  const when = r => { const t = new Date(r[tf]); return isNaN(t) ? null : t; };
+  const hm = t => t.toTimeString().slice(0, 5);
+  const menu = (r, at) => {
+    cur = r;
+    const items = ctl.actions.map(a => h('button', { class: 'menu-item', type: 'button', onclick: () => { closeOverlay(); runAction(a, r, rows, [], refresh); } }, h('kbd', {}, a.key || ' '), a.name || a.action || a.command));
+    if (items.length) openOverlay([h('div', { class: 'popmenu', style: at ? { left: at.x + 'px', top: at.y + 'px' } : { left: '50%', top: '30%' } }, items)]);
+  };
+  const item = r => { const t = when(r), e = ef && r[ef] ? new Date(r[ef]) : null;
+    return h('div', { class: 'cal-ev' + (sf && r[sf] ? ' s-' + String(r[sf]).toLowerCase().replace(/\W+/g, '-') : ''), title: r[lf], onclick: ev => menu(r, { x: ev.clientX, y: ev.clientY }) },
+      t && (t.getHours() || t.getMinutes()) ? h('span', { class: 'muted' }, hm(t) + (e && !isNaN(e) ? '–' + hm(e) : '') + ' ') : null, r[lf] ?? '', sf && r[sf] ? h('span', { class: 'muted' }, ' · ' + r[sf]) : null); };
+  const draw = () => {
+    const by = {};
+    for (const r of rows) { const t = when(r); if (t) (by[dayKey(t)] ||= []).push(r); }
+    Object.values(by).forEach(l => l.sort((a, b) => when(a) - when(b)));
+    head.textContent = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const start = new Date(month); start.setDate(1 - (month.getDay() + 6) % 7);
+    const today = dayKey(new Date()), sel = dayKey(day);
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      if (i === 35 && d.getMonth() !== month.getMonth()) break;
+      const evs = by[dayKey(d)] || [];
+      cells.push(h('div', { class: 'cal-c' + (d.getMonth() !== month.getMonth() ? ' out' : '') + (dayKey(d) === today ? ' today' : '') + (dayKey(d) === sel ? ' sel' : ''), onclick: () => { day = d; draw(); } },
+        h('div', { class: 'cal-n' }, d.getDate()), evs.slice(0, 3).map(item), evs.length > 3 && h('div', { class: 'muted small' }, `+${evs.length - 3} more`)));
+    }
+    grid.replaceChildren(...['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(x => h('div', { class: 'cal-h' }, x)), ...cells);
+    const evs = by[sel] || [];
+    list.replaceChildren(h('div', { class: 'lane-h' }, day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), h('span', { class: 'n' }, evs.length)),
+      evs.length ? evs.map(item) : h('div', { class: 'muted small pad' }, 'Nothing scheduled'));
+  };
+  const shift = k => { month.setMonth(month.getMonth() + k); draw(); };
+  add(tools, [ibtn('left', () => shift(-1), 'Previous month', 'sm'), head, ibtn('right', () => shift(1), 'Next month', 'sm'),
+    btn('Today', () => { month = new Date(); month.setDate(1); day = new Date(); draw(); }, 'sm'),
+    ...ctl.actions.filter(a => !JSON.stringify(a.args || {}).includes('${row.')).slice(0, 3).map(a => btn(a.name || a.action, () => runAction(a, null, rows, [], refresh), 'sm'))]);
+  ctl.key = e => {
+    if (e.key === 'ArrowLeft' || e.key === 'h') { shift(-1); return true; }
+    if (e.key === 'ArrowRight' || e.key === 'l') { shift(1); return true; }
+    return false;
+  };
+  content.replaceChildren(h('div', { class: 'psplit' }, h('div', { class: 'pleft' }, grid), h('div', { class: 'pright', style: { flex: '0 0 32%' } }, list)));
+  return f => { rows = rowsOf(f, n); draw(); };
 }
 
 function simpleWidget(w, n, f) {
@@ -438,7 +503,7 @@ function formWidget(n) {
   const form = schemaForm(P(n, 'schema') || spec?.args);
   return h('div', { class: 'vform' }, form.el, h('div', { class: 'row' }, h('span', { class: 'spacer' }), btn(P(n, 'submit') || 'Run', async () => {
     let args; try { args = form.value(); } catch (e) { return toast(e.message, 'bad'); }
-    await act(name, { ...(P(n, 'args') || {}), ...args }, name);
+    if (await act(name, { ...(P(n, 'args') || {}), ...args }, P(n, 'title') || name)) form.reset();
   }, 'primary')));
 }
 

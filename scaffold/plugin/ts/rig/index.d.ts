@@ -33,6 +33,7 @@ export class Ctx {
   state(key: string): Promise<P.StateValue>;
   setState(key: string, value: unknown): Promise<void>;
   secret(name: string): Promise<string>;
+  setSecret(name: string, value: string): Promise<void>;
   emit(topic: string, data?: P.Args): Promise<void>;
 }
 

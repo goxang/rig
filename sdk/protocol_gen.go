@@ -29,6 +29,7 @@ const (
 	MethodHostStateGet   = "host/state.get"
 	MethodHostStateSet   = "host/state.set"
 	MethodHostSecret     = "host/secret"
+	MethodHostSecretSet  = "host/secret.set"
 	MethodHostEmit       = "host/emit"
 	MethodHostLog        = "host/log"
 	MethodNotifyCancel   = "$/cancel"
@@ -472,6 +473,12 @@ type StateSetParams struct {
 
 type SecretParams struct {
 	Name string `json:"name"`
+}
+
+type SecretSetParams struct {
+	Name string `json:"name"`
+	// empty removes the secret
+	Value string `json:"value"`
 }
 
 type SecretValue struct {

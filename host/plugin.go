@@ -515,6 +515,18 @@ func (p *Plugin) serve(ctx context.Context, method string, raw json.RawMessage) 
 			return nil, notFound("secret", s.Name)
 		}
 		return protocol.SecretValue{Value: v}, nil
+	case protocol.MethodHostSecretSet:
+		var s protocol.SecretSetParams
+		if err := decode(raw, &s); err != nil {
+			return nil, err
+		}
+		if !slices.Contains(p.Permissions.Secrets, s.Name) {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("plugin %s did not declare secret %s", p.Name, s.Name)}
+		}
+		if h.SetSecret == nil {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "this host keeps no secrets"}
+		}
+		return protocol.Empty{}, h.SetSecret(s.Name, s.Value)
 	case protocol.MethodHostEmit:
 		var e protocol.Event
 		if err := decode(raw, &e); err != nil {

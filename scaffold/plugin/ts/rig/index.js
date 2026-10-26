@@ -71,6 +71,7 @@ export class Ctx {
   state(key) { return this._p._call("host/state.get", { key }, this.signal); }
   setState(key, value) { return this._p._call("host/state.set", { key, value }, this.signal); }
   async secret(name) { return (await this._p._call("host/secret", { name }, this.signal)).value; }
+  async setSecret(name, value) { await this._p._call("host/secret.set", { name, value }, this.signal); }
   emit(topic, data = {}) { return this._p._call("host/emit", { topic, data }, this.signal); }
 }
 

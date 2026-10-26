@@ -439,6 +439,12 @@ export interface SecretParams {
   name: string;
 }
 
+export interface SecretSetParams {
+  name: string;
+  /** empty removes the secret */
+  value: string;
+}
+
 export interface SecretValue {
   value: string;
 }

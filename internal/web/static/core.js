@@ -70,7 +70,7 @@ const ICONS = {
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>',
   cmd: '<path d="M5 7l5 5-5 5M12 19h7"/>', send: '<path d="M4 12l16-8-6 16-2-7z"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   folder: '<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>', back: '<path d="M15 6l-6 6 6 6"/>',
-  right: '<path d="M9 6l6 6-6 6"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  right: '<path d="M9 6l6 6-6 6"/>', left: '<path d="M15 6l-6 6 6 6"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   bell: '<path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>', env: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
 };
 function icon(name, cls = 'ico') {

@@ -86,6 +86,12 @@ func (c *Ctx) Secret(name string) (string, error) {
 	return r.Value, c.p.call(c, MethodHostSecret, SecretParams{Name: name}, &r)
 }
 
+// SetSecret stores a secret the manifest declares for this project, as rig secret set does; an
+// empty value removes it.
+func (c *Ctx) SetSecret(name, value string) error {
+	return c.p.call(c, MethodHostSecretSet, SecretSetParams{Name: name, Value: value}, nil)
+}
+
 func (c *Ctx) Emit(e Event) error {
 	return c.p.call(c, MethodHostEmit, e, nil)
 }

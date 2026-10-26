@@ -479,6 +479,22 @@ tbody tr.cur td:first-child { box-shadow: inset 3px 0 var(--accent); }
 .bcard.cur { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
 .bcard .bk { font: 11px var(--mono); color: var(--accent); margin-right: 6px; }
 .bcard .bm { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--dim); }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.checks .check { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.lane.over { outline: 2px dashed var(--accent); }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.cal-h { background: var(--surface-2); padding: 4px 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.cal-c { background: var(--surface); min-height: 84px; padding: 4px; cursor: pointer; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.cal-c.out { opacity: .45; }
+.cal-c.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-c.today .cal-n { color: var(--accent); font-weight: 700; }
+.cal-n { font-size: 11px; color: var(--dim); }
+.cal-ev { font-size: 11px; padding: 1px 4px; border-radius: 3px; background: var(--surface-2); border-left: 3px solid var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cal-ev.s-done, .cal-ev.s-sent, .cal-ev.s-held { opacity: .6; }
+.cal-ev.s-cancelled, .cal-ev.s-failed { text-decoration: line-through; }
+.cal-day { display: flex; flex-direction: column; gap: 4px; }
+.cal-day .cal-ev { white-space: normal; font-size: 12px; padding: 4px 6px; }
+@media (max-width: 700px) { .cal-c { min-height: 52px; } .cal-ev { font-size: 10px; } }
 .md { line-height: 1.55; overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; }

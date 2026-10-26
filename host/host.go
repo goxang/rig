@@ -34,7 +34,9 @@ type Options struct {
 	AI     func(context.Context, protocol.AIParams) (string, error)
 	// Secret looks up a declared secret; nil reads the process environment.
 	Secret func(name string) (string, bool)
-	Emit   func(protocol.Event)
+	// SetSecret stores a declared secret for the project; nil refuses.
+	SetSecret func(name, value string) error
+	Emit      func(protocol.Event)
 	// Components are the project's components a plugin serves (type: <plugin>), by name; nil is none.
 	Components func(plugin string) map[string]protocol.Args
 	// Idle stops a plugin process after this long unused; zero is 10 minutes.

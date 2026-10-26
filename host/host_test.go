@@ -241,6 +241,17 @@ func TestHostMethods(t *testing.T) {
 	if _, err := call(protocol.MethodHostSecret, protocol.SecretParams{Name: "OTHER"}); err == nil {
 		t.Error("an undeclared secret was served")
 	}
+	if _, err := call(protocol.MethodHostSecretSet, protocol.SecretSetParams{Name: "TOK", Value: "x"}); err == nil {
+		t.Error("set with no SetSecret host func")
+	}
+	set := map[string]string{}
+	h.SetSecret = func(n, v string) error { set[n] = v; return nil }
+	if _, err := call(protocol.MethodHostSecretSet, protocol.SecretSetParams{Name: "TOK", Value: "x"}); err != nil || set["TOK"] != "x" {
+		t.Errorf("declared secret set: %v %v", set, err)
+	}
+	if _, err := call(protocol.MethodHostSecretSet, protocol.SecretSetParams{Name: "OTHER", Value: "x"}); err == nil {
+		t.Error("an undeclared secret was set")
+	}
 	if _, err := call(protocol.MethodHostQuery, protocol.QueryParams{Source: "c.x"}); err == nil || !strings.Contains(err.Error(), "may not use") {
 		t.Errorf("uses: %v", err)
 	}

@@ -129,6 +129,9 @@ class Ctx:
     def secret(self, name: str) -> str:
         return self._p._call("host/secret", {"name": name}, self)["value"]
 
+    def set_secret(self, name: str, value: str) -> None:
+        self._p._call("host/secret.set", {"name": name, "value": value}, self)
+
     def emit(self, topic: str, data: dict | None = None) -> None:
         self._p._call("host/emit", {"topic": topic, "data": data or {}}, self)
 

@@ -26,6 +26,7 @@ export const METHODS = {
   "host/state.get": "plugin",
   "host/state.set": "plugin",
   "host/secret": "plugin",
+  "host/secret.set": "plugin",
   "host/emit": "plugin",
   "host/log": "plugin",
   "$/cancel": "any",

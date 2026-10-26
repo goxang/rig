@@ -32,8 +32,15 @@ func (a *App) Host() *host.Host {
 				if v, ok := a.KnownSecrets()[name]; ok {
 					return v, true
 				}
-				return os.LookupEnv(name)
+				if v, ok := os.LookupEnv(name); ok {
+					return v, true
+				}
+				// read on every call so a secret set a moment ago (a plugin's connect form) applies at once
+				stored, _ := spec.LoadSecrets(a.Spec.Name)
+				v, ok := stored[name]
+				return v, ok && v != ""
 			},
+			SetSecret:  func(name, value string) error { return spec.SetSecret(a.Spec.Name, name, value) },
 			Components: a.componentsOf}, a.Spec.Plugins)
 	})
 	return a.plugins.h

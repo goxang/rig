@@ -27,6 +27,7 @@
     "host/state.get": { "from": "plugin", "params": "StateGetParams", "result": "StateValue" },
     "host/state.set": { "from": "plugin", "params": "StateSetParams", "result": "Empty" },
     "host/secret": { "from": "plugin", "params": "SecretParams", "result": "SecretValue" },
+    "host/secret.set": { "from": "plugin", "params": "SecretSetParams", "result": "Empty" },
     "host/emit": { "from": "plugin", "params": "Event", "result": "Empty" },
     "host/log": { "from": "plugin", "params": "LogParams", "notify": true },
     "$/cancel": { "from": "any", "params": "CancelParams", "notify": true },
@@ -590,6 +591,14 @@
       "required": ["name"],
       "properties": {
         "name": { "type": "string" }
+      }
+    },
+    "SecretSetParams": {
+      "type": "object",
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string", "description": "empty removes the secret" }
       }
     },
     "SecretValue": {

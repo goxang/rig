@@ -64,9 +64,9 @@ off up to a minute and keep the last frame. `r` refetches.
 | `timeline` | rows with `time`, `title`, `kind`, `status`, `note`, by month; `order: desc` puts the latest first |
 | `graph` | a flow: rows with `from` and `to` are edges (`label`, `value`, `status`), rows with `node` describe a node (`label`, `value`, `status`); the web draws it left to right, edges as wide as their value and moving while they carry traffic |
 | `waterfall` | spans |
-| `calendar` | `time`; the month, with a count on each day that has events |
-| `board` | `by` (the column field), `card` (the title field), `key` (shown before it), `columns`; arrows or hjkl move, `/` filters, `<` `>` pick the field cards sort by and `alt+↑↓` its direction; columns that do not fit scroll sideways |
-| `form` | `schema`, or `action` (its args), `submit`; `args` are sent with what the form asks |
+| `calendar` | `time`, `end`, `label` (default `title`), `status`; the month, with a count on each day that has events. The web shows each day's rows, pages months, and opens the `actions` menu on a row |
+| `board` | `by` (the column field), `card` (the title field), `key` (shown before it), `columns`; arrows or hjkl move, `/` filters, `<` `>` pick the field cards sort by and `alt+↑↓` its direction; columns that do not fit scroll sideways. `lanes: [To Do, In Progress, Done]` fixes the columns and their order; on the web, `drop: {action, args}` makes cards draggable and runs the action when one lands in another column, with `${row.x}` and `${lane}` in its args |
+| `form` | `schema`, or `action` (its args), `submit`; `args` are sent with what the form asks. A property's `title`, `default` and `enum` shape its field; `format: textarea, markdown, password, date, date-time, email`; `x-options: {source, args, value, label}` fills a select from a source; an array of options is a group of checkboxes. The web empties the form after a successful run |
 | `terminal` | `command` (string or list; default `$SHELL`), `dir` (default the project; relative to the view's own folder), `env`, `keep` (runs while hidden). Keys, and clicks when the program asks for the mouse, go to the program; esc (or ctrl+]) leaves |
 | `canvas` | drawn by `plugin` through `widget.render` |
 
