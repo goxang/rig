@@ -145,3 +145,21 @@ func TestFailedToolIsUnavailable(t *testing.T) {
 		t.Errorf("bug: %+v", e)
 	}
 }
+
+func TestArgsSchemaTags(t *testing.T) {
+	s := ArgsSchema(reflect.TypeOf(struct {
+		Token string   `json:"token" title:"API token" format:"password"`
+		Kind  string   `json:"kind" enum:"a,b" default:"a"`
+		To    []string `json:"to" options:"team.members email name"`
+	}{}))
+	p := s["properties"].(map[string]any)
+	if tk := p["token"].(map[string]any); tk["format"] != "password" || tk["title"] != "API token" {
+		t.Errorf("token %v", tk)
+	}
+	if k := p["kind"].(map[string]any); len(k["enum"].([]string)) != 2 || k["default"] != "a" {
+		t.Errorf("kind %v", k)
+	}
+	if o := p["to"].(map[string]any)["x-options"].(map[string]any); o["source"] != "team.members" || o["label"] != "name" {
+		t.Errorf("to %v", o)
+	}
+}

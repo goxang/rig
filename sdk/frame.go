@@ -46,7 +46,8 @@ func (f *Frame) Len() int {
 }
 
 // ArgsSchema is the JSON Schema of a handler's argument type: a struct's json fields, with the
-// `desc:"..."` and `rig:"required"` tags. Anything else takes any arguments.
+// `desc`, `rig:"required"`, `title`, `format`, `default`, `enum:"a,b"` and `options:"source value label"`
+// tags. Anything else takes any arguments.
 func ArgsSchema(t reflect.Type) Schema {
 	if t.Kind() != reflect.Struct {
 		return nil
@@ -70,6 +71,24 @@ func ArgsSchema(t reflect.Type) Schema {
 		}
 		if d := sf.Tag.Get("desc"); d != "" {
 			p["description"] = d
+		}
+		for _, k := range []string{"title", "format", "default"} {
+			if v := sf.Tag.Get(k); v != "" {
+				p[k] = v
+			}
+		}
+		if v := sf.Tag.Get("enum"); v != "" {
+			p["enum"] = strings.Split(v, ",")
+		}
+		// options:"source value label" fills the field's choices from a source
+		if f := strings.Fields(sf.Tag.Get("options")); len(f) > 0 {
+			o := map[string]any{"source": f[0]}
+			for i, k := range []string{"value", "label"} {
+				if len(f) > i+1 {
+					o[k] = f[i+1]
+				}
+			}
+			p["x-options"] = o
 		}
 		props[name] = p
 		if sf.Tag.Get("rig") == "required" {

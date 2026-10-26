@@ -318,7 +318,11 @@ func callCommand() *cobra.Command {
 				printTable(os.Stdout, []string{"KIND", "NAME", "EFFECT", "WHAT"}, rows)
 				return nil
 			}
-			in := kvArgs(args[1:])
+			schema := p.Sources[args[0]].Args
+			if a, ok := p.Actions[args[0]]; ok {
+				schema = a.Args
+			}
+			in := kvArgs(args[1:], schema)
 			if _, ok := p.Actions[args[0]]; ok {
 				j, res, err := e.Run(ctx, args[0], in, api.RunOpts{DryRun: dry})
 				if j != nil {
@@ -365,13 +369,24 @@ func printFrame(f *protocol.Frame) {
 	printTable(os.Stdout, cols, rows)
 }
 
-// kvArgs reads name=value pairs; a value that is JSON (a number, true, a list) keeps its type.
-func kvArgs(args []string) protocol.Args {
+// kvArgs reads name=value pairs; a value that is JSON (a number, true, a list) keeps its type unless
+// the schema says the argument is a string, so sprint=44 stays "44"; a list argument takes a,b,c.
+func kvArgs(args []string, schema protocol.Schema) protocol.Args {
+	props, _ := schema["properties"].(map[string]any)
 	out := protocol.Args{}
 	for _, a := range args {
 		k, v, _ := strings.Cut(a, "=")
+		prop, _ := props[k].(map[string]any)
 		var j any
-		if json.Unmarshal([]byte(v), &j) == nil {
+		if prop["type"] == "string" {
+			out[k] = v
+		} else if prop["type"] == "array" && !strings.HasPrefix(v, "[") {
+			var list []any
+			for _, x := range strings.Split(v, ",") {
+				list = append(list, strings.TrimSpace(x))
+			}
+			out[k] = list
+		} else if json.Unmarshal([]byte(v), &j) == nil {
 			out[k] = j
 		} else {
 			out[k] = v
