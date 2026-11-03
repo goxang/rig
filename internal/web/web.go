@@ -112,7 +112,7 @@ func (h *Handler) Routes() http.Handler {
 	files, _ := fs.Sub(static, "static")
 	assets := http.FileServerFS(files)
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src http://127.0.0.1:*")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-cache")
 		assets.ServeHTTP(w, r)

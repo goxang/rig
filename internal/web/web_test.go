@@ -22,6 +22,9 @@ func TestRoutes(t *testing.T) {
 	if err != nil || res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Fatalf("index: %v %v", err, res)
 	}
+	if !strings.Contains(res.Header.Get("Content-Security-Policy"), "frame-src http://127.0.0.1:*") {
+		t.Fatal("web plugins need loopback frames without relaxing script policy")
+	}
 	for _, auth := range []string{"", "Bearer nope"} {
 		req, _ := http.NewRequest("POST", srv.URL+"/v1/engine/catalog", nil)
 		req.Header.Set("Authorization", auth)

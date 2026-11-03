@@ -20,11 +20,14 @@ func confine(s sandboxSpec) error {
 		landlock.RWFiles(rwFiles...).IgnoreIfMissing(),
 	}
 	cfg := landlock.V5.BestEffort()
-	if len(s.ports) == 0 {
+	if len(s.ports) == 0 && len(s.listen) == 0 {
 		return cfg.RestrictPaths(rules...)
 	}
 	for _, p := range s.ports {
 		rules = append(rules, landlock.ConnectTCP(p))
+	}
+	for _, p := range s.listen {
+		rules = append(rules, landlock.BindTCP(p))
 	}
 	return cfg.Restrict(rules...)
 }

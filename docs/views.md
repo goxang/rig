@@ -101,3 +101,12 @@ The `rig` preset: `:` palette (`:restart parser`, `:kv get key`, `:open Logs`), 
 shift+←→ switch screens, `:plugins` the plugins in use, `.` or right-click a menu of the screen's keys, `ctrl+e` environment, `T` tasks.
 `keys: rig` in `.rig/local.yaml` or `~/.config/rig/config.yaml` restores rig's keys (`E`, `N`, `S`,
 `ctrl+k` kubeconfig, `ctrl+e` environment details).
+
+## Web plugin pages
+
+`widget: web` embeds a plugin's loopback HTTP page in `rig web`. Bind a source returning a
+`url` column, or set `url:` directly; use `refresh: never` for an editor and provide a text
+`fallback:` for the TUI. Only `http://127.0.0.1:<port>` on a different origin is accepted.
+The iframe is sandboxed and cannot navigate the host. The plugin owns its HTTP server and
+must bind only to loopback, protect asset URLs, and declare a bind permission such as `permissions: {net: ["listen://127.0.0.1:38765"]}`. On Linux this grants binding that TCP port, without granting outbound connections. This
+widget is for local `rig web`; a remote server's loopback is not the browser's loopback.

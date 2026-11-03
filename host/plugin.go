@@ -285,7 +285,11 @@ func (p *Plugin) sandbox() sandboxSpec {
 	}
 	for _, n := range p.Permissions.Net {
 		if port := netPort(p.expand(n)); port != 0 {
-			s.ports = append(s.ports, port)
+			if strings.HasPrefix(n, "listen://") {
+				s.listen = append(s.listen, port)
+			} else {
+				s.ports = append(s.ports, port)
+			}
 		}
 	}
 	if len(s.ports) > 0 {

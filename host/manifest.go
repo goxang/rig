@@ -47,7 +47,7 @@ type Server struct {
 }
 
 type Permissions struct {
-	// Net lists hosts or URLs a plugin connects to; on Landlock ABI 4+ their ports are enforced.
+	// Net lists hosts or URLs a plugin connects to (listen://host:port grants binding); on Landlock ABI 4+ their ports are enforced.
 	Net []string `yaml:"net,omitempty" json:"net,omitempty"`
 	// Secrets are the names host/secret answers.
 	Secrets []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`

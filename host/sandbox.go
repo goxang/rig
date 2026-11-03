@@ -17,6 +17,7 @@ var SandboxExe string
 type sandboxSpec struct {
 	ro, rw []string
 	ports  []uint16
+	listen []uint16
 }
 
 func (s sandboxSpec) args() []string {
@@ -30,12 +31,15 @@ func (s sandboxSpec) args() []string {
 	for _, p := range s.ports {
 		out = append(out, "--port", strconv.Itoa(int(p)))
 	}
+	for _, p := range s.listen {
+		out = append(out, "--listen", strconv.Itoa(int(p)))
+	}
 	return out
 }
 
 // unconfined is a sandbox that would restrict nothing (fs: / and any host), so it is not worth an exec.
 func (s sandboxSpec) unconfined() bool {
-	return len(s.ports) == 0 && slices.Contains(s.rw, "/")
+	return len(s.ports) == 0 && len(s.listen) == 0 && slices.Contains(s.rw, "/")
 }
 
 type listFlag []string
@@ -48,10 +52,11 @@ func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 func Sandbox(args []string) error {
 	fs := flag.NewFlagSet("__sandbox", flag.ContinueOnError)
 	var s sandboxSpec
-	var ports listFlag
+	var ports, listen listFlag
 	fs.Var((*listFlag)(&s.ro), "ro", "readable path")
 	fs.Var((*listFlag)(&s.rw), "rw", "writable path")
 	fs.Var(&ports, "port", "TCP port it may connect to")
+	fs.Var(&listen, "listen", "TCP port it may bind")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -65,6 +70,13 @@ func Sandbox(args []string) error {
 			return fmt.Errorf("__sandbox: port %q", p)
 		}
 		s.ports = append(s.ports, uint16(n))
+	}
+	for _, p := range listen {
+		n, err := strconv.ParseUint(p, 10, 16)
+		if err != nil {
+			return fmt.Errorf("__sandbox: listen %q", p)
+		}
+		s.listen = append(s.listen, uint16(n))
 	}
 	if err := confine(s); err != nil {
 		return fmt.Errorf("__sandbox: %w", err)

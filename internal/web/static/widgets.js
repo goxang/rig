@@ -446,6 +446,11 @@ function simpleWidget(w, n, f) {
   const textOf = () => P(n, 'text') ?? (field ? rows.map(r => r[field]).join('\n') : rows.map(r => Object.values(r).join('  ')).join('\n'));
   const numOf = () => { const k = P(n, 'value') || fields.find(x => ['int', 'number', 'duration'].includes(x.type))?.name || fields[0]?.name; const r = rows.at(-1); return r ? +r[k] : NaN; };
   switch (w) {
+    case 'web': {
+      const url = new URL(rows[0]?.url || P(n, 'url'), location.href);
+      if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.origin === location.origin) return h('div', { class: 'err' }, 'Web plugins must use a loopback HTTP URL');
+      return h('iframe', { src: url.href, title: P(n, 'title') || 'Plugin', sandbox: 'allow-scripts allow-same-origin allow-downloads allow-modals', style: { width: '100%', height: '78vh', border: '0' } });
+    }
     case 'markdown': return markdown(textOf());
     case 'text': return h('div', { class: 'vtext' }, textOf());
     case 'code': return h('pre', { class: 'out' }, textOf());
