@@ -666,7 +666,7 @@ function schemaForm(schema) {
   });
   const raw = h('textarea', { rows: 4, class: 'mono', placeholder: 'extra arguments as JSON, merged over the fields' });
   return {
-    el: h('div', { class: 'col' }, fields.map(f => f.el), h('details', {}, h('summary', { class: 'muted' }, 'JSON arguments'), raw)),
+    el: h('div', { class: 'col' }, fields.map(f => f.el), schema?.additionalProperties !== false && h('details', {}, h('summary', { class: 'muted' }, 'JSON arguments'), raw)),
     value() {
       const out = {};
       for (const f of fields) { const v = f.get(); if (v !== undefined) out[f.k] = v; }

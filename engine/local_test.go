@@ -13,6 +13,7 @@ import (
 	"github.com/goxang/rig/api"
 	"github.com/goxang/rig/kernel/identity"
 	"github.com/goxang/rig/protocol"
+	"github.com/goxang/rig/spec"
 )
 
 func openLocal(t *testing.T, env string) *Local {
@@ -67,6 +68,30 @@ func TestLocalRunsTasksThroughPolicy(t *testing.T) {
 	p.App.Confirmed = true
 	if _, _, err := p.Run(ctx, "task.hi", nil, api.RunOpts{}); err != nil {
 		t.Fatalf("protected with a yes: %v", err)
+	}
+}
+
+func TestLocalTaskFormArguments(t *testing.T) {
+	l := openLocal(t, "dev")
+	l.App.Spec.Tasks["demo"] = spec.Task{
+		Args:  []spec.TaskArg{{Name: "tps", Default: "1500"}, {Name: "minutes", Default: "20"}},
+		Steps: []string{`printf 'received:%s:%s\n' "$1" "$2"`},
+	}
+	// Re-register the action after adding the fixture task.
+	l = NewLocal(l.App, nil)
+	for _, tc := range []struct {
+		args protocol.Args
+		want string
+	}{
+		{protocol.Args{"minutes": "1", "tps": "50"}, "received:50:1"},
+		{protocol.Args{"tps": 1000}, "received:1000:20"},
+		{nil, "received:1500:20"},
+		{protocol.Args{"args": []string{"75", "2"}, "tps": "999"}, "received:75:2"},
+	} {
+		j, _, err := l.Run(context.Background(), "task.demo", tc.args, api.RunOpts{})
+		if err != nil || !strings.Contains(strings.Join(j.Output(), "\n"), tc.want) {
+			t.Fatalf("args %v: err=%v output=%v, want %s", tc.args, err, j.Output(), tc.want)
+		}
 	}
 }
 

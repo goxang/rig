@@ -241,9 +241,10 @@ function renderWidget(n, scope, st) {
   else draw = f => content.replaceChildren(simpleWidget(w, n, f));
   if (w === 'terminal') {
     const box = h('div', { class: 'term-host' });
-    // the PTY starts when the panel is clicked, so a view never spawns processes nobody looks at
+    // Start on demand unless a live console explicitly opts in.
     const start = () => { box.replaceChildren(); scope.onCleanup(termView(box, { kind: 'command', command: P(n, 'command'), dir: P(n, 'dir'), env: P(n, 'env') }, { onExit: () => box.append(h('div', { class: 'muted small pad' }, 'exited · ', h('a', { href: '#', onclick: e => { e.preventDefault(); start(); } }, 'run again'))) })); };
-    box.append(h('button', { class: 'term-start', type: 'button', onclick: start }, icon('term'), h('code', {}, [].concat(P(n, 'command') || '$SHELL').join(' ')), h('span', { class: 'muted' }, 'click to start')));
+    if (P(n, 'autostart')) start();
+    else box.append(h('button', { class: 'term-start', type: 'button', onclick: start }, icon('term'), h('code', {}, [].concat(P(n, 'command') || '$SHELL').join(' ')), h('span', { class: 'muted' }, 'click to start')));
     content.replaceChildren(box);
     tools.append(ibtn('ext', () => zoom(panel), 'Full screen', 'sm'));
     return panel;

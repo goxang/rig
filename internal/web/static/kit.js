@@ -413,8 +413,7 @@ function loadXterm() {
   return xtermLoad;
 }
 function termTheme() {
-  const v = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
-  return { background: v('bar') || '#181B1F', foreground: v('text') || '#D8D9DA', cursor: v('accent'), selectionBackground: v('cursor') };
+  return { background: '#0b0d10', foreground: '#e2e8f0', cursor: '#60a5fa', selectionBackground: '#334155' };
 }
 // termView runs a PTY on the server (req: kind host|service|command and its fields) inside el.
 // It returns stop(); the session also ends when the program exits.

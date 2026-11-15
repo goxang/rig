@@ -684,7 +684,7 @@ body.has-zoom { overflow: hidden; }
 .term-drawer { width: min(1100px, 96vw); max-width: none; }
 .term-drawer .drawer-b { display: flex; flex-direction: column; height: calc(100% - 64px); }
 .term-drawer .term-host { flex: 1; }
-.term-start { margin: auto; display: flex; gap: 10px; align-items: center; border: 1px dashed var(--border); background: none; color: var(--text); padding: 14px 18px; border-radius: var(--radius); cursor: pointer; font: inherit; }
+.term-start { margin: auto; display: flex; gap: 10px; align-items: center; border: 1px dashed #475569; background: none; color: #e2e8f0; padding: 14px 18px; border-radius: var(--radius); cursor: pointer; font: inherit; max-width: 100%; flex-wrap: wrap; justify-content: center; }
 .term-start:hover { border-color: var(--accent); }
 
 /* ---------- services ---------- */
@@ -937,3 +937,15 @@ table.fixed th, table.fixed td { overflow: hidden; text-overflow: ellipsis; }
 .flow .fn circle { fill: var(--st); }
 .flow .fnt { fill: var(--text); font: 600 13px var(--font); }
 .flow .fnv { fill: var(--muted); font: 11px var(--mono); }
+
+/* Keep action buttons aligned when sibling forms have different field counts. */
+.vform { display: flex; flex-direction: column; gap: 16px; height: 100%; }
+.vform > .row:last-child { margin-top: auto; }
+.vform > .row:last-child > .spacer { display: none; }
+.vform > .row:last-child > button { flex: 1; min-width: 0; justify-content: center; white-space: normal; }
+.vpanel > .pbody:has(> .vform) { overflow: visible; }
+.vpanel > .pbody:has(> .bigv) { display: grid; place-items: center; overflow: hidden; }
+.vpanel .bigv { padding: 8px 0; min-height: 0; font-size: clamp(24px, 3cqw, 38px); }
+.view { container-type: inline-size; }
+@container (max-width: 700px) { .vrow { flex-wrap: wrap; } .vrow > .vcell { flex: 1 1 220px; } }
+@media (max-width: 760px) { .vrow { flex-wrap: wrap; } .vrow > .vcell { flex-basis: 100%; } }

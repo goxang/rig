@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -45,6 +46,18 @@ func Views(a *App) []ViewDef {
 	add := func(key, title string, v *view.View, dir, remote string) {
 		if v.Slot == "home" {
 			tile := v.Root
+			if v.File != "" && tile.Widget == "" {
+				raw, err := os.ReadFile(filepath.Join(dir, v.File))
+				loaded := *v
+				if err == nil {
+					err = loaded.Load(raw)
+				}
+				if err != nil {
+					tile = protocol.Node{Widget: "text", Props: protocol.Args{"text": fmt.Sprintf("%s: %v", v.File, err)}}
+				} else {
+					tile = loaded.Root
+				}
+			}
 			tile.Props = maps.Clone(tile.Props)
 			if tile.Props == nil {
 				tile.Props = protocol.Args{}

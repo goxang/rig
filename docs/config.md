@@ -362,7 +362,7 @@ run it with different parameters.
 `args:` declares a task's inputs (`name`, `help`, `default`, `choices` or `from: services|branches|hosts`,
 `multi`): `from: branches` offers `(working tree)` (the checkout as it is: the arg is passed empty), then
 the git branches, newest first, local before `origin/` ones; on a terminal `rig task <name>` asks for each, and `name=value` presets one by name
-(`rig task nexus-prune keep=3`), the others taking their defaults. `confirm: true` asks before the
+(`rig task nexus-prune keep=3`), the others taking their defaults. Engine actions (`task.<name>`) also accept these named fields, in declaration order, with omitted fields taking defaults; an explicit `args` list keeps its positional behavior. `confirm: true` asks before the
 first step on any environment. Neither asks with `--yes` or without a terminal (agents, CI, a step
 of another task). A protected environment asks once on a terminal instead of refusing without
 `--yes`. A read-only environment runs only tasks marked `readonly: true`. Steps print how long they took; secret values in a step's title show as `${NAME}`.

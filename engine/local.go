@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -170,7 +171,21 @@ func (l *Local) builtins() {
 		}
 		_ = reg.Add(actions.Action{Name: "task." + name, Effect: effect, Help: l.App.TaskHelp(name),
 			Run: func(ctx context.Context, args protocol.Args) (*protocol.RunResult, error) {
-				return nil, l.App.RunTask(ctx, name, strs(args["args"]), jobs.Out(ctx))
+				words := strs(args["args"])
+				if _, explicit := args["args"]; !explicit {
+					answers := make([]string, len(t.Args))
+					for i, arg := range t.Args {
+						answers[i] = arg.Default
+						if arg.Env() && os.Getenv(arg.Name) != "" {
+							answers[i] = ""
+						}
+						if value, ok := args[arg.Name]; ok && value != nil {
+							answers[i] = fmt.Sprint(value)
+						}
+					}
+					words = TaskArgValues(t.Args, answers)
+				}
+				return nil, l.App.RunTask(ctx, name, words, jobs.Out(ctx))
 			}})
 	}
 
